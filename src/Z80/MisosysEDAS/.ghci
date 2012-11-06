@@ -1,0 +1,2 @@
+:set -XGADTs -XMultiParamTypeClasses -XOverloadedStrings -XTemplateHaskell -XTypeSynonymInstances -XFlexibleInstances
+:set -i..:../..
