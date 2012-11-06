@@ -24,14 +24,10 @@ class CmdEnvDispatch emulator where
 -- Note: This could also be used for a test harness...
 data CmdEnvironment = CmdEnvironment
             { emulator  :: Maybe EmulatedProcessor -- ^ The emulator
-            , emuImage  :: FilePath                -- ^ An image to load, e.g., a ROM or bootstrap code
-            , imgFormat :: String                  -- ^ A string that gives some clue about the format
             }
             
 -- | Default command environment values
 defaultCmdEnvironment :: CmdEnvironment
 defaultCmdEnvironment = CmdEnvironment
                { emulator  = Nothing
-               , emuImage  = ""
-               , imgFormat = "none"
                }

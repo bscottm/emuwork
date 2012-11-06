@@ -72,7 +72,6 @@ parseOptions =
 options :: [OptDescr (Machine.CmdEnvironment -> IO Machine.CmdEnvironment)]
 options =
   [ Option []    ["processor"]  (ReqArg setEmulator "<NAME>") "Set the processor emulator"
-  , Option []    ["image"]      (ReqArg setRomImage "<FILE>") "Set the initial image file"
   , Option ['?'] ["help"]       (NoArg  doUsage)              "Get help"
   ]
   where
@@ -86,12 +85,6 @@ options =
         Just _something -> return flags { Machine.emulator = theEmulator }
       where
         theEmulator = lookupEmulator emuname
-
-    setRomImage imageFile flags = do
-      exists <- doesFileExist imageFile
-      if exists
-        then return flags { Machine.emuImage = imageFile }
-        else exitError $ "Image file not found: " ++ imageFile
 
     doUsage           _flags    = do 
       showUsage

@@ -14,11 +14,14 @@ library
   hs-source-dirs:     src
   build-depends:      base >= 4,
                       filepath,
+                      directory,
+                      bytestring >= 0.9,
                       vector >= 0.10
   ghc-options:        -Wall
   default-extensions: MultiParamTypeClasses, TypeSynonymInstances, GADTs
   exposed-modules:   
                       Machine,
+                      Reader,
                       Z80,
                       TIExplorer.Explorer
 
@@ -29,10 +32,12 @@ executable emuwork
   build-depends:      base >= 4,
                       directory,
                       filepath,
+                      bytestring >= 0.9,
                       vector >= 0.10
   ghc-options:        -Wall
   default-extensions: MultiParamTypeClasses, TypeSynonymInstances, GADTs
   other-modules:   
                       Machine,
+                      Reader,
                       Z80,
                       TIExplorer.Explorer
