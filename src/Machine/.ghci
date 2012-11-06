@@ -1,0 +1,3 @@
+:set -XGADTs -XMultiParamTypeClasses
+:set -i..:
+:load Machine.EmulatedProcessor

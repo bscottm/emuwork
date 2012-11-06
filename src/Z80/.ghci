@@ -1,0 +1,3 @@
+:set -XGADTs
+:set -i..:
+:load Z80

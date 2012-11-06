@@ -1,0 +1,3 @@
+#!/bin/sh
+
+dist/build/emuwork/emuwork --processor=z80 --image=trs80-roms/level2.rom disassemble origin=0

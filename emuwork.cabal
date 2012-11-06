@@ -1,0 +1,38 @@
+name:           emuwork
+version:        0.1
+cabal-version:  >= 1.12
+build-type:     Simple
+author:         B. Scott Michel
+synopsis:       A prototype processor emulation framework
+
+description:    Yet another processor emulation framework for my
+                favorite old processors.
+license:        GPL-3
+
+library
+  default-language:   Haskell2010
+  hs-source-dirs:     src
+  build-depends:      base >= 4,
+                      filepath,
+                      vector >= 0.10
+  ghc-options:        -Wall
+  default-extensions: MultiParamTypeClasses, TypeSynonymInstances, GADTs
+  exposed-modules:   
+                      Machine,
+                      Z80,
+                      TIExplorer.Explorer
+
+executable emuwork
+  default-language:   Haskell2010
+  hs-source-dirs:     src
+  main-is:            Main.hs
+  build-depends:      base >= 4,
+                      directory,
+                      filepath,
+                      vector >= 0.10
+  ghc-options:        -Wall
+  default-extensions: MultiParamTypeClasses, TypeSynonymInstances, GADTs
+  other-modules:   
+                      Machine,
+                      Z80,
+                      TIExplorer.Explorer
