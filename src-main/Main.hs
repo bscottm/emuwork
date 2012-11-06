@@ -1,3 +1,5 @@
+{- | The main module, where all of the fun happens.
+-}
 module Main (main) where
 
 import System.IO

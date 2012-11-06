@@ -1,12 +1,12 @@
-module Machine.Environment
+{- |
+   The 'Machine.CmdEnvironment' module: Data types, type classes and defaults for a machine's command environment.
+   This is just a way of driving a processor emulator, in which the common options are captured.
+-}
+module Machine.CmdEnvironment
        ( CmdEnvironment(..)
        , CmdEnvDispatch(..)
        , defaultCmdEnvironment
        ) where
-
--- Redundant imports:
--- import System.FilePath
--- import Data.Maybe
 
 import Machine.EmulatedProcessor
 
@@ -23,16 +23,15 @@ class CmdEnvDispatch emulator where
 --
 -- Note: This could also be used for a test harness...
 data CmdEnvironment = CmdEnvironment
-            { emulator :: Maybe EmulatedProcessor -- ^ The emulator
-            , emuImage :: FilePath                -- ^ An image to load, e.g., a ROM or bootstrap code
+            { emulator  :: Maybe EmulatedProcessor -- ^ The emulator
+            , emuImage  :: FilePath                -- ^ An image to load, e.g., a ROM or bootstrap code
+            , imgFormat :: String                  -- ^ A string that gives some clue about the format
             }
             
 -- | Default command environment values
 defaultCmdEnvironment :: CmdEnvironment
 defaultCmdEnvironment = CmdEnvironment
-               { emulator = defaultEmulator
-               , emuImage = defaultEmuImage
+               { emulator  = Nothing
+               , emuImage  = ""
+               , imgFormat = "none"
                }
-  where
-    defaultEmulator = Nothing
-    defaultEmuImage = ""
