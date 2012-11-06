@@ -26,26 +26,25 @@ data EmulatedProcessor =
   forall machineSpecific . EmulatedProcessor
   { machineName    :: String          -- ^ Identifying name of the machine
   , names          :: [String]        -- ^ List of names for the emulated processor
-  {- | Machine-specific data.
-
-    Note: This is existentially qualified to make this record intentionally polymorphic.
-  -}
+  , cmdDispatch    :: machineSpecific
+                   -> [String]
+                   -> IO ()
+  -- | Machine-specific data.
+  --
+  --  Note: This is existentially qualified to make this record intentionally polymorphic.
   , internals      :: machineSpecific
   }
 
-{- |
-  Abstract interface to functions that a processor emulation should provide.
--}
+-- | Abstract interface to functions that a processor emulation should provide.
 class EmulatorActions wordType addrType dispType machineSpecific where
   -- | The machine's program counter function
   programCounter :: ProgramCounterF addrType dispType 
-  -- | Step one instruction.
 {-
+  -- | Step one instruction.
   stepOne :: machineSpecific
           -> machineSpecific
 -}
-  -- | Disassemble a stream of instructions
-  
+
 {- |
   Program counter actions: 'Inc' to increment by one, 'Dec' to decrement by one,
   and 'Disp' @x@ to displace the program counter by @x@ units (bytes, words, etc.)
