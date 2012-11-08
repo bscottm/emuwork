@@ -1,11 +1,8 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
-{- |
-  The Z80 processor module (note: this may just end up exporting a particular
-  instance of AbstractMachine and not a particular kind of system such as a TRS-80.)
--}
+
+-- | The Z80 processor emulation module.
 module Z80.Processor (
   -- * Types
     Z80word
@@ -15,7 +12,7 @@ module Z80.Processor (
   , Z80state(..)
 
   -- * Functions
-  , z80processor
+  , z80initialState
 ) where
 
 import Prelude hiding (replicate)
@@ -96,11 +93,11 @@ z80MaxAddr = 0xffff
 z80MemSizeIntegral :: Int
 z80MemSizeIntegral = (fromIntegral z80MaxAddr) - (fromIntegral z80MinAddr) + 1
 
-{- |
-  Create the initial state of the Z80 processor. This sets the register
-  file to a user-provided initial state and zeroes out all other registers.
-  Interrupts are disabled.
--}
+-- | Create the initial state of the Z80 processor. This sets the register
+-- file to a user-provided initial state and zeroes out all other registers.
+--  Interrupts are disabled.
+--
+-- FIXME: Is this YAGNI?
 initialState :: Z80registers    -- ^ Initial register values
              -> Z80state        -- ^ Resulting state
 initialState initialRegs = 
@@ -116,12 +113,6 @@ initialState initialRegs =
   , memory = replicate z80MemSizeIntegral (0 :: Z80word)
   }
 
-{- |
-  Constructor function for an emulated Zilog Z80.
--}
-z80processor :: EmulatedProcessor
-z80processor = EmulatedProcessor
-  { machineName = "Zilog Z80"
-  , names       = ["z80", "Z80", "Zilog-z80", "Zilog-Z80"]
-  , internals = initialState zeroedRegisters
-  }
+-- | Initial state for a Z80
+z80initialState :: Z80state
+z80initialState = initialState zeroedRegisters

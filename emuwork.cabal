@@ -15,6 +15,7 @@ library
   build-depends:      base >= 4,
                       filepath,
                       directory,
+                      deepseq,
                       bytestring >= 0.9,
                       vector >= 0.10
   ghc-options:        -Wall
@@ -32,6 +33,7 @@ executable emuwork
   build-depends:      base >= 4,
                       directory,
                       filepath,
+                      deepseq,
                       bytestring >= 0.9,
                       vector >= 0.10
   ghc-options:        -Wall

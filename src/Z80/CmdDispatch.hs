@@ -1,50 +1,54 @@
-{-# LANGUAGE FlexibleInstances #-}
+-- | The Z80 emulation's command dispatch module.
+--
+-- The normal way of invoking these commands is:
+--
+-- @emuwork --processor=z80 <z80-specific command>@
+--
+-- Currently supported commands include:
+--
+-- @disassemble@, @disasm@
+--   Disassemble an image, e.g., raw ROM file
 module Z80.CmdDispatch
        ( z80cmdDispatch
        ) where
 
 import Prelude hiding(catch)
 import System.IO
-import System.Environment
-import System.FilePath
-import System.Directory
-import System.Exit
+-- redundant: import System.Environment
+-- redundant: import System.FilePath
+-- redundant: import System.Directory
+-- redundant: import System.Exit
 import System.Console.GetOpt
+import Control.DeepSeq
 import Control.Exception
-import Data.Word
+-- redundant: import Data.Word
 import Data.Maybe
-import Data.List (foldl')
+import Data.List (foldl', intercalate)
 import qualified Data.Vector.Unboxed as DVU
 
 import Reader
-import Machine
+-- redundant: import Machine
 import Z80.Processor
-
-instance CmdEnvDispatch z80processor where
-  cmdDispatch = z80cmdDispatch
   
 -- | Various things we can do with the Z80 processor emulator
 data Z80Command = NoCommand
                 | InvalidCommand [String]
                 | Disassemble
-                  { emuImage  :: FilePath
-                  , origin :: Z80addr
-                  , startAddr :: Maybe Z80addr
+                  { emuImage    :: FilePath
+                  , origin      :: Z80addr
+                  , startAddr   :: Maybe Z80addr
                   , nBytesToDis :: Maybe Z80disp
                   }
 
 -- | The Z80 command line interface dispatch function
-z80cmdDispatch :: z80processor
-               -> CmdEnvironment
+z80cmdDispatch :: Z80state
                -> [String]
                -> IO ()
-z80cmdDispatch _machine cmdEnv options =
-  do
-    putStrLn "Z80 processor dispatch"
+z80cmdDispatch _machine options =
     case parseCmd options of
       NoCommand               -> hPutStrLn stderr "No command?"
       InvalidCommand errs     -> hPutStrLn stderr ("Invalid command" ++ (show errs))
-      disAsm@Disassemble { }  -> (cmdDisassemble disAsm) `catch` (\ e -> hPutStrLn stderr (show (e :: ErrorCall)))
+      disAsm@Disassemble { }  -> (cmdDisassemble disAsm) `catch` (\ exc -> hPutStrLn stderr (show (exc :: ErrorCall)))
 
 parseCmd :: [String]
          -> Z80Command
@@ -70,8 +74,8 @@ parseDisassemble opts =
 disAsmOptions :: [OptDescr (Z80Command -> Z80Command)]
 disAsmOptions =
   [ Option []    ["image"]      (ReqArg setRomImage "<FILE>") "Set the initial image file"
-  , Option []    ["origin"]     (ReqArg setOrigin   "<ADDR>") "Set the disassembly output's origin address"
-  , Option []    ["start"]      (ReqArg setStartOffset "<ADDR>") "Set the disassembly start address"
+  , Option []    ["origin"]     (ReqArg setOrigin   "<ADDR>") "Set the disassembly output's origin address, default = 0"
+  , Option []    ["start"]      (ReqArg setStartOffset "<ADDR>") "Disassembly start address, relative to the origin"
   , Option []    ["length"]     (ReqArg setDisLength "<DISP>") "Number of bytes to disassemble"
   ]
   where
@@ -87,15 +91,20 @@ disAsmOptions =
                                              error (whence ++  ": Could not parse unsigned, 16-bit number ('" ++ x ++ "')")
                           _otherwise -> error (whence ++ ": Could not parse unsigned, 16-bit number ('" ++ x ++ "')")
 
+{- unused
 -- | Show the help message:
 helpMsg :: String -> String
 helpMsg progname = let header = "Usage: " ++ progname ++ " [OPTIONS]"
                    in  usageInfo header disAsmOptions
+-}
 
+{- unused
 -- | Show the usage message
 showUsage :: IO ()
 showUsage = getProgName >>= (\progname -> hPutStr stderr (helpMsg progname))
+-}
 
+{- unused
 -- | Print an error message to stderr, then exit with failure status
 exitError :: String
              -> IO a
@@ -104,16 +113,35 @@ exitError msg = do
     hPutStrLn stderr (prg ++ ": " ++ msg)
     showUsage
     exitFailure
+-}
 
 -- | Execute the Z80 disassembler!
 cmdDisassemble :: Z80Command
                -> IO ()
 cmdDisassemble disAsm =
-  -- Note that the interior of disAsm is
-  let evalDisAsm = origin disAsm `seq` startAddr disAsm `seq` nBytesToDis disAsm
-  in  evalDisAsm `seq` readRawWord8Vector (emuImage disAsm)
-                         >>= \img -> if not . DVU.null $ img then
-                                       putStrLn ("Successfully read image, length " ++ (show (DVU.length img)))
-                                         >> putStrLn ("Disassembly origin = " ++ (show (origin disAsm)))
-                                     else
-                                       putStrLn "-- Error reading image"
+  disAsm `deepseq` readRawWord8Vector (emuImage disAsm)
+		   >>= \img -> let theOrigin      = origin disAsm
+				   theStartAddr   = fromMaybe theOrigin (startAddr disAsm)
+				   theImageLen    = DVU.length img
+				   theNBytesToDis = fromMaybe (fromIntegral theImageLen) (nBytesToDis disAsm)
+			       in  if not . DVU.null $ img then
+				     putStrLn (intercalate "" [ "disassemble image "
+							      , (show . emuImage $ disAsm)
+							      , ", length "
+							      , (show theImageLen)
+							      , ", origin "
+							      , (show theOrigin)
+							      , ", start "
+							      , (show theStartAddr)
+							      , ", bytes to dump "
+							      , (show theNBytesToDis)
+							      ])
+				 else
+				   putStrLn "-- Error reading image"
+
+-- | Ensure that 'Z80Command' can be fully evaluated by 'deepseq'. Notably, this is used to catch
+-- integer parsing errors 
+instance NFData Z80Command where
+  rnf NoCommand = ()
+  rnf (InvalidCommand strs) = strs `seq` ()
+  rnf (Disassemble img org sAddr nBytes) = img `seq` org `seq` sAddr `seq` nBytes `seq` ()

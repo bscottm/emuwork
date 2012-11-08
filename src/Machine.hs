@@ -2,8 +2,22 @@
 
 module Machine
        ( module Machine.EmulatedProcessor
-       , module Machine.CmdEnvironment
+       , module Machine.NullProcessor
+       , CommonEmulatorOptions(..)
+       , defaultCommonEmulatorOptions
        ) where
 
 import Machine.EmulatedProcessor
-import Machine.CmdEnvironment
+import Machine.NullProcessor
+
+-- | Common command line option data record
+data CommonEmulatorOptions =
+  EmulatorOptions
+  { emulator :: Maybe EmulatedProcessor         -- ^ The processor emulator
+  }
+
+-- | The default emulator options
+defaultCommonEmulatorOptions :: CommonEmulatorOptions
+defaultCommonEmulatorOptions = EmulatorOptions
+                         { emulator = Nothing
+                         }

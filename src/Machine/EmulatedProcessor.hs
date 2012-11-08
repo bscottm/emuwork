@@ -26,10 +26,12 @@ data EmulatedProcessor =
   forall machineSpecific . EmulatedProcessor
   { machineName    :: String          -- ^ Identifying name of the machine
   , names          :: [String]        -- ^ List of names for the emulated processor
-  {- | Machine-specific data.
-
-    Note: This is existentially qualified to make this record intentionally polymorphic.
-  -}
+  , cmdDispatch    :: machineSpecific
+                   -> [String]
+                   -> IO ()
+  -- | Machine-specific data.
+  --
+  --  Note: This is existentially qualified to make this record intentionally polymorphic.
   , internals      :: machineSpecific
   }
 

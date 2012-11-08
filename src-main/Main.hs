@@ -1,12 +1,10 @@
-{- | The main module, where all of the fun happens.
--}
+-- | The main module, where all of the fun happens.
 module Main (main) where
 
 import System.IO
 import System.Environment
 import System.Exit
 import System.Console.GetOpt
-import System.Directory
 import Data.List
 import Control.Monad
 
@@ -17,8 +15,15 @@ main::IO ()
 main =
   do
     (flags, others) <- parseOptions
-    Machine.cmdDispatch (Machine.emulator flags) flags others
-    return ()
+    case Machine.emulator flags of
+      Nothing          -> hPutStrLn stderr "Emulator not specified on command line with '--processor.' flag."
+                          >> dumpEmulators
+      Just theEmulator -> doDispatch theEmulator others
+
+doDispatch :: Machine.EmulatedProcessor
+           -> [String]
+           -> IO ()
+doDispatch (Machine.EmulatedProcessor _machine _names dispatch theInternals) emuOpts = dispatch theInternals emuOpts
 
 -- | Lookup an 'Machine.EmulatedProcessor' from an internal list of known
 -- emulators.
@@ -34,25 +39,26 @@ lookupEmulator emuname = lookupEmulator' emuname knownProcessorEmulators
 -- | List of known emulators. This is different from a list of known emulated systems.
 knownProcessorEmulators :: [Machine.EmulatedProcessor]
 knownProcessorEmulators =
-  [ Z80.z80processor
+  [ Machine.nullProcessor
+  , Z80.z80processor
   ]
 
--- | Parse command line flags and options, returning a 'Machine.CmdEnvironment' record (options) and
+-- | Parse command line flags and options, returning a 'Machine.CommonEmulatorOptions' record (options) and
 -- remaining command line parameters wrapped in the IO monad
-parseOptions :: IO (Machine.CmdEnvironment, [String])
+parseOptions :: IO (Machine.CommonEmulatorOptions, [String])
 parseOptions =
     let processArgs         = getArgs >>= return . getOpt RequireOrder options
         -- The key observation here is that within each option in the OptDescr list,
-        -- there is a function that sets an individual member of the 'Machine.CmdEnvironment'
+        -- there is a function that sets an individual member of the 'Machine.CommonEmulatorOptions'
         -- record.
         --
         -- When getOpt processes the command line options, it will create a list
         -- of the options that are actually present on the command line. The
         -- getOpt-generated list is then combined via foldl', which only modifies
         -- the parts of the record that occurred on the command line. The result
-        -- is a single (IO Machine.CmdEnvironment) object that has the default options set,
-        -- modified by the options present in getArgs
-        foldArgsAndDefaults = foldl' (>>=) (return Machine.defaultCmdEnvironment)
+        -- is a single (IO Machine.CommonEmulatorOptions) object that has the
+        -- default options set, modified by the options present in getArgs
+        foldArgsAndDefaults = foldl' (>>=) (return Machine.defaultCommonEmulatorOptions)
         -- Yell at the user if there were option/flag processing errors
         checkErrors errors  = unless (null errors) $ do
                                 mapM_ (hPutStrLn stderr) errors
@@ -65,11 +71,11 @@ parseOptions =
       -- Fold the flag functions and combine the results into a single
       -- return value
       opts <- foldArgsAndDefaults optsActions
-      -- Return the IO (Machine.CmdEnvironment, [String]) result
+      -- Return the IO (Machine.CommonEmulatorOptions, [String]) result
       return (opts, rest)
 
 -- | Common command line options
-options :: [OptDescr (Machine.CmdEnvironment -> IO Machine.CmdEnvironment)]
+options :: [OptDescr (Machine.CommonEmulatorOptions -> IO Machine.CommonEmulatorOptions)]
 options =
   [ Option []    ["processor"]  (ReqArg setEmulator "<NAME>") "Set the processor emulator"
   , Option ['?'] ["help"]       (NoArg  doUsage)              "Get help"
@@ -79,7 +85,6 @@ options =
       case theEmulator of
         Nothing         -> do
           hPutStrLn stderr ("Unrecognized emulator name: " ++ emuname)
-          hPutStrLn stderr "Known emulators are:"
           dumpEmulators
           exitFailure
         Just _something -> return flags { Machine.emulator = theEmulator }
@@ -99,6 +104,7 @@ helpMsg progname = let header = "Usage: " ++ progname ++ " [OPTIONS]"
 showUsage :: IO ()
 showUsage = getProgName >>= (\progname -> hPutStr stderr (helpMsg progname))
 
+{- unused:
 -- | Print an error message to stderr, then exit with failure status
 exitError :: String
              -> IO a
@@ -107,11 +113,12 @@ exitError msg = do
     hPutStrLn stderr (prg ++ ": " ++ msg)
     showUsage
     exitFailure
+-}
 
 -- | Pretty print the known emulator list:
 dumpEmulators :: IO ()
 dumpEmulators = do
-  mapM_ prettyEmu knownProcessorEmulators
+  hPutStrLn stderr "Known emulators are:" >> mapM_ prettyEmu knownProcessorEmulators
   where
     prefix = "-- "
     indent = "   "
