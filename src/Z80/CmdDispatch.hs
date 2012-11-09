@@ -29,6 +29,7 @@ import qualified Data.Vector.Unboxed as DVU
 import Reader
 -- redundant: import Machine
 import Z80.Processor
+import Z80.Disassembler
   
 -- | Various things we can do with the Z80 processor emulator
 data Z80Command = NoCommand
@@ -119,23 +120,26 @@ exitError msg = do
 cmdDisassemble :: Z80Command
                -> IO ()
 cmdDisassemble disAsm =
+  -- Force normal form evaluation on disAsm, to deal with potential parsing errors
   disAsm `deepseq` readRawWord8Vector (emuImage disAsm)
 		   >>= \img -> let theOrigin      = origin disAsm
 				   theStartAddr   = fromMaybe theOrigin (startAddr disAsm)
 				   theImageLen    = DVU.length img
 				   theNBytesToDis = fromMaybe (fromIntegral theImageLen) (nBytesToDis disAsm)
 			       in  if not . DVU.null $ img then
-				     putStrLn (intercalate "" [ "disassemble image "
-							      , (show . emuImage $ disAsm)
-							      , ", length "
-							      , (show theImageLen)
-							      , ", origin "
-							      , (show theOrigin)
-							      , ", start "
-							      , (show theStartAddr)
-							      , ", bytes to dump "
-							      , (show theNBytesToDis)
-							      ])
+				     putStrLn (concat [ "disassemble image "
+						      , (show . emuImage $ disAsm)
+						      , ", length "
+						      , (show theImageLen)
+						      , ", origin "
+						      , (show theOrigin)
+						      , ", start "
+						      , (show theStartAddr)
+						      , ", bytes to dump "
+						      , (show theNBytesToDis)
+						      ])
+                                     >> z80disassembler img theOrigin theStartAddr theNBytesToDis
+                                     >>= (\ dis -> putStrLn (show dis))
 				 else
 				   putStrLn "-- Error reading image"
 
@@ -143,5 +147,8 @@ cmdDisassemble disAsm =
 -- integer parsing errors 
 instance NFData Z80Command where
   rnf NoCommand = ()
-  rnf (InvalidCommand strs) = strs `seq` ()
-  rnf (Disassemble img org sAddr nBytes) = img `seq` org `seq` sAddr `seq` nBytes `seq` ()
+  rnf (InvalidCommand strs) = rnf strs
+  rnf (Disassemble img org sAddr nBytes) = rnf img `seq`
+                                           rnf org `seq`
+                                           rnf sAddr `seq`
+                                           rnf nBytes

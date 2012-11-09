@@ -3,12 +3,14 @@
 module Machine
        ( module Machine.EmulatedProcessor
        , module Machine.NullProcessor
+       , module Machine.Utils
        , CommonEmulatorOptions(..)
        , defaultCommonEmulatorOptions
        ) where
 
 import Machine.EmulatedProcessor
 import Machine.NullProcessor
+import Machine.Utils
 
 -- | Common command line option data record
 data CommonEmulatorOptions =
