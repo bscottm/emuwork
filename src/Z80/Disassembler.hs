@@ -1,86 +1,66 @@
 -- | The Z80 disassembler module
 module Z80.Disassembler
   ( -- * Types
-    Disassembly
-  , DisElement
+    Z80memory
+  , Z80Disassembly
+
     -- * Functions
   , z80disassembler 
   ) where
 
 -- import Debug.Trace
 
-import System.IO
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
-import Data.Sequence (Seq, (|>))
-import qualified Data.Sequence as DS
+import Data.Sequence ((|>))
 import Data.Vector.Unboxed (Vector, (!?), (!))
 import qualified Data.Vector.Unboxed as DVU
+import Data.Int
 import Data.Bits
 
+import Machine.DisassemblerTypes
 import Z80.Processor
 import Z80.InstructionSet
 
 type Z80memory = Vector Z80word
-type DisElement  = (Z80addr, Vector Z80word, Instruction)
-type Disassembly = Seq DisElement
+type Z80Disassembly = Disassembly Z80addr Z80word Instruction NullPseudoOp
 
+-- | The Z80 disassembler, which just invokes the 'Disassembly' class instance of 'disassemble'
 z80disassembler :: Z80memory                    -- ^ Vector of bytes to disassemble
                 -> Z80addr                      -- ^ Origin, i.e., output's starting address
                 -> Z80addr                      -- ^ Start address, relative to origin, to start disassembling
                 -> Z80disp                      -- ^ Number of bytes to disassemble
-                -> IO Disassembly
-z80disassembler image origin startAddr nBytes 
-  | startAddr < origin =
-    hPutStrLn stderr (errorStr ++ "start address < origin")
-    >> return DS.empty
-  | pc + fromIntegral(nBytes) > imgLen =
-    hPutStrLn stderr (warnStr ++ "number of bytes to disassemble exceeds image length, truncating")
-    >> (return $ disasm image pc (imgLen - pc) DS.empty)
-  | otherwise = return $ disasm image pc (pc + fromIntegral(nBytes)) DS.empty
-  where
-    pc     = startAddr - origin
-    imgLen = fromIntegral(DVU.length image) :: Z80addr
+                -> Z80Disassembly                  -- ^ Existing list of disassembled instructions
+                -> Z80Disassembly
+z80disassembler image origin startAddr nBytes disassembled = disassemble image origin startAddr nBytes disassembled
 
-disasm :: Z80memory                             -- ^ The image to disassemble
-       -> Z80addr                               -- ^ Starting address
-       -> Z80addr                               -- ^ Ending address
-       -> Disassembly                           -- ^ Disassembled instruction continuation function
-       -> Disassembly
-disasm image pc lastpc dis
-  {- trace ("disasm: pc = " ++ (show pc) ++ ", dis = " ++ (show dis)) False = undefined -}
-  | pc >= lastpc =
-    dis
-  | otherwise =
-    let opc = (image !? fromIntegral(pc))
-    in  case opc of
-          Nothing     -> error ("Z80 disasm: invalid fetch at pc = " ++ (show pc))
-          Just theOpc ->
-            case theOpc of
-              0xcb        -> undefAndNext theOpc
-              0xed        -> undefAndNext theOpc
-              0xdd        -> undefAndNext theOpc
-              0xfd        -> undefAndNext theOpc
-              _otherwise ->
-                let y  = (shiftR theOpc 3) .&. 7
-                    z  = (theOpc .&. 7)
-                    p  = (shiftR theOpc 4) .&. 3
-                    q  = (shiftR theOpc 3) .&. 1
-                in  case (shiftR theOpc 6) .&. 3 of
-                      0          -> let (newpc, ins) = group0decode image pc theOpc
-                                    in  disasm image (newpc + 1) lastpc (dis |> (pc, getOpcodes pc newpc, ins))
-                      1          -> let ins = group1decode theOpc
-                                    in  disasm image (pc + 1) lastpc (dis |> (pc, getOpcodes pc pc, ins))
-                      2          -> let ins = group2decode theOpc
-                                    in  disasm image (pc + 1) lastpc (dis |> (pc, getOpcodes pc pc, ins))
-                      3          -> let (newpc, ins) = group3decode image pc theOpc z y p q
-                                    in  disasm image (newpc + 1) lastpc (dis |> (pc, getOpcodes pc newpc, ins))
-                      _otherwise -> error (errorStr ++ "x out of range?")
-  where
-    undefAndNext opc = disasm image (pc + 1) lastpc (dis |> (pc, getOpcodes pc pc, Z80undef [opc]))
-    getOpcodes x y = let x' = (fromIntegral x) :: Int
-                         y' = (fromIntegral y) :: Int
-                     in  DVU.slice x' (y' - x' + 1) image
+-- | The 'Disassembly' class instance for the Z80.
+instance Disassembler Z80addr Z80disp Z80word Instruction NullPseudoOp where
+    disassemble mem origin startAddr nBytes disassembled = disasm mem pc (pc + (fromIntegral nBytes)) disassembled
+      where
+        pc = startAddr - origin
+        disasm theMem thePc lastpc dis
+          {-  | trace ("disasm: pc = " ++ (show thePc)) False = undefined -}
+          | thePc >= lastpc = dis
+          | otherwise =
+            let opc = (theMem !? fromIntegral(thePc))
+            in  case opc of
+                  Nothing     -> error ("Z80 disasm: invalid fetch at pc = " ++ (show thePc))
+                  Just theOpc -> case (shiftR theOpc 6) .&. 3 of
+                                   0          -> let (newpc, ins) = group0decode theMem thePc theOpc
+                                                 in  disasm theMem (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
+                                   1          -> let ins = group1decode theOpc
+                                                 in  disasm theMem (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
+                                   2          -> let ins = group2decode theOpc
+                                                 in  disasm theMem (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
+                                   3          -> let (newpc, ins) = group3decode theMem thePc theOpc
+                                                 in  disasm theMem (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
+                                   _otherwise -> error (errorStr ++ "x out of range?")
+          where
+            getOpcodes x y = let x' = (fromIntegral x) :: Int
+                                 y' = (fromIntegral y) :: Int
+                             in  DVU.slice x' (y' - x' + 1) theMem
+            mkDisasmInst oldpc newpc ins = dis |> DisasmInst oldpc (getOpcodes oldpc newpc) ins
 
 group0decode :: Z80memory                       -- ^ Memory image
              -> Z80addr                         -- ^ Current PC
@@ -91,18 +71,18 @@ group0decode image pc opc
   | z == 0 = case y of
                0                  -> (pc, NOP)
                1                  -> (pc, EXAFAF')
-               2                  -> (pc + 1, DJNZ (getDispAddr image pc))
-               3                  -> (pc + 1, JR (getDispAddr image pc))
-               _otherwise         -> (pc + 1, JRCC (condC (y - 4)) (getDispAddr image pc))
+               2                  -> displacementInstruction image pc DJNZ
+               3                  -> displacementInstruction image pc JR
+               _otherwise         -> displacementInstruction image pc $ JRCC (condC (y - 4))
   | z == 1 = case q of
                0                  -> (pc + 2, LD16 (pairSP p) (getAddr image (pc + 1)))
                1                  -> (pc, ADDHL (pairSP p))
                _otherwise         -> undefined
   | z == 2, q == 0 = case p of
-                       0          -> (pc, STA BCIndirect)
-                       1          -> (pc, STA DEIndirect)
+                       0          -> (pc, STA BCIndirect')
+                       1          -> (pc, STA DEIndirect')
                        2          -> (pc + 2, STHL (getAddr image (pc + 1)))
-                       3          -> (pc + 2, STA (Imm16Indirect (getAddr image (pc + 1))))
+                       3          -> (pc + 2, STA (Imm16Indirect' (getAddr image (pc + 1))))
                        _otherwise -> undefined
   | z == 2, q == 1 = case p of
                        0          -> (pc, LDA BCIndirect)
@@ -117,7 +97,7 @@ group0decode image pc opc
   | z == 4 = (pc, INC (reg8 y))
   | z == 5 = (pc, DEC (reg8 y))
   | z == 6 = (pc + 1, LD8 (Reg8Imm (reg8 y) (getNextWord image pc)))
-  | z == 6 = (pc, accumOps IntMap.! (fromIntegral y))
+  | z == 7 = (pc, accumOps IntMap.! (fromIntegral y))
   | otherwise = (pc, Z80undef [opc])
   where
     z = (opc .&. 7)
@@ -151,7 +131,7 @@ group1decode opc
 group2decode :: Z80word
              -> Instruction
 group2decode opc = let aluOp = aluOps IntMap.! (fromIntegral $ (shiftR opc 3) .&. 7)
-                   in  aluOp (aluReg8 (opc .&. 7))
+                   in  (aluOp . aluReg8) $ (opc .&. 7)
 
 -- | ALU operation map (reduces pattern matching)
 aluOps :: IntMap (OperALU -> Instruction)
@@ -166,60 +146,117 @@ aluOps = IntMap.fromList [ (0, ADD)
                          ]
 
 -- | Group 3 instructions
-group3decode :: Z80memory
+group3decode :: Z80memory                       -- ^ Memory image
              -> Z80addr                         -- ^ Current PC
              -> Z80word                         -- ^ Opcode
-             -> Z80word                         -- ^ "z" (lower 3 bits)
-             -> Z80word                         -- ^ "y" (bits 3-5)
-             -> Z80word                         -- ^ "p" (bits 4, 5)
-             -> Z80word                         -- ^ "q" (bit 3)
              -> (Z80addr, Instruction)          -- ^ (new PC, instruction)
+group3decode image pc opc
+  | z == 0          = (pc, RETCC . condC $ y)
+  | z == 1, q == 0  = (pc, (POP . pairAF) $ p)
+  | z == 1, q == 1  = case p of
+                        0          -> (pc, RET)
+                        1          -> (pc, EXX)
+                        2          -> (pc, JPHL)
+                        3          -> (pc, LDSPHL)
+                        _otherwise -> undefined
+  | z == 2          = (pc + 2, JPCC (condC y) (getAddr image (pc + 1)))
+  | z == 3          = case y of
+                        0          -> (pc + 2, JP (getAddr image (pc + 1)))
+                        1          -> bitopsDecode image pc
+                        2          -> (pc + 1, OUT (getNextWord image pc))
+                        3          -> (pc + 1, IN (getNextWord image pc))
+                        4          -> (pc, EXSPHL)
+                        5          -> (pc, EXDEHL)
+                        6          -> (pc, DI)
+                        7          -> (pc, EI)
+                        _otherwise -> undefined
+  | z == 4           = (pc + 2, CALLCC (condC y) (getAddr image (pc + 1)))
+  | z == 5, q == 0   = (pc, PUSH . pairAF $ p)
+  | z == 5, q == 1   = case p of
+                         0          -> (pc + 2, CALL (getAddr image (pc + 1)))
+                         1          -> (pc, Z80undef [opc]) -- dd prefix
+                         2          -> edPrefixDecode image pc
+                         3          -> (pc, Z80undef [opc]) -- fd prefix
+                         _otherwise -> undefined
+  | z == 6           = let aluOp = aluOps IntMap.! (fromIntegral y)
+                       in  (pc + 1, aluOp (ALUimm (getNextWord image pc)))
+  | z == 7           = (pc, RST y)
+  | otherwise        = (pc, Z80undef [opc])
+  where
+    z = (opc .&. 7)
+    y = (shiftR opc 3) .&. 7
+    p  = (shiftR opc 4) .&. 3
+    q  = (shiftR opc 3) .&. 1
 
-group3decode _image pc _opc 0 y _p _q = (pc, RETCC (condC y))
+bitopsDecode :: Z80memory                       -- ^ Memory
+             -> Z80addr                         -- ^ Current PC (but we increment it locally)
+             -> (Z80addr, Instruction)          -- ^ The result
+bitopsDecode image pc = case (shiftR opc 6) .&. 3 of
+                           0          -> let rotOp = rotOps IntMap.! (fromIntegral y)
+                                         in  (pc + 1, (rotOp . reg8) $ z)
+                           1          -> (pc + 1, (BIT y (reg8 z)))
+                           2          -> (pc + 1, (RES y (reg8 z)))
+                           3          -> (pc + 1, (SET y (reg8 z)))
+                           _otherwise -> undefined
+  where
+    opc = getNextWord image pc
+    z = (opc .&. 7)
+    y = (shiftR opc 3) .&. 7
 
-group3decode _image pc _opc 1 _y p 0 = (pc, (POP . pairAF) $ p)
-group3decode _image pc _opc 1 _y 0 1 = (pc, RET)
-group3decode _image pc _opc 1 _y 1 1 = (pc, EXX)
-group3decode _image pc _opc 1 _y 2 1 = (pc, JPHL)
-group3decode _image pc _opc 1 _y 3 1 = (pc, LDSPHL)
+rotOps :: IntMap (Z80reg8 -> Instruction)
+rotOps = IntMap.fromList [ (0, RLC)
+                         , (1, RRC)
+                         , (2, RL)
+                         , (3, RR)
+                         , (4, SLA)
+                         , (5, SRA)
+                         , (6, SLL)
+                         , (7, SRL)
+                         ]
 
-group3decode image pc _opc 2 y _p _q = let cc = condC y
-                                           dest = getAddr image (pc + 1)
-                                      in   (pc + 2, JPCC cc dest)
+-- | Decode 'ED'-prefixed instructions
+edPrefixDecode :: Z80memory
+               -> Z80addr
+               -> (Z80addr, Instruction)
+edPrefixDecode image pc = case (shiftR opc 6) .&. 3 of
+                            0         -> invalid
+                            1         -> invalid
+                            2         -> if z <= 3 && y >= 4 then
+                                           -- Increment, Increment-Repeat instructions
+                                           (pc + 1, ((incdecOps IntMap.! (fromIntegral y)) IntMap.! (fromIntegral z)))
+                                         else
+                                           invalid
+                            3         -> invalid
+                            _otherise -> invalid
+  where
+    opc = getNextWord image pc
+    z = (opc .&. 7)
+    y = (shiftR opc 3) .&. 7
+    invalid = (pc + 1, Z80undef [0xed, opc])
 
-group3decode image pc _opc 3 0 _p _q = (pc + 2, JP (getAddr image (pc + 1)))
--- z = 3, y = 1: This is the 0xcb prefix group
-group3decode image pc _opc 3 2 _p _q = (pc + 1, OUT (getNextWord image pc))
-group3decode image pc _opc 3 3 _p _q = (pc + 1, IN (getNextWord image pc))
-group3decode _image pc _opc 3 4 _p _q = (pc, EXSPHL)
-group3decode _image pc _opc 3 5 _p _q = (pc, EXDEHL)
-group3decode _image pc _opc 3 6 _p _q = (pc, DI)
-group3decode _image pc _opc 3 7 _p _q = (pc, EI)
-
-group3decode image pc _opc 4 y _p _q = let cc = condC y
-                                           dest = getAddr image (pc + 1)
-                                       in  (pc + 2, CALLCC cc dest)
-
-group3decode _image pc _opc 5 _y p 0 = (pc, (PUSH . pairAF $ p))
-group3decode image pc _opc 5 _y 0 1 = (pc + 2, CALL (getAddr image (pc + 1)))
--- p = 1, q = 1: DD prefix
--- p = 2, q = 1: ED prefix
--- p = 3, q = 1: FD prefix
-
-group3decode image pc _opc 6 0 _p _q = (pc + 1, ADD (ALUimm (getNextWord image pc)))
-group3decode image pc _opc 6 1 _p _q = (pc + 1, ADC (ALUimm (getNextWord image pc)))
-group3decode image pc _opc 6 2 _p _q = (pc + 1, SUB (ALUimm (getNextWord image pc)))
-group3decode image pc _opc 6 3 _p _q = (pc + 1, SBC (ALUimm (getNextWord image pc)))
-group3decode image pc _opc 6 4 _p _q = (pc + 1, AND (ALUimm (getNextWord image pc)))
-group3decode image pc _opc 6 5 _p _q = (pc + 1, XOR (ALUimm (getNextWord image pc)))
-group3decode image pc _opc 6 6 _p _q = (pc + 1, OR  (ALUimm (getNextWord image pc)))
-group3decode image pc _opc 6 7 _p _q = (pc + 1, CP  (ALUimm (getNextWord image pc)))
-
-group3decode _image pc _opc 7 y _p _q = (pc, RST y)
-
--- Catchall:
-group3decode _image pc opc _z _y _p _q = (pc, Z80undef [opc])
-
+-- |
+incdecOps :: IntMap (IntMap Instruction)
+incdecOps = IntMap.fromList [ (4, IntMap.fromList [ (0, LDI )
+                                                  , (1, CPI )
+                                                  , (2, INI )
+                                                  , (3, OUTI )
+                                                  ] )
+                            , (5, IntMap.fromList [ (0, LDD)
+                                                  , (1, CPD)
+                                                  , (2, IND)
+                                                  , (3, OUTD)
+                                                  ] )
+                            , (6, IntMap.fromList [ (0, LDIR)
+                                                  , (1, CPIR)
+                                                  , (2, INIR)
+                                                  , (3, OTIR)
+                                                  ] )
+                            , (7, IntMap.fromList [ (0, LDDR)
+                                                  , (1, CPDR)
+                                                  , (2, INDR)
+                                                  , (3, OTDR)
+                                                  ] )
+                            ]
 -- | Convert 16-bit register pair/SP index to a 'RegPairSP' operand
 pairSP :: Z80word
        -> RegPairSP
@@ -267,6 +304,7 @@ condC 4 = PO
 condC 5 = PE
 condC 6 = POS
 condC 7 = MI
+condC x = error ("condC: Invalid condition code index " ++ (show x))
 
 -- | Fetch an absolute (16-bit) address
 getAddr :: Z80memory
@@ -277,20 +315,24 @@ getAddr image pc = let pc' = fromIntegral pc :: Int
                        hi = fromIntegral (image ! (pc' + 1)) :: Z80addr
                     in (shiftL hi 8) .|. lo
 
--- | Fetch a displacement, convert it to an address
-getDispAddr :: Z80memory
-            -> Z80addr
-            -> Z80addr
-getDispAddr image pc = let pc' = fromIntegral pc :: Int
-                           disp = image ! pc'
-                       in  pc + (fromIntegral disp)
+displacementInstruction :: Z80memory
+                        -> Z80addr
+                        -> (Z80addr -> Instruction)
+                        -> (Z80addr, Instruction)
+displacementInstruction image pc ins = let pc'   = fromIntegral (pc + 1) :: Int
+                                           disp  = fromIntegral (image ! pc') :: Int16
+                                           disp' = if disp <= 0x7f then
+                                                     disp
+                                                   else
+                                                     -((disp `xor` 0xff) + 1)
+                                       in  (pc + 1, ins $ (pc + (fromIntegral disp') + 2))
 
 -- | Get a byte
 getWord :: Z80memory
         -> Z80addr
         -> Z80word
 getWord image pc = let pc' = fromIntegral pc :: Int
-                   in  image ! (pc' + 1)
+                   in  image ! pc'
 
 -- | Get following byte (shorthand)
 getNextWord :: Z80memory
@@ -300,6 +342,3 @@ getNextWord image pc = getWord image (pc + 1)
 
 errorStr :: String
 errorStr = "z80disassembler: error: "
-
-warnStr :: String
-warnStr = "z80disassembler: warning: "

@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 -- | The Z80 emulation's command dispatch module.
 --
 -- The normal way of invoking these commands is:
@@ -21,15 +22,17 @@ import System.IO
 import System.Console.GetOpt
 import Control.DeepSeq
 import Control.Exception
--- redundant: import Data.Word
+import qualified Data.ByteString.Char8 as BS
 import Data.Maybe
-import Data.List (foldl', intercalate)
+import Data.List (foldl')
 import qualified Data.Vector.Unboxed as DVU
+import qualified Data.Sequence as DS
 
 import Reader
 -- redundant: import Machine
 import Z80.Processor
 import Z80.Disassembler
+import Z80.DisasmOutput
   
 -- | Various things we can do with the Z80 processor emulator
 data Z80Command = NoCommand
@@ -138,10 +141,20 @@ cmdDisassemble disAsm =
 						      , ", bytes to dump "
 						      , (show theNBytesToDis)
 						      ])
-                                     >> z80disassembler img theOrigin theStartAddr theNBytesToDis
-                                     >>= (\ dis -> putStrLn (show dis))
+                                     >> doDisAsm img theOrigin theStartAddr theNBytesToDis theImageLen
+                                     >>= (\ dis -> BS.putStrLn $ outputDisassembly dis)
 				 else
 				   putStrLn "-- Error reading image"
+  where
+    doDisAsm img theOrigin theStartAddr theNBytesToDis theImageLen
+      | theStartAddr < theOrigin =
+        hPutStrLn stderr "start address < origin"
+        >> return DS.empty
+      | theStartAddr + fromIntegral(theNBytesToDis) > fromIntegral theImageLen =
+        hPutStrLn stderr "number of bytes to disassemble exceeds image length, truncating"
+        >> (return $ z80disassembler img theStartAddr (theStartAddr - theOrigin) theNBytesToDis DS.empty)
+      | otherwise =
+        return $ z80disassembler img theOrigin theStartAddr theNBytesToDis DS.empty
 
 -- | Ensure that 'Z80Command' can be fully evaluated by 'deepseq'. Notably, this is used to catch
 -- integer parsing errors 

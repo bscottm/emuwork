@@ -7,6 +7,7 @@ module Z80.InstructionSet
   , Z80reg16(..)
   , OperLD8(..)
   , OperLDA(..)
+  , OperSTA(..)
   , OperALU(..)
   , RegPairSP(..)
   , RegPairAF(..)
@@ -28,6 +29,7 @@ data Instruction where
   -- LD r, (IY + d)
   LD8 :: OperLD8
        -> Instruction
+{-
   -- LD (HL), r
   -- LD (IX + d), r
   -- LD (IY + d), r
@@ -38,6 +40,7 @@ data Instruction where
   -- LD (IY + d), n
   ST8I :: OperST8 Z80word
        -> Instruction
+-}
   -- LD A, (BC)
   -- LD A, (DE)
   -- LD A, (nn)
@@ -50,7 +53,7 @@ data Instruction where
   -- LD (nn), A
   -- LD I, A
   -- LD R, A
-  STA :: OperLDA
+  STA :: OperSTA
       -> Instruction
   -- LD rp, nn
   LD16 :: RegPairSP
@@ -113,18 +116,29 @@ data Instruction where
   RST :: Z80word
       -> Instruction
 
+  -- 0xcb prefix instructions:
+  -- RLC, RRC, RL, RR, SLA, SRA, SLL, SRL, BIT, RES, SET
+  RLC, RRC, RL, RR, SLA, SRA, SLL, SRL :: Z80reg8
+                                       -> Instruction
+  BIT, RES, SET :: Z80word                      -- Bit within byte to set/reset/test
+                -> Z80reg8
+                -> Instruction
+
+  -- Increment, Increment-Repeat instructions
+  LDI, CPI, INI, OUTI, LDD, CPD, IND, OUTD, LDIR, CPIR, INIR, OTIR, LDDR, CPDR, INDR, OTDR :: Instruction
+	
 -- | Instruction -> String serialization
 instance Show Instruction where
-  show (Z80undef bytes) = "Z80undef " ++ (asHex bytes)
+  show (Z80undef bytes) = "Z80undef " ++ (as0xHexS bytes)
 
   show (LD8 x) = "LD8(" ++ (show x) ++ ")"
   show (LDA x) = "LDA(" ++ (show x) ++ ")"
   show (STA x) = "STA(" ++ (show x) ++ ")"
 
-  show (LD16 rp imm) = "LD16(" ++ (show rp) ++ "," ++ (asHex imm) ++ ")"
+  show (LD16 rp imm) = "LD16(" ++ (show rp) ++ "," ++ (as0xHexS imm) ++ ")"
 
-  show (LDHL addr) = "LDHL(" ++ (asHex addr) ++ ")"
-  show (STHL addr) = "STHL(" ++ (asHex addr) ++ ")"
+  show (LDHL addr) = "LDHL(" ++ (as0xHexS addr) ++ ")"
+  show (STHL addr) = "STHL(" ++ (as0xHexS addr) ++ ")"
 
   show HALT = "HALT"
   show NOP = "NOP"
@@ -146,11 +160,11 @@ instance Show Instruction where
   show SCF = "SCF"
   show CCF = "CCF"
 
-  show (DJNZ addr) = "DJNZ(" ++ (asHex addr) ++ ")"
-  show (JR addr) = "JR(" ++ (asHex addr) ++ ")"
-  show (JRCC cc addr) = "JRCC(" ++ (show cc) ++ "," ++ (asHex addr) ++ ")"
+  show (DJNZ addr) = "DJNZ(" ++ (as0xHexS addr) ++ ")"
+  show (JR addr) = "JR(" ++ (as0xHexS addr) ++ ")"
+  show (JRCC cc addr) = "JRCC(" ++ (show cc) ++ "," ++ (as0xHexS addr) ++ ")"
 
-  show (JP addr) = "JP(" ++ (asHex addr) ++ ")"
+  show (JP addr) = "JP(" ++ (as0xHexS addr) ++ ")"
   show (JPCC cc addr) = "JPCC(" ++ (show cc) ++ "," ++ (show addr) ++ ")"
 
   show (ADD op) = "ADD(" ++ (show op) ++ ")"
@@ -168,11 +182,11 @@ instance Show Instruction where
   show (INC16 rp) = "INC16(" ++ (show rp) ++ ")"
   show (DEC16 rp) = "DEC16(" ++ (show rp) ++ ")"
 
-  show (IN port) = "IN(" ++ (asHex port) ++ ")"
-  show (OUT port) = "OUT(" ++ (asHex port) ++ ")"
+  show (IN port) = "IN(" ++ (as0xHexS port) ++ ")"
+  show (OUT port) = "OUT(" ++ (as0xHexS port) ++ ")"
 
-  show (CALL addr) = "CALL(" ++ (asHex addr) ++ ")"
-  show (CALLCC cc addr) = "CALLCC(" ++ (show cc) ++ "," ++ (asHex addr) ++ ")"
+  show (CALL addr) = "CALL(" ++ (as0xHexS addr) ++ ")"
+  show (CALLCC cc addr) = "CALLCC(" ++ (show cc) ++ "," ++ (as0xHexS addr) ++ ")"
 
   show RET = "RET"
   show (RETCC cc) = "RETCC(" ++ (show cc) ++ ")"
@@ -181,6 +195,18 @@ instance Show Instruction where
   show (POP rp) = "POP(" ++ (show rp) ++ ")"
 
   show (RST nn) = "RST(" ++ (show nn) ++ ")"
+  
+  show(RLC r) = "RLC(" ++ (show r) ++ ")"
+  show(RRC r) = "RRC(" ++ (show r) ++ ")"
+  show(RL r) = "RL(" ++ (show r) ++ ")"
+  show(RR r) = "RR(" ++ (show r) ++ ")"
+  show(SLA r) = "SLA(" ++ (show r) ++ ")"
+  show(SRA r) = "SRA(" ++ (show r) ++ ")"
+  show(SLL r) = "SLL(" ++ (show r) ++ ")"
+  show(SRL r) = "SRL(" ++ (show r) ++ ")"
+  show(BIT bit r) = "BIT(" ++ (show bit) ++ "," ++ (show r) ++ ")"
+  show(RES bit r) = "RES(" ++ (show bit) ++ "," ++ (show r) ++ ")"
+  show(SET bit r) = "SET(" ++ (show bit) ++ "," ++ (show r) ++ ")"
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -221,7 +247,7 @@ data OperST8 x where
              -> Z80word
              -> OperST8 x
 
--- | Accumulator load/store specials
+-- | Accumulator load operands
 data OperLDA where
   BCIndirect    :: OperLDA
   DEIndirect    :: OperLDA
@@ -233,9 +259,25 @@ data OperLDA where
 instance Show OperLDA where
   show BCIndirect           = "[BC]"
   show DEIndirect           = "[DE]"
-  show (Imm16Indirect addr) = "[" ++ (asHex addr) ++ "]"
+  show (Imm16Indirect addr) = "[" ++ (as0xHexS addr) ++ "]"
   show IReg                 = "I"
   show RReg                 = "R"
+
+-- | Accumulator store operands
+data OperSTA where
+  BCIndirect'    :: OperSTA
+  DEIndirect'    :: OperSTA
+  Imm16Indirect' :: Z80addr
+                 -> OperSTA
+  IReg'          :: OperSTA
+  RReg'          :: OperSTA
+
+instance Show OperSTA where
+  show BCIndirect'           = "[BC]"
+  show DEIndirect'           = "[DE]"
+  show (Imm16Indirect' addr) = "[" ++ (as0xHexS addr) ++ "]"
+  show IReg'                 = "I"
+  show RReg'                 = "R"
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
