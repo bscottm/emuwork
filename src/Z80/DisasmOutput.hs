@@ -4,7 +4,6 @@ module Z80.DisasmOutput
   ( outputDisassembly
   ) where
 
-import Data.Map
 import Data.Char
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BC

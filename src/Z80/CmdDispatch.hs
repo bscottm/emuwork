@@ -9,8 +9,10 @@
 --
 -- @disassemble@, @disasm@
 --   Disassemble an image, e.g., raw ROM file
+
 module Z80.CmdDispatch
        ( z80cmdDispatch
+       , trs80Rom
        ) where
 
 import Prelude hiding(catch)
@@ -157,7 +159,7 @@ cmdDisassemble disAsm =
         return $ z80disassembler img theOrigin theStartAddr theNBytesToDis DS.empty
 
 -- | Ensure that 'Z80Command' can be fully evaluated by 'deepseq'. Notably, this is used to catch
--- integer parsing errors 
+-- integer parsing errors as early as possible.
 instance NFData Z80Command where
   rnf NoCommand = ()
   rnf (InvalidCommand strs) = rnf strs
@@ -165,3 +167,7 @@ instance NFData Z80Command where
                                            rnf org `seq`
                                            rnf sAddr `seq`
                                            rnf nBytes
+
+-- | Trash-80 disassembly test harness, basically callable via ghci
+trs80Rom = readRawWord8Vector "../../trs80-roms/level2.rom"
+           >>= (\ img -> BS.putStrLn $ outputDisassembly $ z80disassembler img 0 0 0x105 DS.empty)

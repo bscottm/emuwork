@@ -10,6 +10,7 @@ module Z80.Disassembler
 
 -- import Debug.Trace
 
+import Control.Monad.Trans.State.Lazy
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import Data.Sequence ((|>))
@@ -30,37 +31,58 @@ z80disassembler :: Z80memory                    -- ^ Vector of bytes to disassem
                 -> Z80addr                      -- ^ Origin, i.e., output's starting address
                 -> Z80addr                      -- ^ Start address, relative to origin, to start disassembling
                 -> Z80disp                      -- ^ Number of bytes to disassemble
-                -> Z80Disassembly                  -- ^ Existing list of disassembled instructions
+                -> Z80Disassembly               -- ^ Existing list of disassembled instructions
                 -> Z80Disassembly
 z80disassembler image origin startAddr nBytes disassembled = disassemble image origin startAddr nBytes disassembled
 
 -- | The 'Disassembly' class instance for the Z80.
 instance Disassembler Z80addr Z80disp Z80word Instruction NullPseudoOp where
-    disassemble mem origin startAddr nBytes disassembled = disasm mem pc (pc + (fromIntegral nBytes)) disassembled
+    disassemble mem origin startAddr nBytes disassembled = disasm mem pc lastpc mkInitialDisasmState disassembled
       where
         pc = startAddr - origin
-        disasm theMem thePc lastpc dis
-          {-  | trace ("disasm: pc = " ++ (show thePc)) False = undefined -}
-          | thePc >= lastpc = dis
-          | otherwise =
-            let opc = (theMem !? fromIntegral(thePc))
-            in  case opc of
-                  Nothing     -> error ("Z80 disasm: invalid fetch at pc = " ++ (show thePc))
-                  Just theOpc -> case (shiftR theOpc 6) .&. 3 of
-                                   0          -> let (newpc, ins) = group0decode theMem thePc theOpc
-                                                 in  disasm theMem (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
-                                   1          -> let ins = group1decode theOpc
-                                                 in  disasm theMem (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
-                                   2          -> let ins = group2decode theOpc
-                                                 in  disasm theMem (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
-                                   3          -> let (newpc, ins) = group3decode theMem thePc theOpc
-                                                 in  disasm theMem (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
-                                   _otherwise -> error (errorStr ++ "x out of range?")
-          where
-            getOpcodes x y = let x' = (fromIntegral x) :: Int
-                                 y' = (fromIntegral y) :: Int
-                             in  DVU.slice x' (y' - x' + 1) theMem
-            mkDisasmInst oldpc newpc ins = dis |> DisasmInst oldpc (getOpcodes oldpc newpc) ins
+        lastpc = pc + (fromIntegral nBytes)
+
+-- | Where the real work of the Z80 disassembly happens...
+disasm :: Z80memory
+       -> Z80addr
+       -> Z80addr
+       -> Z80DisasmState
+       -> Z80Disassembly
+       -> Z80Disassembly
+disasm theMem thePc lastpc dstate dis
+  {-  | trace ("disasm: pc = " ++ (show thePc)) False = undefined -}
+  | thePc >= lastpc = dis
+  | otherwise =
+    let opc = (theMem !? fromIntegral(thePc))
+    in  case opc of
+          Nothing     -> error ("Z80 disasm: invalid fetch at pc = " ++ (show thePc))
+          Just theOpc -> case (shiftR theOpc 6) .&. 3 of
+                           0          -> let (newpc, ins) = group0decode theMem thePc theOpc
+                                         in  disasm theMem (newpc + 1) lastpc dstate $ mkDisasmInst thePc newpc ins
+                           1          -> let ins = group1decode theOpc
+                                         in  disasm theMem (thePc + 1) lastpc dstate $ mkDisasmInst thePc thePc ins
+                           2          -> let ins = group2decode theOpc
+                                         in  disasm theMem (thePc + 1) lastpc dstate $ mkDisasmInst thePc thePc ins
+                           3          -> let (newpc, ins) = group3decode theMem thePc theOpc
+                                         in  disasm theMem (newpc + 1) lastpc dstate $ mkDisasmInst thePc newpc ins
+                           _otherwise -> error (errorStr ++ "x out of range?")
+  where
+    getOpcodes x y = let x' = (fromIntegral x) :: Int
+                         y' = (fromIntegral y) :: Int
+                     in  DVU.slice x' (y' - x' + 1) theMem
+    mkDisasmInst oldpc newpc ins = dis |> DisasmInst oldpc (getOpcodes oldpc newpc) ins
+
+-- | Type used within the 'State' monad, at least to keep track of the temporary (local) labels for
+-- relative jumps.
+data Z80DisasmState =
+  Z80DisasmState
+  { labelVal :: Int                             -- ^ Current label value
+  }
+
+mkInitialDisasmState :: Z80DisasmState
+mkInitialDisasmState = Z80DisasmState
+                       { labelVal = 1
+                       }  
 
 group0decode :: Z80memory                       -- ^ Memory image
              -> Z80addr                         -- ^ Current PC
@@ -321,11 +343,11 @@ displacementInstruction :: Z80memory
                         -> (Z80addr, Instruction)
 displacementInstruction image pc ins = let pc'   = fromIntegral (pc + 1) :: Int
                                            disp  = fromIntegral (image ! pc') :: Int16
-                                           disp' = if disp <= 0x7f then
-                                                     disp
-                                                   else
-                                                     -((disp `xor` 0xff) + 1)
-                                       in  (pc + 1, ins $ (pc + (fromIntegral disp') + 2))
+                                           disp' = fromIntegral (if disp <= 0x7f then
+                                                                   disp
+                                                                 else
+                                                                   -((disp `xor` 0xff) + 1))
+                                       in  (pc + 1, ins $ (pc + disp' + 2))
 
 -- | Get a byte
 getWord :: Z80memory

@@ -208,6 +208,23 @@ instance Show Instruction where
   show(RES bit r) = "RES(" ++ (show bit) ++ "," ++ (show r) ++ ")"
   show(SET bit r) = "SET(" ++ (show bit) ++ "," ++ (show r) ++ ")"
 
+  show LDI = "LDI"
+  show CPI = "CPI"
+  show INI = "INI"
+  show OUTI = "OUTI"
+  show LDD = "LDD"
+  show CPD = "CPD"
+  show IND = "IND"
+  show OUTD = "OUTD"
+  show LDIR = "LDIR"
+  show CPIR = "CPIR"
+  show INIR = "INIR"
+  show OTIR = "OTIR"
+  show LDDR = "LDDR"
+  show CPDR = "CPDR"
+  show INDR = "INDR"
+  show OTDR  = "OTDR"
+
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | 8-bit load group operands
