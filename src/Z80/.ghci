@@ -1,3 +1,4 @@
-:set -XGADTs -XFlexibleInstances -XMultiParamTypeClasses -XRankNTypes -XTypeSynonymInstances -XOverloadedStrings
+:set -XGADTs -XFlexibleInstances -XMultiParamTypeClasses -XRankNTypes -XTypeSynonymInstances -XOverloadedStrings -XTemplateHaskell
+:set -XTypeOperators
 :set -i.:..
 :load Z80

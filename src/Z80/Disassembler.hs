@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeOperators #-}
 -- | The Z80 disassembler module
 module Z80.Disassembler
   ( -- * Types
@@ -9,13 +11,17 @@ module Z80.Disassembler
   ) where
 
 -- import Debug.Trace
+-- import Prelude hiding ((.), id)
 
-import Control.Monad.Trans.State.Lazy
+-- import Control.Monad.Trans.State.Lazy
+import Data.Label
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import Data.Sequence ((|>))
 import Data.Vector.Unboxed (Vector, (!?), (!))
 import qualified Data.Vector.Unboxed as DVU
+import qualified Data.Map as Map
+import qualified Data.ByteString.Char8 as BC
 import Data.Int
 import Data.Bits
 
@@ -23,7 +29,11 @@ import Machine.DisassemblerTypes
 import Z80.Processor
 import Z80.InstructionSet
 
+mkLabels [ ''Disassembly ]
+
+-- | Shorthand for the 'Vector' of Z80words
 type Z80memory = Vector Z80word
+-- | Shorthand for the 'Disassembly' state for the Z80
 type Z80Disassembly = Disassembly Z80addr Z80word Instruction NullPseudoOp
 
 -- | The Z80 disassembler, which just invokes the 'Disassembly' class instance of 'disassemble'
@@ -37,7 +47,7 @@ z80disassembler image origin startAddr nBytes disassembled = disassemble image o
 
 -- | The 'Disassembly' class instance for the Z80.
 instance Disassembler Z80addr Z80disp Z80word Instruction NullPseudoOp where
-    disassemble mem origin startAddr nBytes disassembled = disasm mem pc lastpc mkInitialDisasmState disassembled
+    disassemble mem origin startAddr nBytes disassembled = disasm mem pc lastpc disassembled
       where
         pc = startAddr - origin
         lastpc = pc + (fromIntegral nBytes)
@@ -46,10 +56,9 @@ instance Disassembler Z80addr Z80disp Z80word Instruction NullPseudoOp where
 disasm :: Z80memory
        -> Z80addr
        -> Z80addr
-       -> Z80DisasmState
        -> Z80Disassembly
        -> Z80Disassembly
-disasm theMem thePc lastpc dstate dis
+disasm theMem thePc lastpc dis
   {-  | trace ("disasm: pc = " ++ (show thePc)) False = undefined -}
   | thePc >= lastpc = dis
   | otherwise =
@@ -58,31 +67,29 @@ disasm theMem thePc lastpc dstate dis
           Nothing     -> error ("Z80 disasm: invalid fetch at pc = " ++ (show thePc))
           Just theOpc -> case (shiftR theOpc 6) .&. 3 of
                            0          -> let (newpc, ins) = group0decode theMem thePc theOpc
-                                         in  disasm theMem (newpc + 1) lastpc dstate $ mkDisasmInst thePc newpc ins
+                                         in  disasm theMem (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
                            1          -> let ins = group1decode theOpc
-                                         in  disasm theMem (thePc + 1) lastpc dstate $ mkDisasmInst thePc thePc ins
+                                         in  disasm theMem (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
                            2          -> let ins = group2decode theOpc
-                                         in  disasm theMem (thePc + 1) lastpc dstate $ mkDisasmInst thePc thePc ins
+                                         in  disasm theMem (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
                            3          -> let (newpc, ins) = group3decode theMem thePc theOpc
-                                         in  disasm theMem (newpc + 1) lastpc dstate $ mkDisasmInst thePc newpc ins
+                                         in  disasm theMem (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
                            _otherwise -> error (errorStr ++ "x out of range?")
   where
     getOpcodes x y = let x' = (fromIntegral x) :: Int
                          y' = (fromIntegral y) :: Int
                      in  DVU.slice x' (y' - x' + 1) theMem
-    mkDisasmInst oldpc newpc ins = dis |> DisasmInst oldpc (getOpcodes oldpc newpc) ins
-
--- | Type used within the 'State' monad, at least to keep track of the temporary (local) labels for
--- relative jumps.
-data Z80DisasmState =
-  Z80DisasmState
-  { labelVal :: Int                             -- ^ Current label value
-  }
-
-mkInitialDisasmState :: Z80DisasmState
-mkInitialDisasmState = Z80DisasmState
-                       { labelVal = 1
-                       }  
+    -- Note: 'set' and 'get' come from Data.Label.
+    mkDisasmInst oldpc newpc ins = let newDisasmSeq = (get disasmSeq dis) |> DisasmInst oldpc (getOpcodes oldpc newpc) ins
+                                   in  set disasmSeq newDisasmSeq $ annotateAddr ins dis
+    -- Annotate labels on instructions that have addresses
+    annotateAddr ins dis = case ins of
+                         (DJNZ addr) -> markAddr addr dis
+                         (JR addr) -> markAddr addr dis
+                         _otherwise -> dis
+    markAddr addr dis = let label = BC.append "L" (BC.pack . show $ get labelNum dis)
+                            updsyms = Map.insertWith (\l r -> r) addr label $ get symbolTab dis
+                       in  set symbolTab updsyms $ modify labelNum (+ 1) dis
 
 group0decode :: Z80memory                       -- ^ Memory image
              -> Z80addr                         -- ^ Current PC

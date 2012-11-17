@@ -20,7 +20,8 @@ library
                       containers >= 0.4,
                       bytestring >= 0.9,
                       vector >= 0.10,
-                      fclabels
+                      fclabels,
+                      transformers
   ghc-options:        -Wall
   default-extensions: MultiParamTypeClasses, TypeSynonymInstances, GADTs, TemplateHaskell
   exposed-modules:   
@@ -40,7 +41,8 @@ executable emuwork
                       containers >= 0.4,
                       bytestring >= 0.9,
                       vector >= 0.10,
-                      fclabels
+                      fclabels,
+                      transformers
   ghc-options:        -Wall
   default-extensions: MultiParamTypeClasses, TypeSynonymInstances, GADTs
   other-modules:   
