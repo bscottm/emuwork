@@ -1,3 +1,5 @@
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 -- | The Z80 disassembler module
@@ -5,15 +7,21 @@ module Z80.Disassembler
   ( -- * Types
     Z80memory
   , Z80Disassembly
+  , Z80PseudoOps(..)
 
     -- * Functions
-  , z80disassembler 
+  , z80disassembler
+  , z80disbytes
+  , z80disasciiz
+  , z80disascii
+  , group0decode
+  , group1decode
+  , group2decode
+  , group3decode
   ) where
 
 -- import Debug.Trace
--- import Prelude hiding ((.), id)
 
--- import Control.Monad.Trans.State.Lazy
 import Data.Label
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
@@ -21,6 +29,7 @@ import Data.Sequence ((|>))
 import Data.Vector.Unboxed (Vector, (!?), (!))
 import qualified Data.Vector.Unboxed as DVU
 import qualified Data.Map as Map
+import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BC
 import Data.Int
 import Data.Bits
@@ -29,12 +38,32 @@ import Machine.DisassemblerTypes
 import Z80.Processor
 import Z80.InstructionSet
 
+-- Emit Template Haskell hair for lenses used to set/get/modify the Disassembly state:
 mkLabels [ ''Disassembly ]
+
+-- | Pseudo disassembler operations: These are elements such as bytes to dump, various types of strings, etc.
+data Z80PseudoOps where
+  -- Range of bytes to dump
+  ByteRange :: Z80addr                          -- Start address
+            -> Vector Z80word                   -- Bytes
+            -> Z80PseudoOps
+  -- 0-terminated string (yes, these were used back in the pre-C days...)
+  AsciiZ    :: Z80addr                          -- Start of string
+            -> Vector Z80word                   -- The string, not including the zero terminator
+            -> Z80PseudoOps
+  -- Simple ASCII string
+  Ascii     :: Z80addr
+            -> Vector Z80word
+            -> Z80PseudoOps
+  -- Symbol equation (associates a symbol with a number, usually the address of something
+  Equate :: Z80addr
+         -> ByteString
+         -> Z80PseudoOps
 
 -- | Shorthand for the 'Vector' of Z80words
 type Z80memory = Vector Z80word
 -- | Shorthand for the 'Disassembly' state for the Z80
-type Z80Disassembly = Disassembly Z80addr Z80word Instruction NullPseudoOp
+type Z80Disassembly = Disassembly Z80addr Z80word Instruction Z80PseudoOps
 
 -- | The Z80 disassembler, which just invokes the 'Disassembly' class instance of 'disassemble'
 z80disassembler :: Z80memory                    -- ^ Vector of bytes to disassemble
@@ -45,20 +74,62 @@ z80disassembler :: Z80memory                    -- ^ Vector of bytes to disassem
                 -> Z80Disassembly
 z80disassembler image origin startAddr nBytes disassembled = disassemble image origin startAddr nBytes disassembled
 
+-- | Grab a sequence of bytes from the memory image, add to the disassembly sequence as a 'ByteRange' pseudo instruction
+z80disbytes :: Z80memory                        -- ^ Vector of bytes from which to extract some data
+            -> Z80addr                          -- ^ Output's origin address
+            -> Z80addr                          -- ^ Start address, relative to the origin, to start extracting bytes
+            -> Z80disp                          -- ^ Number of bytes to extract
+            -> Z80Disassembly                   -- ^ Current disassembly state
+            -> Z80Disassembly                   -- ^ Resulting diassembly state
+z80disbytes mem origin sAddr nBytes dstate = let sAddr' = fromIntegral sAddr
+                                                 nBytes' = fromIntegral nBytes
+                                                 theBytes = ByteRange (sAddr + origin) $ DVU.slice sAddr' nBytes' mem
+                                                 disSeq   = get disasmSeq dstate
+                                             in  set disasmSeq (disSeq |> DisasmPseudo theBytes) dstate
+
+-- | Grab (what is presumably) an ASCII string sequence, terminating at the first 0 encountered. This is somewhat inefficient
+-- because multiple 'Vector' slices get created.
+z80disasciiz :: Z80memory                       -- ^ Vector of bytes from which to extract some data
+             -> Z80addr                         -- ^ Output's origin address
+             -> Z80addr                         -- ^ Start address, relative to the origin, to start extracting bytes
+             -> Z80Disassembly                  -- ^ Current disassembly state
+             -> Z80Disassembly                  -- ^ Resulting diassembly state
+z80disasciiz mem origin sAddr dstate = let sAddr'       = fromIntegral sAddr
+                                           toSearch     = DVU.slice sAddr' (DVU.length mem - sAddr') mem
+                                           disSeq       = get disasmSeq dstate
+                                           foundStr idx = DisasmPseudo (AsciiZ (sAddr + origin) (DVU.slice sAddr' (idx + 1) mem))
+                                in  case DVU.elemIndex 0 toSearch of
+                                      Nothing -> dstate -- No found?
+                                      Just idx -> set disasmSeq (disSeq |> foundStr idx) dstate
+
+-- | Grab a sequence of bytes from the memory image, add to the disassembly sequence as a 'ByteRange' pseudo instruction
+z80disascii :: Z80memory                        -- ^ Vector of bytes from which to extract some data
+            -> Z80addr                          -- ^ Output's origin address
+            -> Z80addr                          -- ^ Start address, relative to the origin, to start extracting bytes
+            -> Z80disp                          -- ^ Number of bytes to extract
+            -> Z80Disassembly                   -- ^ Current disassembly state
+            -> Z80Disassembly                   -- ^ Resulting diassembly state
+z80disascii mem origin sAddr nBytes dstate = let sAddr'    = fromIntegral sAddr
+                                                 nBytes'  = fromIntegral nBytes
+                                                 theBytes = Ascii (sAddr + origin) $ DVU.slice sAddr' nBytes' mem
+                                                 disSeq   = get disasmSeq dstate
+                                             in  set disasmSeq (disSeq |> DisasmPseudo theBytes) dstate
+
 -- | The 'Disassembly' class instance for the Z80.
-instance Disassembler Z80addr Z80disp Z80word Instruction NullPseudoOp where
-    disassemble mem origin startAddr nBytes disassembled = disasm mem pc lastpc disassembled
+instance Disassembler Z80addr Z80disp Z80word Instruction Z80PseudoOps where
+    disassemble mem origin startAddr nBytes disassembled = disasm mem origin pc lastpc disassembled
       where
         pc = startAddr - origin
         lastpc = pc + (fromIntegral nBytes)
 
 -- | Where the real work of the Z80 disassembly happens...
-disasm :: Z80memory
-       -> Z80addr
-       -> Z80addr
+disasm :: Z80memory                             -- ^ The "memory" vector of bytes
+       -> Z80addr                               -- ^ The disassembly origin
+       -> Z80addr                               -- ^ The disassembly start address, realtive to the origin
+       -> Z80addr                               -- ^ The disassembly's last address
        -> Z80Disassembly
        -> Z80Disassembly
-disasm theMem thePc lastpc dis
+disasm theMem origin thePc lastpc dis
   {-  | trace ("disasm: pc = " ++ (show thePc)) False = undefined -}
   | thePc >= lastpc = dis
   | otherwise =
@@ -67,29 +138,45 @@ disasm theMem thePc lastpc dis
           Nothing     -> error ("Z80 disasm: invalid fetch at pc = " ++ (show thePc))
           Just theOpc -> case (shiftR theOpc 6) .&. 3 of
                            0          -> let (newpc, ins) = group0decode theMem thePc theOpc
-                                         in  disasm theMem (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
+                                         in  disasm theMem origin (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
                            1          -> let ins = group1decode theOpc
-                                         in  disasm theMem (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
+                                         in  disasm theMem origin (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
                            2          -> let ins = group2decode theOpc
-                                         in  disasm theMem (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
+                                         in  disasm theMem origin (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
                            3          -> let (newpc, ins) = group3decode theMem thePc theOpc
-                                         in  disasm theMem (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
+                                         in  disasm theMem origin (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
                            _otherwise -> error (errorStr ++ "x out of range?")
   where
+    -- Save the opcode bytes, now that we know how many correspond the the instruction
     getOpcodes x y = let x' = (fromIntegral x) :: Int
                          y' = (fromIntegral y) :: Int
                      in  DVU.slice x' (y' - x' + 1) theMem
     -- Note: 'set' and 'get' come from Data.Label.
-    mkDisasmInst oldpc newpc ins = let newDisasmSeq = (get disasmSeq dis) |> DisasmInst oldpc (getOpcodes oldpc newpc) ins
+    mkDisasmInst oldpc newpc ins = let disasmPC = oldpc + origin
+                                       opcodes = getOpcodes oldpc newpc
+                                       newDisasmSeq = (get disasmSeq dis) |> DisasmInst disasmPC opcodes ins
                                    in  set disasmSeq newDisasmSeq $ annotateAddr ins dis
-    -- Annotate labels on instructions that have addresses
-    annotateAddr ins dis = case ins of
-                         (DJNZ addr) -> markAddr addr dis
-                         (JR addr) -> markAddr addr dis
-                         _otherwise -> dis
-    markAddr addr dis = let label = BC.append "L" (BC.pack . show $ get labelNum dis)
-                            updsyms = Map.insertWith (\l r -> r) addr label $ get symbolTab dis
-                       in  set symbolTab updsyms $ modify labelNum (+ 1) dis
+    -- Annotate labels on instructions that contain addresses
+    annotateAddr ins theDState = case ins of
+                                   (DJNZ addr)     -> jumpLabel addr theDState
+                                   (JR addr)       -> jumpLabel addr theDState
+                                   (JRCC _cc addr) -> jumpLabel addr theDState
+                                   (CALL addr)     -> subLabel  addr theDState
+                                   _otherwise      -> theDState
+    -- Create a label signifying the destination of a jump
+    jumpLabel addr theDState = let symTab = get symbolTab theDState
+                              in  if Map.notMember addr symTab then
+                                    let label = BC.append "L" (BC.pack . show $ get labelNum theDState)
+                                        updsyms = Map.insert addr label symTab
+                                    in  set symbolTab updsyms $ modify labelNum (+ 1) theDState
+                                  else
+                                    theDState   -- No change to the disassembler state
+  -- Create a label signifying the destination of a subrouting
+    subLabel addr theDState = let symTab = get symbolTab theDState
+                              in  if Map.notMember addr symTab then
+                                    theDState
+                                  else
+                                    theDState
 
 group0decode :: Z80memory                       -- ^ Memory image
              -> Z80addr                         -- ^ Current PC
@@ -249,7 +336,15 @@ edPrefixDecode :: Z80memory
                -> (Z80addr, Instruction)
 edPrefixDecode image pc = case (shiftR opc 6) .&. 3 of
                             0         -> invalid
-                            1         -> invalid
+                            1         -> case z of
+                                           0 -> invalid
+                                           1 -> invalid
+                                           2 -> invalid
+                                           3 -> invalid
+                                           4 -> invalid
+                                           5 -> invalid
+                                           6 -> invalid
+                                           7 -> invalid
                             2         -> if z <= 3 && y >= 4 then
                                            -- Increment, Increment-Repeat instructions
                                            (pc + 1, ((incdecOps IntMap.! (fromIntegral y)) IntMap.! (fromIntegral z)))

@@ -6,12 +6,15 @@ module Z80.DisasmOutput
   ( outputDisassembly
   ) where
 
+-- import Debug.Trace
+
 import Data.Char
 import Data.Label
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BC
 import Data.Sequence (ViewL(..), viewl)
 import qualified Data.Map as Map
+import Data.Vector.Unboxed (Vector)
 import qualified Data.Vector.Unboxed as DVU
 
 import Machine.Utils
@@ -31,26 +34,75 @@ outputDisassembly dis = doOutput (viewl (get disasmSeq dis)) BC.empty
     doOutput (left :< rest) acc = formatElem left (doOutput (viewl rest) acc)
 
     formatElem thing acc = case thing of
-                             (DisasmInst addr bytes ins) -> BC.concat [ makeUpper $ asHex addr
-                                                                      , ": "
-                                                                      , formatBytes bytes
-                                                                      , formatLabel addr
-                                                                      , padTo 24 $ formatIns ins
-                                                                      , "|"
-                                                                      , formatChars bytes
-                                                                      , "|"
-                                                                      , (BC.cons '\n' acc)
+                             (DisasmInst addr bytes ins) -> BC.concat [ formatLinePrefix bytes addr dis
+                                                                      , padTo lenInstruction $ formatIns ins
+                                                                      , "\n"
+                                                                      , acc
                                                                       ]
-                             (DisasmPseudo _) -> acc
+                             (DisasmPseudo pseudo)       -> formatPseudo pseudo dis acc
       where
-        formatBytes bytes = padTo 18 $ makeUpper $ DVU.foldl (\s x -> BC.concat [ s, asHex x, " " ]) BC.empty bytes
-        formatChars bytes = padTo 6  $ DVU.foldl (\s x -> BC.append s (mkPrintable x)) BC.empty bytes
-        formatLabel addr  = padTo 8 $ case Map.lookup addr (get symbolTab dis) of
-                                        Nothing -> ""
-                                        Just s  -> BC.append  s ":"
         formatIns ins = let (mnemonic, opers) = formatInstruction dis ins
-                        in  BC.append (padTo 8 mnemonic) opers
-        mkPrintable x = if x > 0x20 && x < 0x7f then (BC.singleton . chr . fromIntegral) x; else " "
+                        in  BC.append (padTo lenMnemonic mnemonic) opers
+
+-- | Output a formatted address in uppercase hex
+upperHex :: forall operand. ShowHex operand => 
+            operand
+         -> ByteString
+upperHex = (makeUpper . asHex)
+
+-- | Output an 'upperHex' address with the appended 'H'
+oldStyleHex :: forall operand. ShowHex operand =>
+               operand
+            -> ByteString
+oldStyleHex x = BC.snoc (upperHex x) 'H'
+
+-- | Format the beginning of the line (address, bytes, label, etc.)
+formatLinePrefix :: Vector Z80word
+                 -> Z80addr
+                 -> Z80Disassembly
+                 -> ByteString
+formatLinePrefix bytes addr dstate =
+  let label               = case Map.lookup addr (get symbolTab dstate) of
+                              Nothing  -> ""
+                              Just lab -> BC.snoc lab ':'
+      bytesToChars vec    = padTo lenAsChars  $ DVU.foldl (\s x -> BC.append s (mkPrintable x)) BC.empty vec
+      mkPrintable x       = if x > 0x20 && x < 0x7f then (BC.singleton . chr . fromIntegral) x; else " "
+  in  if BC.length label < (lenSymLabel - 2) then
+        BC.concat [ upperHex addr
+                  , ": "
+                  , formatBytes bytes
+                  , "|"
+                  , bytesToChars bytes
+                  , "| "
+                  , padTo lenSymLabel label
+                  ]
+      else BC.concat [ upperHex addr
+                     , ": "
+                     , padTo (lenInsBytes + lenAsChars + 3) ""
+                     , label
+                     , "\n"
+                     , upperHex addr
+                     , ": "
+                     , formatBytes bytes
+                     , "|"
+                     , bytesToChars bytes
+                     , "| "
+                     , padTo lenSymLabel ""
+                     ]
+
+-- | Format a series of bytes
+formatBytes :: Vector Z80word
+            -> ByteString
+formatBytes bytes = padTo lenInsBytes $ BC.intercalate " " [ upperHex x | x <- DVU.toList bytes ]
+
+-- Lengths of various output columns:
+lenInsBytes, lenAsChars, lenSymLabel, lenInstruction, lenMnemonic :: Int
+
+lenInsBytes = (lenAsChars * 3)          -- ^ 8 bytes max to dump, 3 spaces per byte
+lenAsChars = 8                          -- ^ 8 characters, as the bytes are dumped as characters
+lenSymLabel = BC.length("XXXXXXXXXXXX") + 2     -- ^ Label colum is 8 characters plus ": "
+lenInstruction = 24
+lenMnemonic = 8
 
 formatInstruction :: Z80Disassembly
                   -> Instruction
@@ -96,7 +148,7 @@ formatInstruction _dstate SCF = zeroOperands "SCF"
 formatInstruction _dstate CCF = zeroOperands "CCF"
 formatInstruction dstate (DJNZ addr) = oneOperandAddr "DJNZ" addr dstate
 formatInstruction dstate (JR addr) = oneOperandAddr "JR" addr dstate
-formatInstruction _dstate (JRCC cc addr) = twoOperands "JR" cc addr
+formatInstruction dstate (JRCC cc addr) = twoOperandAddr "JR" cc addr dstate
 formatInstruction _dstate (JP addr) = oneOperand "JP" addr
 formatInstruction _dstate (JPCC cc addr) = twoOperands "JP" cc addr
 formatInstruction _dstate (IN port) = oneOperand "IN" port
@@ -172,14 +224,29 @@ twoOperands mne op1 op2 = (mne, BC.concat [ formatOperand op1
                                           ]
                           )
 
+-- | Disassembly output with a two operand instruction, second operand is an address
+twoOperandAddr :: forall operand1. (DisOperandFormat operand1) =>
+                  ByteString
+               -> operand1
+               -> Z80addr
+               -> Z80Disassembly
+            -> (ByteString, ByteString)
+twoOperandAddr mne op1 addr dstate = (mne, BC.concat [ formatOperand op1
+                                                     , ", "
+                                                     , (case Map.lookup addr (get symbolTab dstate) of
+                                                          Nothing    -> formatOperand addr
+                                                          Just label -> label)
+                                                     ]
+                                     )
+
 class DisOperandFormat x where
   formatOperand :: x -> ByteString
 
 instance DisOperandFormat Z80word where
-  formatOperand x = BC.append (makeUpper . asHex $ x) "H"
+  formatOperand = oldStyleHex
 
 instance DisOperandFormat Z80addr where
-  formatOperand x = BC.append (makeUpper . asHex $ x) "H"
+  formatOperand = oldStyleHex
 
 instance DisOperandFormat OperLD8 where
   formatOperand (Reg8Reg8 r r') = BC.append (formatOperand r) (BC.append ", " (formatOperand r'))
@@ -241,6 +308,70 @@ instance DisOperandFormat Z80condC where
 instance DisOperandFormat RegPairAF where
   formatOperand (RPair16' r) = formatOperand r
   formatOperand AF = "AF"
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+formatPseudo :: Z80PseudoOps
+             -> Z80Disassembly
+             -> ByteString
+             -> ByteString
+
+formatPseudo (ByteRange sAddr bytes) dstate acc = 
+  let outF vec =  BC.concat [ padTo lenMnemonic "DB"
+                            , BC.intercalate ", " [ oldStyleHex x | x <- DVU.toList vec ]
+                            ]
+  in  BC.append (fmtByteGroup dstate bytes sAddr 0 outF) acc
+
+formatPseudo (AsciiZ sAddr str) dstate acc =
+  let initSlice     = DVU.slice 0 (if DVU.length str <= 8; then DVU.length str; else 8) str
+      nonNullSlice  = DVU.slice 0 (DVU.length str - 1) str
+      mkString      = BC.cons '\'' (BC.snoc (BC.pack [ (chr . fromIntegral) x | x <- DVU.toList nonNullSlice ]) '\'')
+      outF _vec     = BC.empty
+  in  BC.concat [ formatLinePrefix initSlice sAddr dstate
+                , padTo lenMnemonic "DZ"
+                , mkString
+                , "\n"
+                , fmtByteGroup dstate str (sAddr + 8) 8 outF
+                , acc
+                ]
+
+formatPseudo (Ascii sAddr str) dstate acc =
+  let initSlice     = DVU.slice 0 (if DVU.length str <= 8; then DVU.length str; else 8) str
+      mkString      = BC.cons '\'' (BC.snoc (BC.pack [ (chr . fromIntegral) x | x <- DVU.toList str ]) '\'')
+      outF _vec     = BC.empty
+  in  BC.concat [ formatLinePrefix initSlice sAddr dstate
+                , padTo lenMnemonic "DS"
+                , mkString
+                , "\n"
+                , fmtByteGroup dstate str (sAddr + 8) 8 outF
+                , acc
+                ]
+
+formatPseudo (Equate _saddr _label) _dstate acc = acc
+
+-- | Format groups of bytes by groups of 8
+fmtByteGroup :: Z80Disassembly
+             -> Vector Z80word
+             -> Z80addr
+             -> Int
+             -> (Vector Z80word -> ByteString)
+             -> ByteString
+fmtByteGroup dstate bytes addr idx outF
+  | idx >= DVU.length bytes =
+    BC.empty
+  | idx + 8 >= DVU.length bytes =
+    -- dump remaining bytes
+    BC.concat [ formatLinePrefix (DVU.slice idx (DVU.length bytes - idx) bytes) addr dstate
+              , outF (DVU.slice idx (DVU.length bytes - idx) bytes)
+              , "\n"
+              ]
+  | otherwise =
+    -- dump a group of 8 bytes
+    BC.concat [ formatLinePrefix (DVU.slice idx 8 bytes) addr dstate
+              , outF (DVU.slice idx 8 bytes)
+              , "\n"
+              , fmtByteGroup dstate bytes (addr + 8) (idx + 8) outF
+              ]
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 

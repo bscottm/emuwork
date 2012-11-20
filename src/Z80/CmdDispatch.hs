@@ -1,6 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeOperators #-}
 -- | The Z80 emulation's command dispatch module.
 --
 -- The normal way of invoking these commands is:
@@ -14,7 +12,6 @@
 
 module Z80.CmdDispatch
        ( z80cmdDispatch
-       , trs80Rom
        ) where
 
 import Prelude hiding(catch)
@@ -27,11 +24,9 @@ import System.Console.GetOpt
 import Control.DeepSeq
 import Control.Exception
 import qualified Data.ByteString.Char8 as BS
-import Data.Label
 import Data.Maybe
 import Data.List (foldl')
 import qualified Data.Vector.Unboxed as DVU
-import qualified Data.Map as Map
 
 import Machine.DisassemblerTypes
 import Reader
@@ -39,9 +34,6 @@ import Z80.Processor
 import Z80.Disassembler
 import Z80.DisasmOutput
 
--- Template Haskell hair for lenses
-mkLabel ''Disassembly
-  
 -- | Various things we can do with the Z80 processor emulator
 data Z80Command = NoCommand
                 | InvalidCommand [String]
@@ -173,19 +165,3 @@ instance NFData Z80Command where
                                            rnf org `seq`
                                            rnf sAddr `seq`
                                            rnf nBytes
-
--- | Trash-80 disassembly test harness, basically callable via ghci
-trs80Rom :: IO ()
-trs80Rom = readRawWord8Vector "../../trs80-roms/level2.rom"
-           >>= (\ img -> BS.putStrLn $ outputDisassembly $ z80disassembler img 0 0 0x105 initialDisassembly)
-  where
-    initialDisassembly = set symbolTab knownSymbols mkInitialDisassembly
-    knownSymbols   = Map.fromList [ (0x0000, "RST0")
-                                  , (0x0008, "RST1")
-                                  , (0x0010, "RST2")
-                                  , (0x0018, "RST3")
-                                  , (0x0020, "RST4")
-                                  , (0x0028, "RST5")
-                                  , (0x0030, "RST6")
-                                  , (0x0038, "RST7")
-                                  ]
