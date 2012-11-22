@@ -8,10 +8,11 @@ module Z80.DisasmOutput
 
 -- import Debug.Trace
 
+import Data.Int
 import Data.Char
 import Data.Label
-import Data.ByteString.Char8 (ByteString)
-import qualified Data.ByteString.Char8 as BC
+import Data.ByteString.Lazy.Char8 (ByteString)
+import qualified Data.ByteString.Lazy.Char8 as BC
 import Data.Sequence (ViewL(..), viewl)
 import qualified Data.Map as Map
 import Data.Vector.Unboxed (Vector)
@@ -96,12 +97,20 @@ formatBytes :: Vector Z80word
 formatBytes bytes = padTo lenInsBytes $ BC.intercalate " " [ upperHex x | x <- DVU.toList bytes ]
 
 -- Lengths of various output columns:
-lenInsBytes, lenAsChars, lenSymLabel, lenInstruction, lenMnemonic :: Int
 
+lenInsBytes :: Int64
 lenInsBytes = (lenAsChars * 3)          -- ^ 8 bytes max to dump, 3 spaces per byte
+
+lenAsChars :: Int64
 lenAsChars = 8                          -- ^ 8 characters, as the bytes are dumped as characters
+
+lenSymLabel :: Int64
 lenSymLabel = BC.length("XXXXXXXXXXXX") + 2     -- ^ Label colum is 8 characters plus ": "
+
+lenInstruction :: Int64
 lenInstruction = 24
+
+lenMnemonic :: Int64
 lenMnemonic = 8
 
 formatInstruction :: Z80Disassembly
@@ -110,11 +119,13 @@ formatInstruction :: Z80Disassembly
 
 formatInstruction _dstate (Z80undef _) = zeroOperands "???"
 formatInstruction _dstate (LD8 x) = oneOperand "LD" x
-formatInstruction _dstate (LDA x) = oneOperand "LD" x
-formatInstruction _dstate (STA x) = oneOperand "LD" x
+formatInstruction _dstate (LDA x) = ("LD", (accumLoadStore x False))
+formatInstruction _dstate (STA x) = ("LD", (accumLoadStore x True))
 formatInstruction _dstate (LD16 r imm) = twoOperands "LD" r imm
 formatInstruction _dstate (STHL addr) = ("LD", BC.append "(" (BC.append (formatOperand addr) "), HL"))
 formatInstruction _dstate (LDHL addr) = ("LD", BC.append "HL, (" (BC.append (formatOperand addr) ")"))
+formatInstruction _dstate (LD16Indirect rp addr) = ("LD", indirect16LoadStore rp addr False)
+formatInstruction _dstate (ST16Indirect addr rp) = ("LD", indirect16LoadStore rp addr True)
 formatInstruction _dstate (INC r) = oneOperand "INC" r
 formatInstruction _dstate (DEC r) = oneOperand "DEC" r
 formatInstruction _dstate (INC16 r) = oneOperand "INC" r
@@ -172,6 +183,12 @@ formatInstruction _dstate (SRL r) = oneOperand "SRL" r
 formatInstruction _dstate (BIT bit r) = twoOperands "BIT" bit r
 formatInstruction _dstate (RES bit r) = twoOperands "RES" bit r
 formatInstruction _dstate (SET bit r) = twoOperands "SET" bit r
+formatInstruction _dstate NEG = zeroOperands "NEG"
+formatInstruction _dstate RETI = zeroOperands "RETI"
+formatInstruction _dstate RETN = zeroOperands "RETN"
+formatInstruction _dstate (IM mode) = oneOperand "IM" mode
+formatInstruction _dstate RLD = zeroOperands "RLD"
+formatInstruction _dstate RRD = zeroOperands "RRD"
 formatInstruction _dstate LDI = zeroOperands "LDI"
 formatInstruction _dstate CPI = zeroOperands "CPI"
 formatInstruction _dstate INI = zeroOperands "INI"
@@ -239,6 +256,46 @@ twoOperandAddr mne op1 addr dstate = (mne, BC.concat [ formatOperand op1
                                                      ]
                                      )
 
+-- | Output an accumulator load or store
+accumLoadStore :: AccumLoadStore                -- ^ Operand to output
+               -> Bool                          -- ^ True = store, False = load
+               -> ByteString
+accumLoadStore operand loadStore =
+  let arg1 = case operand of
+               BCIndirect           -> "(BC)"
+               DEIndirect           -> "(DE)"
+               (Imm16Indirect addr) -> BC.concat [ "("
+                                                 , formatOperand addr
+                                                 , ")"
+                                                 ]
+               IReg                 -> "I"
+               RReg                 -> "R"
+  in  if loadStore then
+        BC.append arg1 ", A"
+      else
+        BC.append "A, " arg1
+
+-- | Output a 16-bit register indirect load/store
+indirect16LoadStore :: RegPairSP
+                    -> Z80addr
+                    -> Bool
+                    -> ByteString
+indirect16LoadStore rp addr loadStore =
+  let rp'   = formatOperand rp
+      addr' = formatOperand addr
+  in  if loadStore then
+        BC.concat [ "("
+                  , addr'
+                  , "), "
+                  , rp'
+                  ]
+      else
+        BC.concat [ rp'
+                  , ", ("
+                  , addr'
+                  , ")"
+                  ]
+
 class DisOperandFormat x where
   formatOperand :: x -> ByteString
 
@@ -254,20 +311,6 @@ instance DisOperandFormat OperLD8 where
   formatOperand (HLIndLoad r)   = BC.append (formatOperand r) ", (HL)"
   formatOperand (IXIndLoad r disp) = BC.append (formatOperand r) (BC.append ", (IX" (BC.append (showDisp disp) ")"))
   formatOperand (IYIndLoad r disp) = BC.append (formatOperand r) (BC.append ", (IY" (BC.append (showDisp disp) ")"))
-
-instance DisOperandFormat OperLDA where
-  formatOperand BCIndirect = "A, (BC)"
-  formatOperand DEIndirect = "A, (DE)"
-  formatOperand (Imm16Indirect addr) = BC.append "A, (" (BC.append (formatOperand addr) ")")
-  formatOperand IReg = "A, I"
-  formatOperand RReg = "A, R"
-
-instance DisOperandFormat OperSTA where
-  formatOperand BCIndirect' = "(BC), A"
-  formatOperand DEIndirect' = "(DE), A"
-  formatOperand (Imm16Indirect' addr) = BC.append "(" (BC.append (formatOperand addr) "), A")
-  formatOperand IReg' = "I, A"
-  formatOperand RReg' = "R, A"
 
 instance DisOperandFormat OperALU where
   formatOperand (ALUimm imm) = formatOperand imm

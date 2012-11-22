@@ -8,8 +8,9 @@ module Machine.Utils
   , makeUpper
   ) where
 
-import Data.ByteString.Char8 (ByteString)
-import qualified Data.ByteString.Char8 as BC
+import Data.Int
+import Data.ByteString.Lazy.Char8 (ByteString)
+import qualified Data.ByteString.Lazy.Char8 as BC
 import Numeric
 import Data.Char
 import Data.Word
@@ -31,12 +32,12 @@ class ShowHex x where
   as0xHexS = BC.unpack . as0xHex
 
 instance ShowHex Word8 where
-  asHex x = let s = showHex x ""
-            in  BC.append (zeroFill 2 s) (BC.pack s)
+  asHex x = let s = BC.pack $ showHex x ""
+            in  BC.append (zeroFill 2 s) s
 
 instance ShowHex Word16 where
-  asHex x = let s = showHex x ""
-            in  BC.append (zeroFill 4 s) (BC.pack s)
+  asHex x = let s = BC.pack $ showHex x ""
+            in  BC.append (zeroFill 4 s) s
 
 instance (ShowHex x) => ShowHex [x] where
   asHex   x = BC.append "[" $ asHexList (asHex)   x BC.empty
@@ -53,18 +54,19 @@ asHexList asHexF (x:xs) s = BC.append (asHexF x) (BC.append ", " (asHexList asHe
 
 -- | Zero fill the front of a number, up to a given width
 zeroFill :: Int
-         -> String
          -> ByteString
-zeroFill width s = let l = length s
-                   in  if (l < width) then
-                         BC.replicate (width - l) '0'
+         -> ByteString
+zeroFill width s = let l = BC.length s
+                       width' = fromIntegral width :: Int64
+                   in  if (l < width') then
+                         BC.replicate (width' - l) '0'
                        else
                          BC.empty
 
 -- | Utility function that right pads the 'ByteString' with spaces up to a
 -- given width. Nothing is done if the 'ByteString' is already longer than
 -- the given width.
-padTo :: Int                                    -- ^ Width
+padTo :: Int64                                  -- ^ Width
       -> ByteString                             -- ^ The incoming byte string
       -> ByteString                             -- ^ The resulting byte string
 padTo width s = let l = BC.length s

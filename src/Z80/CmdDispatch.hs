@@ -23,7 +23,7 @@ import System.IO
 import System.Console.GetOpt
 import Control.DeepSeq
 import Control.Exception
-import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy.Char8 as BS
 import Data.Maybe
 import Data.List (foldl')
 import qualified Data.Vector.Unboxed as DVU

@@ -16,7 +16,7 @@ import qualified Data.Map as Map
 import Data.Sequence (Seq)
 import qualified Data.Sequence as DS
 import Data.Vector.Unboxed (Vector)
-import Data.ByteString (ByteString)
+import Data.ByteString.Lazy (ByteString)
 
 -- | 'DisasmElement' is a dissassembly element: a disassembled instruction (with corresponding address and instruction
 -- words) or pseudo operation.
@@ -34,8 +34,8 @@ data Disassembly addrType wordType instructionType pseudoOpType =
   { _labelNum :: Int                                                                -- ^ A general-purpose label counter, useful
                                                                                     -- for local labels, e.g., "L1", "L2", etc.,
                                                                                     -- that are inserted into the symbol table.
-  , _symbolTab :: Map addrType ByteString                                           -- ^ The symbol table for address references in
-                                                                                    -- 'disasmSeq'
+  , _symbolTab :: Map addrType ByteString                                           -- ^ The symbol table mapping between addresses
+                                                                                    -- and symbol names in 'disasmSeq'
   , _disasmSeq :: Seq (DisasmElement addrType wordType instructionType pseudoOpType) -- ^ The sequence of tuples, each of which is
                                                                                     -- an address, words corresponding to the
                                                                                     -- disassembled instruction, and the

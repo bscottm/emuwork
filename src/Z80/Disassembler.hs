@@ -29,8 +29,8 @@ import Data.Sequence ((|>))
 import Data.Vector.Unboxed (Vector, (!?), (!))
 import qualified Data.Vector.Unboxed as DVU
 import qualified Data.Map as Map
-import Data.ByteString.Char8 (ByteString)
-import qualified Data.ByteString.Char8 as BC
+import Data.ByteString.Lazy.Char8 (ByteString)
+import qualified Data.ByteString.Lazy.Char8 as BC
 import Data.Int
 import Data.Bits
 
@@ -195,10 +195,10 @@ group0decode image pc opc
                1                  -> (pc, ADDHL (pairSP p))
                _otherwise         -> undefined
   | z == 2, q == 0 = case p of
-                       0          -> (pc, STA BCIndirect')
-                       1          -> (pc, STA DEIndirect')
+                       0          -> (pc, STA BCIndirect)
+                       1          -> (pc, STA DEIndirect)
                        2          -> (pc + 2, STHL (getAddr image (pc + 1)))
-                       3          -> (pc + 2, STA (Imm16Indirect' (getAddr image (pc + 1))))
+                       3          -> (pc + 2, STA (Imm16Indirect (getAddr image (pc + 1))))
                        _otherwise -> undefined
   | z == 2, q == 1 = case p of
                        0          -> (pc, LDA BCIndirect)
@@ -339,12 +339,33 @@ edPrefixDecode image pc = case (shiftR opc 6) .&. 3 of
                             1         -> case z of
                                            0 -> invalid
                                            1 -> invalid
-                                           2 -> invalid
-                                           3 -> invalid
-                                           4 -> invalid
-                                           5 -> invalid
-                                           6 -> invalid
-                                           7 -> invalid
+                                           2 -> let rp = pairSP p
+                                                in  (pc + 1, if q == 0 then
+                                                               SBCHL rp
+                                                             else
+                                                               ADCHL rp)
+                                           3 -> let rp    = pairSP p
+                                                    addr  = (getAddr image (pc + 1))
+                                                in  if q == 0 then
+                                                  (pc + 2, ST16Indirect addr rp)
+                                                else
+                                                  (pc + 2, LD16Indirect rp addr)
+                                           4 -> (pc + 1, NEG)
+                                           5 -> (pc + 1, if y == 1 then
+                                                           RETI
+                                                         else
+                                                           RETN)
+                                                  
+                                           6 -> (pc + 1, IM (interruptMode IntMap.! (fromIntegral y)))
+                                           7 -> case y of
+                                                  0 -> (pc + 1, (STA IReg))
+                                                  1 -> (pc + 1, (STA RReg))
+                                                  2 -> (pc + 1, (LDA IReg))
+                                                  3 -> (pc + 1, (LDA RReg))
+                                                  4 -> (pc + 1, RLD)
+                                                  5 -> (pc + 1, RRD)
+                                                  6 -> invalid
+                                                  7 -> invalid
                             2         -> if z <= 3 && y >= 4 then
                                            -- Increment, Increment-Repeat instructions
                                            (pc + 1, ((incdecOps IntMap.! (fromIntegral y)) IntMap.! (fromIntegral z)))
@@ -355,10 +376,12 @@ edPrefixDecode image pc = case (shiftR opc 6) .&. 3 of
   where
     opc = getNextWord image pc
     z = (opc .&. 7)
-    y = (shiftR opc 3) .&. 7
+    y = (opc `shiftR` 3) .&. 7
+    p = (y `shiftR` 1) .&. 3
+    q = y .&. 1
     invalid = (pc + 1, Z80undef [0xed, opc])
 
--- |
+-- | Block/compare/input/output increment-decrement lookup table
 incdecOps :: IntMap (IntMap Instruction)
 incdecOps = IntMap.fromList [ (4, IntMap.fromList [ (0, LDI )
                                                   , (1, CPI )
@@ -381,6 +404,19 @@ incdecOps = IntMap.fromList [ (4, IntMap.fromList [ (0, LDI )
                                                   , (3, OTDR)
                                                   ] )
                             ]
+
+-- | Convert embedded interrupt mode to actual interrupt mode 
+interruptMode :: IntMap Z80word
+interruptMode = IntMap.fromList [ (0, 0)
+                                , (1, 0)        -- Could be either 0 or 1, actually
+                                , (2, 1)
+                                , (3, 2)
+                                , (4, 0)
+                                , (5, 0)        -- Could be either 0 or 1, actually
+                                , (6, 1)
+                                , (7, 2)
+                                ]
+
 -- | Convert 16-bit register pair/SP index to a 'RegPairSP' operand
 pairSP :: Z80word
        -> RegPairSP

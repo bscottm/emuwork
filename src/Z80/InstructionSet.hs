@@ -6,8 +6,7 @@ module Z80.InstructionSet
   , Z80reg8(..)
   , Z80reg16(..)
   , OperLD8(..)
-  , OperLDA(..)
-  , OperSTA(..)
+  , AccumLoadStore(..)
   , OperALU(..)
   , RegPairSP(..)
   , RegPairAF(..)
@@ -29,31 +28,19 @@ data Instruction where
   -- LD r, (IY + d)
   LD8 :: OperLD8
        -> Instruction
-{-
-  -- LD (HL), r
-  -- LD (IX + d), r
-  -- LD (IY + d), r
-  ST8 :: OperST8 Z80reg8
-      -> Instruction
-  -- LD (HL), n
-  -- LD (IX + d), n
-  -- LD (IY + d), n
-  ST8I :: OperST8 Z80word
-       -> Instruction
--}
   -- LD A, (BC)
   -- LD A, (DE)
   -- LD A, (nn)
   -- LD A, I
   -- LD A, R
-  LDA :: OperLDA
+  LDA :: AccumLoadStore
       -> Instruction
   -- LD (BC), A
   -- LD (DE), A
   -- LD (nn), A
   -- LD I, A
   -- LD R, A
-  STA :: OperSTA
+  STA :: AccumLoadStore
       -> Instruction
   -- LD rp, nn
   LD16 :: RegPairSP
@@ -65,20 +52,26 @@ data Instruction where
        -> Instruction
   LDHL :: Z80addr
        -> Instruction
-  -- INC/DEC BC
-  -- INC/DEC DE
-  -- INC/DEC HL
-  -- INC/DEC SP
+  -- 16-bit indirect loads and stores, e.g. LD BC, (4000H) [load BC from the contents of 0x4000]
+  LD16Indirect :: RegPairSP
+               -> Z80addr
+               -> Instruction
+  ST16Indirect :: Z80addr
+               -> RegPairSP
+               -> Instruction
+  -- Increment/decrement registers
   INC, DEC :: Z80reg8
            -> Instruction
   INC16, DEC16 :: RegPairSP
                -> Instruction
   --- ALU group: ADD, ADC, SUB, SBC, AND, XOR, OR and CP
-  -- ADD HL, rp here too.
+  -- ADD HL, rp and ADC/SBC HL, rp
   ADD, ADC, SUB, SBC, AND, XOR, OR, CP :: OperALU
                                        -> Instruction
   ADDHL :: RegPairSP
         -> Instruction
+  ADCHL, SBCHL :: RegPairSP
+               -> Instruction
   -- HALT; NOP; EX AF, AF'; DI; EI; EXX; JP HL; LD SP, HL
   HALT, NOP, EXAFAF', EXDEHL, EXSPHL, DI, EI, EXX, JPHL, LDSPHL :: Instruction
   -- Accumulator ops: RLCA, RRCA, RLA, RRA, DAA, CPL, SCF, CCF
@@ -124,6 +117,20 @@ data Instruction where
                 -> Z80reg8
                 -> Instruction
 
+  -- 0xed prefix instructions:
+  -- Negate accumulator
+  NEG :: Instruction
+
+  -- RETI, RETN: Return from interrupt, non-maskable interrupt
+  RETI, RETN :: Instruction
+
+  -- Interrupt mode
+  IM :: Z80word
+     -> Instruction
+
+  -- Rotate right/left, decimal
+  RRD, RLD :: Instruction
+
   -- Increment, Increment-Repeat instructions
   LDI, CPI, INI, OUTI, LDD, CPD, IND, OUTD, LDIR, CPIR, INIR, OTIR, LDDR, CPDR, INDR, OTDR :: Instruction
 	
@@ -139,6 +146,8 @@ instance Show Instruction where
 
   show (LDHL addr) = "LDHL(" ++ (as0xHexS addr) ++ ")"
   show (STHL addr) = "STHL(" ++ (as0xHexS addr) ++ ")"
+  show (LD16Indirect rp addr) = "LD16Indirect(" ++ (show rp) ++ "," ++ (as0xHexS addr) ++ ")"
+  show (ST16Indirect addr rp) = "LD16Indirect(" ++ (as0xHexS addr) ++ "," ++ (show rp) ++ ")"
 
   show HALT = "HALT"
   show NOP = "NOP"
@@ -208,6 +217,16 @@ instance Show Instruction where
   show(RES bit r) = "RES(" ++ (show bit) ++ "," ++ (show r) ++ ")"
   show(SET bit r) = "SET(" ++ (show bit) ++ "," ++ (show r) ++ ")"
 
+  show NEG = "NEG"
+
+  show RETI = "RETI"
+  show RETN = "RETN"
+
+  show (IM mode) = "IM(" ++ (show mode) ++ ")"
+
+  show RLD = "RLD"
+  show RRD = "RRD"
+
   show LDI = "LDI"
   show CPI = "CPI"
   show INI = "INI"
@@ -253,48 +272,21 @@ instance Show OperLD8 where
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
--- | 8-bit register store group operands
-data OperST8 x where
-  HLIndStore :: x
-             -> OperST8 x
-  IXIndStore :: x
-             -> Z80word
-             -> OperST8 x
-  IYIndStore :: x
-             -> Z80word
-             -> OperST8 x
-
--- | Accumulator load operands
-data OperLDA where
-  BCIndirect    :: OperLDA
-  DEIndirect    :: OperLDA
+-- | Accumulator load/store operands
+data AccumLoadStore where
+  BCIndirect    :: AccumLoadStore
+  DEIndirect    :: AccumLoadStore
   Imm16Indirect :: Z80addr
-                -> OperLDA
-  IReg          :: OperLDA
-  RReg          :: OperLDA
+                -> AccumLoadStore
+  IReg          :: AccumLoadStore
+  RReg          :: AccumLoadStore
 
-instance Show OperLDA where
-  show BCIndirect           = "[BC]"
-  show DEIndirect           = "[DE]"
-  show (Imm16Indirect addr) = "[" ++ (as0xHexS addr) ++ "]"
-  show IReg                 = "I"
-  show RReg                 = "R"
-
--- | Accumulator store operands
-data OperSTA where
-  BCIndirect'    :: OperSTA
-  DEIndirect'    :: OperSTA
-  Imm16Indirect' :: Z80addr
-                 -> OperSTA
-  IReg'          :: OperSTA
-  RReg'          :: OperSTA
-
-instance Show OperSTA where
-  show BCIndirect'           = "[BC]"
-  show DEIndirect'           = "[DE]"
-  show (Imm16Indirect' addr) = "[" ++ (as0xHexS addr) ++ "]"
-  show IReg'                 = "I"
-  show RReg'                 = "R"
+instance Show AccumLoadStore where
+  show BCIndirect            = "[BC]"
+  show DEIndirect            = "[DE]"
+  show (Imm16Indirect addr)  = "[" ++ (as0xHexS addr) ++ "]"
+  show IReg                  = "I"
+  show RReg                  = "R"
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
