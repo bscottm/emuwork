@@ -31,16 +31,16 @@ data DisasmElement addrType wordType instructionType pseudoOptype where
 -- | A 'Disassembly' encapsulates the disassembler state. 
 data Disassembly addrType wordType instructionType pseudoOpType =
   Disassembly
-  { _labelNum :: Int                                                                -- ^ A general-purpose label counter, useful
-                                                                                    -- for local labels, e.g., "L1", "L2", etc.,
-                                                                                    -- that are inserted into the symbol table.
-  , _symbolTab :: Map addrType ByteString                                           -- ^ The symbol table mapping between addresses
-                                                                                    -- and symbol names in 'disasmSeq'
-  , _disasmSeq :: Seq (DisasmElement addrType wordType instructionType pseudoOpType) -- ^ The sequence of tuples, each of which is
-                                                                                    -- an address, words corresponding to the
-                                                                                    -- disassembled instruction, and the
-                                                                                    -- disassembled instruction.
-
+  { -- | A general-purpose label counter, useful for local labels, e.g., "L1", "L2", etc., that are inserted into the symbol table.
+    _labelNum :: Int
+  -- | Predicate: Is the address in the disassembler's range? Note that the default function always returns 'True'.
+  , _addrInDisasmRange :: addrType              -- ^ The address to test
+                       -> Bool                  -- ^ 'True' if in disassembler's range, 'False' otherwise.
+  -- | The symbol table mapping between addresses and symbol names in 'disasmSeq'
+  , _symbolTab :: Map addrType ByteString
+  -- | The sequence of tuples, each of which is an address, words corresponding to the disassembled instruction, and the
+  -- disassembled instruction.
+  , _disasmSeq :: Seq (DisasmElement addrType wordType instructionType pseudoOpType)
   }
 
 -- |  The 'Disassembler' provides a class for all disassemblers. Note that this
@@ -62,4 +62,4 @@ mkLabels [ ''Disassembly ]
 
 -- | Make an initial 'Disassembly' record
 mkInitialDisassembly :: Disassembly addrType wordType instructionType pseudoOpType
-mkInitialDisassembly = Disassembly 0 Map.empty DS.empty
+mkInitialDisassembly = Disassembly 0 (\_ -> True) Map.empty DS.empty

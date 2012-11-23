@@ -1,0 +1,5 @@
+:set -XGADTs -XFlexibleInstances -XMultiParamTypeClasses -XRankNTypes -XTypeSynonymInstances -XOverloadedStrings -XTemplateHaskell
+:set -XTypeOperators
+:set -i.:../src
+:load RomDisassembly.hs
+let doTrs80Rom = trs80Rom "../trs80-roms/level2.rom"

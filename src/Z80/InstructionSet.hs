@@ -8,6 +8,8 @@ module Z80.InstructionSet
   , OperLD8(..)
   , AccumLoadStore(..)
   , OperALU(..)
+  , OperExtendedALU(..)
+  , OperIO(..)
   , RegPairSP(..)
   , RegPairAF(..)
   ) where
@@ -66,12 +68,16 @@ data Instruction where
                -> Instruction
   --- ALU group: ADD, ADC, SUB, SBC, AND, XOR, OR and CP
   -- ADD HL, rp and ADC/SBC HL, rp
-  ADD, ADC, SUB, SBC, AND, XOR, OR, CP :: OperALU
-                                       -> Instruction
-  ADDHL :: RegPairSP
-        -> Instruction
-  ADCHL, SBCHL :: RegPairSP
-               -> Instruction
+  SUB, AND, XOR, OR, CP :: OperALU
+                        -> Instruction
+
+  ADD :: OperExtendedALU
+      -> Instruction
+  ADC :: OperExtendedALU
+      -> Instruction
+  SBC :: OperExtendedALU
+      -> Instruction
+
   -- HALT; NOP; EX AF, AF'; DI; EI; EXX; JP HL; LD SP, HL
   HALT, NOP, EXAFAF', EXDEHL, EXSPHL, DI, EI, EXX, JPHL, LDSPHL :: Instruction
   -- Accumulator ops: RLCA, RRCA, RLA, RRA, DAA, CPL, SCF, CCF
@@ -90,7 +96,7 @@ data Instruction where
        -> Z80addr
        -> Instruction
   -- I/O instructions
-  IN, OUT :: Z80word
+  IN, OUT :: OperIO
           -> Instruction
   -- Subroutine call
   CALL :: Z80addr
@@ -184,15 +190,14 @@ instance Show Instruction where
   show (XOR op) = "XOR(" ++ (show op) ++ ")"
   show (OR op) = "OR(" ++ (show op) ++ ")"
   show (CP op) = "CP(" ++ (show op) ++ ")"
-  show (ADDHL rp) = "ADDHL(" ++ (show rp) ++ ")"
 
   show (INC reg) = "INC(" ++ (show reg) ++ ")"
   show (DEC reg) = "DEC(" ++ (show reg) ++ ")"
   show (INC16 rp) = "INC16(" ++ (show rp) ++ ")"
   show (DEC16 rp) = "DEC16(" ++ (show rp) ++ ")"
 
-  show (IN port) = "IN(" ++ (as0xHexS port) ++ ")"
-  show (OUT port) = "OUT(" ++ (as0xHexS port) ++ ")"
+  show (IN port) = "IN(" ++ (show port) ++ ")"
+  show (OUT port) = "OUT(" ++ (show port) ++ ")"
 
   show (CALL addr) = "CALL(" ++ (as0xHexS addr) ++ ")"
   show (CALLCC cc addr) = "CALLCC(" ++ (show cc) ++ "," ++ (as0xHexS addr) ++ ")"
@@ -205,17 +210,17 @@ instance Show Instruction where
 
   show (RST nn) = "RST(" ++ (show nn) ++ ")"
   
-  show(RLC r) = "RLC(" ++ (show r) ++ ")"
-  show(RRC r) = "RRC(" ++ (show r) ++ ")"
-  show(RL r) = "RL(" ++ (show r) ++ ")"
-  show(RR r) = "RR(" ++ (show r) ++ ")"
-  show(SLA r) = "SLA(" ++ (show r) ++ ")"
-  show(SRA r) = "SRA(" ++ (show r) ++ ")"
-  show(SLL r) = "SLL(" ++ (show r) ++ ")"
-  show(SRL r) = "SRL(" ++ (show r) ++ ")"
-  show(BIT bit r) = "BIT(" ++ (show bit) ++ "," ++ (show r) ++ ")"
-  show(RES bit r) = "RES(" ++ (show bit) ++ "," ++ (show r) ++ ")"
-  show(SET bit r) = "SET(" ++ (show bit) ++ "," ++ (show r) ++ ")"
+  show (RLC r) = "RLC(" ++ (show r) ++ ")"
+  show (RRC r) = "RRC(" ++ (show r) ++ ")"
+  show (RL r) = "RL(" ++ (show r) ++ ")"
+  show (RR r) = "RR(" ++ (show r) ++ ")"
+  show (SLA r) = "SLA(" ++ (show r) ++ ")"
+  show (SRA r) = "SRA(" ++ (show r) ++ ")"
+  show (SLL r) = "SLL(" ++ (show r) ++ ")"
+  show (SRL r) = "SRL(" ++ (show r) ++ ")"
+  show (BIT bit r) = "BIT(" ++ (show bit) ++ "," ++ (show r) ++ ")"
+  show (RES bit r) = "RES(" ++ (show bit) ++ "," ++ (show r) ++ ")"
+  show (SET bit r) = "SET(" ++ (show bit) ++ "," ++ (show r) ++ ")"
 
   show NEG = "NEG"
 
@@ -308,6 +313,31 @@ instance Show OperALU where
   show ALUHLindirect = "(HL)"
   show (ALUIXindirect disp) = "(IX " ++ (showDisp disp) ++ ")"
   show (ALUIYindirect disp) = "(IX " ++ (showDisp disp) ++ ")"
+
+-- | ALU operations that can also extend to use HL and register pair
+data OperExtendedALU where
+  OrdinaryALU  :: OperALU
+               -> OperExtendedALU
+  HLRegPairALU :: RegPairSP
+               -> OperExtendedALU
+
+instance Show OperExtendedALU where
+  show (OrdinaryALU op) = show op
+  show (HLRegPairALU rp) = "HL," ++ (show rp)
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+data OperIO where
+  PortImm :: Z80word
+          -> OperIO
+  CIndIO  :: Z80reg8
+          -> OperIO
+  CIndIO0 :: OperIO
+
+instance Show OperIO where
+  show (PortImm port) = as0xHexS port
+  show (CIndIO reg8)  = show reg8 ++ ",(C)"
+  show (CIndIO0)      = "(C)"
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 

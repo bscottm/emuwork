@@ -162,19 +162,23 @@ disasm theMem origin thePc lastpc dis
                                    (JR addr)       -> jumpLabel addr theDState
                                    (JRCC _cc addr) -> jumpLabel addr theDState
                                    (CALL addr)     -> subLabel  addr theDState
+                                   (JP addr)       -> jumpLabel addr theDState
+                                   (JPCC _cc addr) -> jumpLabel addr theDState
                                    _otherwise      -> theDState
     -- Create a label signifying the destination of a jump
     jumpLabel addr theDState = let symTab = get symbolTab theDState
-                              in  if Map.notMember addr symTab then
-                                    let label = BC.append "L" (BC.pack . show $ get labelNum theDState)
-                                        updsyms = Map.insert addr label symTab
-                                    in  set symbolTab updsyms $ modify labelNum (+ 1) theDState
-                                  else
-                                    theDState   -- No change to the disassembler state
-  -- Create a label signifying the destination of a subrouting
+                               in  if ((get addrInDisasmRange theDState) addr) && Map.notMember addr symTab then
+                                     let label = BC.cons 'L' (BC.pack . show $ get labelNum theDState)
+                                         updsyms = Map.insert addr label symTab
+                                     in set symbolTab updsyms $ modify labelNum (+ 1) theDState
+                                   else
+                                     theDState   -- No change to the disassembler state
+    -- Create a label signifying the destination of a subrouting
     subLabel addr theDState = let symTab = get symbolTab theDState
-                              in  if Map.notMember addr symTab then
-                                    theDState
+                              in  if ((get addrInDisasmRange theDState) addr) && Map.notMember addr symTab then
+                                    let label = BC.append "SUB" (BC.pack . show $ get labelNum theDState)
+                                        updsyms = Map.insert addr label symTab
+                                    in set symbolTab updsyms $ modify labelNum (+ 1) theDState
                                   else
                                     theDState
 
@@ -192,7 +196,7 @@ group0decode image pc opc
                _otherwise         -> displacementInstruction image pc $ JRCC (condC (y - 4))
   | z == 1 = case q of
                0                  -> (pc + 2, LD16 (pairSP p) (getAddr image (pc + 1)))
-               1                  -> (pc, ADDHL (pairSP p))
+               1                  -> (pc, ADD $ HLRegPairALU (pairSP p))
                _otherwise         -> undefined
   | z == 2, q == 0 = case p of
                        0          -> (pc, STA BCIndirect)
@@ -246,20 +250,17 @@ group1decode opc
 -- | ALU instruction decode (group 2)
 group2decode :: Z80word
              -> Instruction
-group2decode opc = let aluOp = aluOps IntMap.! (fromIntegral $ (shiftR opc 3) .&. 7)
-                   in  (aluOp . aluReg8) $ (opc .&. 7)
-
--- | ALU operation map (reduces pattern matching)
-aluOps :: IntMap (OperALU -> Instruction)
-aluOps = IntMap.fromList [ (0, ADD)
-                         , (1, ADC)
-                         , (2, SUB)
-                         , (3, SBC)
-                         , (4, AND)
-                         , (5, XOR)
-                         , (6, OR)
-                         , (7, CP)
-                         ]
+group2decode opc = let reg      =  (opc .&. 7)
+                   in  case opc `shiftR` 3 .&. 7 of 
+                         0          -> (ADD . OrdinaryALU . aluReg8) reg
+                         1          -> (ADC . OrdinaryALU . aluReg8) reg
+                         2          -> (SUB . aluReg8) reg
+                         3          -> (SBC . OrdinaryALU . aluReg8) reg
+                         4          -> (AND . aluReg8) reg
+                         5          -> (XOR . aluReg8) reg
+                         6          -> (OR  . aluReg8) reg
+                         7          -> (CP  . aluReg8) reg
+                         _otherwise -> undefined
 
 -- | Group 3 instructions
 group3decode :: Z80memory                       -- ^ Memory image
@@ -279,8 +280,8 @@ group3decode image pc opc
   | z == 3          = case y of
                         0          -> (pc + 2, JP (getAddr image (pc + 1)))
                         1          -> bitopsDecode image pc
-                        2          -> (pc + 1, OUT (getNextWord image pc))
-                        3          -> (pc + 1, IN (getNextWord image pc))
+                        2          -> (pc + 1, (OUT . PortImm) $ getNextWord image pc)
+                        3          -> (pc + 1, (IN . PortImm)  $ getNextWord image pc)
                         4          -> (pc, EXSPHL)
                         5          -> (pc, EXDEHL)
                         6          -> (pc, DI)
@@ -294,8 +295,18 @@ group3decode image pc opc
                          2          -> edPrefixDecode image pc
                          3          -> (pc, Z80undef [opc]) -- fd prefix
                          _otherwise -> undefined
-  | z == 6           = let aluOp = aluOps IntMap.! (fromIntegral y)
-                       in  (pc + 1, aluOp (ALUimm (getNextWord image pc)))
+  | z == 6           = let imm = ALUimm $ (getNextWord image pc)
+                       in  (pc + 1, case y of
+                                      0          -> (ADD . OrdinaryALU) $ imm
+                                      1          -> (ADC . OrdinaryALU) $ imm
+                                      2          -> SUB imm
+                                      3          -> (SBC . OrdinaryALU) $ imm
+                                      4          -> AND imm
+                                      5          -> XOR imm
+                                      6          -> OR  imm
+                                      7          -> CP  imm
+                                      _otherwise -> undefined
+                             )
   | z == 7           = (pc, RST y)
   | otherwise        = (pc, Z80undef [opc])
   where
@@ -337,19 +348,30 @@ edPrefixDecode :: Z80memory
 edPrefixDecode image pc = case (shiftR opc 6) .&. 3 of
                             0         -> invalid
                             1         -> case z of
-                                           0 -> invalid
-                                           1 -> invalid
+                                           0 -> (pc + 1, IN $ if y /= 6 then
+                                                                CIndIO $ reg8 y
+                                                              else
+                                                                CIndIO0
+                                                )
+                                           1 -> (pc + 1, OUT $ if y /= 6 then
+                                                                 CIndIO $ reg8 y
+                                                               else
+                                                                 CIndIO0
+                                                )
                                            2 -> let rp = pairSP p
-                                                in  (pc + 1, if q == 0 then
-                                                               SBCHL rp
-                                                             else
-                                                               ADCHL rp)
+                                                    ins 
+                                                      | q == 0    = SBC
+                                                      | q == 1    = ADC
+                                                      | otherwise = undefined
+                                                in  (pc + 1, (ins . HLRegPairALU) rp)
                                            3 -> let rp    = pairSP p
                                                     addr  = (getAddr image (pc + 1))
-                                                in  if q == 0 then
-                                                  (pc + 2, ST16Indirect addr rp)
-                                                else
-                                                  (pc + 2, LD16Indirect rp addr)
+                                                    ins
+                                                      | q == 0    = ST16Indirect addr rp
+                                                      | q == 1    = LD16Indirect rp addr
+                                                      | otherwise = undefined
+                                                in (pc + 2, ins)
+
                                            4 -> (pc + 1, NEG)
                                            5 -> (pc + 1, if y == 1 then
                                                            RETI
@@ -358,21 +380,23 @@ edPrefixDecode image pc = case (shiftR opc 6) .&. 3 of
                                                   
                                            6 -> (pc + 1, IM (interruptMode IntMap.! (fromIntegral y)))
                                            7 -> case y of
-                                                  0 -> (pc + 1, (STA IReg))
-                                                  1 -> (pc + 1, (STA RReg))
-                                                  2 -> (pc + 1, (LDA IReg))
-                                                  3 -> (pc + 1, (LDA RReg))
-                                                  4 -> (pc + 1, RLD)
-                                                  5 -> (pc + 1, RRD)
-                                                  6 -> invalid
-                                                  7 -> invalid
+                                                  0          -> (pc + 1, (STA IReg))
+                                                  1          -> (pc + 1, (STA RReg))
+                                                  2          -> (pc + 1, (LDA IReg))
+                                                  3          -> (pc + 1, (LDA RReg))
+                                                  4          -> (pc + 1, RLD)
+                                                  5          -> (pc + 1, RRD)
+                                                  6          -> invalid
+                                                  7          -> invalid
+                                                  _otherwise -> error ("edPrefixDecode, x = 1, z = 7: invalid y = " ++ (show y))
+                                           _otherwise -> error ("edPrefixDecode, x = 1: undefined/invalid z = " ++ (show z))
                             2         -> if z <= 3 && y >= 4 then
                                            -- Increment, Increment-Repeat instructions
                                            (pc + 1, ((incdecOps IntMap.! (fromIntegral y)) IntMap.! (fromIntegral z)))
                                          else
                                            invalid
                             3         -> invalid
-                            _otherise -> invalid
+                            _otherise -> error "edPrefixDecode: invalid x"
   where
     opc = getNextWord image pc
     z = (opc .&. 7)

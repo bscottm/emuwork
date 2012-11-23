@@ -29,21 +29,75 @@ mkLabel ''Disassembly
 
 -- | The disassembly output function
 outputDisassembly :: Z80Disassembly -> ByteString
-outputDisassembly dis = doOutput (viewl (get disasmSeq dis)) BC.empty
+outputDisassembly dstate = BC.append (doOutput (viewl (get disasmSeq dstate)) BC.empty)
+                                     (formatSymTab (get symbolTab dstate))
   where
+    -- | Recurse through the left view
     doOutput EmptyL acc = acc
     doOutput (left :< rest) acc = formatElem left (doOutput (viewl rest) acc)
 
-    formatElem thing acc = case thing of
-                             (DisasmInst addr bytes ins) -> BC.concat [ formatLinePrefix bytes addr dis
-                                                                      , padTo lenInstruction $ formatIns ins
-                                                                      , "\n"
-                                                                      , acc
-                                                                      ]
-                             (DisasmPseudo pseudo)       -> formatPseudo pseudo dis acc
-      where
-        formatIns ins = let (mnemonic, opers) = formatInstruction dis ins
-                        in  BC.append (padTo lenMnemonic mnemonic) opers
+    formatElem thing acc = BC.append ( case thing of
+                                         (DisasmInst addr bytes ins) -> BC.concat [ formatLinePrefix bytes addr dstate
+                                                                                  , formatIns ins
+                                                                                  , "\n"
+                                                                                  ]
+                                         (DisasmPseudo pseudo)       -> formatPseudo pseudo dstate
+                                     )
+                                     acc
+
+    formatIns ins = let (mnemonic, opers) = formatInstruction dstate ins
+                    in  padTo lenInstruction $ BC.append (padTo lenMnemonic mnemonic) opers
+
+    formatSymTab symTab = let maxsym    = maxSymLen symTab
+                              totalCols = lenOutputLine `div` (maxsym + extraSymPad)
+                              (_, symsByAddr) = Map.foldlWithKey (symbolsByAddr maxsym totalCols) (0, BC.empty) symTab
+                              (_, symsByName) = Map.foldlWithKey (symbolsByName maxsym totalCols) (0, BC.empty)
+                                                                 (Map.fromList [ (y, x) | (x, y) <- Map.assocs symTab ])
+                          in  BC.concat [ "\n\n"
+                                        , "Symbol Table (alpha):"
+                                        , "\n"
+                                        , symsByName
+                                        , "\n\n"
+                                        , "Symbol Table (numeric):"
+                                        , "\n"
+                                        , symsByAddr
+                                        ]
+
+    -- Extra symbol padding: 4 for the hex address, 3 for " = " and 2 for intercolumn spacing
+    extraSymPad = 4 + 3 + 2
+
+    -- Find maximum symbol name length. Note: Curried form, assumes last parameter is the symbol table (Map Z80addr ByteString)
+    maxSymLen = Map.foldl' (\len str -> if len < BC.length str; then BC.length str; else len) 0
+
+    -- Dump the symbols by address, columnar format
+    symbolsByAddr maxsym nColumns (col, syms) kSym sym =
+      let (newCol, delim) = if col >= nColumns then
+                              (0, "\n")
+                            else
+                              (col + 1, "  ")
+      in ( newCol,
+           BC.concat [ syms
+                     , padTo maxsym sym
+                     , " = "
+                     , upperHex kSym
+                     , delim
+                     ]
+         )
+
+    -- Dump the symbols by name, columnar format
+    symbolsByName maxsym nColumns (col, syms) theSym symAddr =
+      let (newCol, delim) = if col >= nColumns then
+                              (0, "\n")
+                            else
+                              (col + 1, "  ")
+      in ( newCol,
+           BC.concat [ syms
+                     , padTo maxsym theSym
+                     , " = "
+                     , upperHex symAddr
+                     , delim
+                     ]
+         )
 
 -- | Output a formatted address in uppercase hex
 upperHex :: forall operand. ShowHex operand => 
@@ -79,7 +133,10 @@ formatLinePrefix bytes addr dstate =
                   ]
       else BC.concat [ upperHex addr
                      , ": "
-                     , padTo (lenInsBytes + lenAsChars + 3) ""
+                     , padTo lenInsBytes ""
+                     , "|"
+                     , padTo lenAsChars ""
+                     , "| "
                      , label
                      , "\n"
                      , upperHex addr
@@ -99,112 +156,114 @@ formatBytes bytes = padTo lenInsBytes $ BC.intercalate " " [ upperHex x | x <- D
 -- Lengths of various output columns:
 
 lenInsBytes :: Int64
-lenInsBytes = (lenAsChars * 3)          -- ^ 8 bytes max to dump, 3 spaces per byte
+lenInsBytes = (lenAsChars * 3)                  -- ^ 8 bytes max to dump, 3 spaces per byte
 
 lenAsChars :: Int64
-lenAsChars = 8                          -- ^ 8 characters, as the bytes are dumped as characters
+lenAsChars = 8                                  -- ^ 8 characters, as the bytes are dumped as characters
 
 lenSymLabel :: Int64
 lenSymLabel = BC.length("XXXXXXXXXXXX") + 2     -- ^ Label colum is 8 characters plus ": "
 
-lenInstruction :: Int64
+lenInstruction :: Int64                         -- ^ Total length of the instruction+operands output
 lenInstruction = 24
 
-lenMnemonic :: Int64
+lenMnemonic :: Int64                            -- ^ Length of the instruction mnemonic
 lenMnemonic = 8
+
+lenOutputLine :: Int64
+lenOutputLine = lenInsBytes + lenAsChars + 2 + lenSymLabel + lenInstruction
 
 formatInstruction :: Z80Disassembly
                   -> Instruction
                   -> (ByteString, ByteString)
 
-formatInstruction _dstate (Z80undef _) = zeroOperands "???"
-formatInstruction _dstate (LD8 x) = oneOperand "LD" x
-formatInstruction _dstate (LDA x) = ("LD", (accumLoadStore x False))
-formatInstruction _dstate (STA x) = ("LD", (accumLoadStore x True))
-formatInstruction _dstate (LD16 r imm) = twoOperands "LD" r imm
-formatInstruction _dstate (STHL addr) = ("LD", BC.append "(" (BC.append (formatOperand addr) "), HL"))
-formatInstruction _dstate (LDHL addr) = ("LD", BC.append "HL, (" (BC.append (formatOperand addr) ")"))
-formatInstruction _dstate (LD16Indirect rp addr) = ("LD", indirect16LoadStore rp addr False)
-formatInstruction _dstate (ST16Indirect addr rp) = ("LD", indirect16LoadStore rp addr True)
-formatInstruction _dstate (INC r) = oneOperand "INC" r
-formatInstruction _dstate (DEC r) = oneOperand "DEC" r
-formatInstruction _dstate (INC16 r) = oneOperand "INC" r
-formatInstruction _dstate (DEC16 r) = oneOperand "DEC" r
-formatInstruction _dstate (ADD r) = oneOperand "ADD" r
-formatInstruction _dstate (ADC r) = oneOperand "ADC" r
-formatInstruction _dstate (SUB r) = oneOperand "SUB" r
-formatInstruction _dstate (SBC r) = oneOperand "SBC" r
-formatInstruction _dstate (AND r) = oneOperand "AND" r
-formatInstruction _dstate (XOR r) = oneOperand "XOR" r
-formatInstruction _dstate (OR r) = oneOperand "OR" r
-formatInstruction _dstate (CP r) = oneOperand "CP" r
-formatInstruction _dstate (ADDHL r) = ("ADD", BC.append "HL, " $ formatOperand r)
-formatInstruction _dstate HALT = zeroOperands "HALT"
-formatInstruction _dstate NOP = zeroOperands "NOP"
-formatInstruction _dstate EXAFAF' = ("EX", "AF, AF'")
-formatInstruction _dstate EXSPHL = ("EX", "(SP), HL")
-formatInstruction _dstate EXDEHL = ("EX", "DE, HL")
-formatInstruction _dstate DI = zeroOperands "DI"
-formatInstruction _dstate EI = zeroOperands "EI"
-formatInstruction _dstate EXX = zeroOperands "EXX"
-formatInstruction _dstate JPHL = ("JP", "HL")
-formatInstruction _dstate LDSPHL = ("LD", "SP, HL")
-formatInstruction _dstate RLCA = zeroOperands "RLCA"
-formatInstruction _dstate RRCA = zeroOperands "RRCA"
-formatInstruction _dstate RLA = zeroOperands "RLA"
-formatInstruction _dstate RRA = zeroOperands "RRA"
-formatInstruction _dstate DAA = zeroOperands "DAA"
-formatInstruction _dstate CPL = zeroOperands "CPL"
-formatInstruction _dstate SCF = zeroOperands "SCF"
-formatInstruction _dstate CCF = zeroOperands "CCF"
-formatInstruction dstate (DJNZ addr) = oneOperandAddr "DJNZ" addr dstate
-formatInstruction dstate (JR addr) = oneOperandAddr "JR" addr dstate
-formatInstruction dstate (JRCC cc addr) = twoOperandAddr "JR" cc addr dstate
-formatInstruction _dstate (JP addr) = oneOperand "JP" addr
-formatInstruction _dstate (JPCC cc addr) = twoOperands "JP" cc addr
-formatInstruction _dstate (IN port) = oneOperand "IN" port
-formatInstruction _dstate (OUT port) = oneOperand "OUT" port
-formatInstruction _dstate (CALL addr) = oneOperand "CALL" addr
-formatInstruction _dstate (CALLCC cc addr) = twoOperands "CALL" cc addr
-formatInstruction _dstate RET = zeroOperands "RET"
-formatInstruction _dstate (RETCC cc) = oneOperand "RET" cc
-formatInstruction _dstate (PUSH r) = oneOperand "PUSH" r
-formatInstruction _dstate (POP r) = oneOperand "POP" r
-formatInstruction _dstate (RST rst) = oneOperand "RST" rst
+formatInstruction _dstate (Z80undef _)            = zeroOperands "???"
+formatInstruction _dstate (LD8 x)                 = oneOperand "LD" x
+formatInstruction _dstate (LDA x)                 = ("LD", (accumLoadStore x False))
+formatInstruction _dstate (STA x)                 = ("LD", (accumLoadStore x True))
+formatInstruction _dstate (LD16 r imm)            = twoOperands "LD" r imm
+formatInstruction _dstate (STHL addr)             = ("LD", BC.append "(" (BC.append (formatOperand addr) "), HL"))
+formatInstruction _dstate (LDHL addr)             = ("LD", BC.append "HL, (" (BC.append (formatOperand addr) ")"))
+formatInstruction _dstate (LD16Indirect rp addr)  = ("LD", indirect16LoadStore rp addr False)
+formatInstruction _dstate (ST16Indirect addr rp)  = ("LD", indirect16LoadStore rp addr True)
+formatInstruction _dstate (INC r)                 = oneOperand "INC" r
+formatInstruction _dstate (DEC r)                 = oneOperand "DEC" r
+formatInstruction _dstate (INC16 r)               = oneOperand "INC" r
+formatInstruction _dstate (DEC16 r)               = oneOperand "DEC" r
+formatInstruction _dstate (ADD r)                 = oneOperand "ADD" r
+formatInstruction _dstate (ADC r)                 = oneOperand "ADC" r
+formatInstruction _dstate (SUB r)                 = oneOperand "SUB" r
+formatInstruction _dstate (SBC r)                 = oneOperand "SBC" r
+formatInstruction _dstate (AND r)                 = oneOperand "AND" r
+formatInstruction _dstate (XOR r)                 = oneOperand "XOR" r
+formatInstruction _dstate (OR r)                  = oneOperand "OR" r
+formatInstruction _dstate (CP r)                  = oneOperand "CP" r
+formatInstruction _dstate HALT                    = zeroOperands "HALT"
+formatInstruction _dstate NOP                     = zeroOperands "NOP"
+formatInstruction _dstate EXAFAF'                 = ("EX", "AF, AF'")
+formatInstruction _dstate EXSPHL                  = ("EX", "(SP), HL")
+formatInstruction _dstate EXDEHL                  = ("EX", "DE, HL")
+formatInstruction _dstate DI                      = zeroOperands "DI"
+formatInstruction _dstate EI                      = zeroOperands "EI"
+formatInstruction _dstate EXX                     = zeroOperands "EXX"
+formatInstruction _dstate JPHL                    = ("JP", "HL")
+formatInstruction _dstate LDSPHL                  = ("LD", "SP, HL")
+formatInstruction _dstate RLCA                    = zeroOperands "RLCA"
+formatInstruction _dstate RRCA                    = zeroOperands "RRCA"
+formatInstruction _dstate RLA                     = zeroOperands "RLA"
+formatInstruction _dstate RRA                     = zeroOperands "RRA"
+formatInstruction _dstate DAA                     = zeroOperands "DAA"
+formatInstruction _dstate CPL                     = zeroOperands "CPL"
+formatInstruction _dstate SCF                     = zeroOperands "SCF"
+formatInstruction _dstate CCF                     = zeroOperands "CCF"
+formatInstruction dstate (DJNZ addr)              = oneOperandAddr "DJNZ" addr dstate
+formatInstruction dstate (JR addr)                = oneOperandAddr "JR" addr dstate
+formatInstruction dstate (JRCC cc addr)           = twoOperandAddr "JR" cc addr dstate
+formatInstruction dstate (JP addr)                = oneOperandAddr "JP" addr dstate
+formatInstruction dstate (JPCC cc addr)           = twoOperandAddr "JP" cc addr dstate
+formatInstruction _dstate (IN port)               = ("IN", ioPortOperand port True)
+formatInstruction _dstate (OUT port)              = ("OUT", ioPortOperand port False)
+formatInstruction dstate (CALL addr)              = oneOperandAddr "CALL" addr dstate
+formatInstruction dstate (CALLCC cc addr)         = twoOperandAddr "CALL" cc addr dstate
+formatInstruction _dstate RET                     = zeroOperands "RET"
+formatInstruction _dstate (RETCC cc)              = oneOperand "RET" cc
+formatInstruction _dstate (PUSH r)                = oneOperand "PUSH" r
+formatInstruction _dstate (POP r)                 = oneOperand "POP" r
+formatInstruction _dstate (RST rst)               = oneOperand "RST" rst
 
-formatInstruction _dstate (RLC r) = oneOperand "RLC" r
-formatInstruction _dstate (RRC r) = oneOperand "RRC" r
-formatInstruction _dstate (RL r) = oneOperand "RL" r
-formatInstruction _dstate (RR r) = oneOperand "RR" r
-formatInstruction _dstate (SLA r) = oneOperand "SLA" r
-formatInstruction _dstate (SRA r) = oneOperand "SRA" r
-formatInstruction _dstate (SLL r) = oneOperand "SLL" r
-formatInstruction _dstate (SRL r) = oneOperand "SRL" r
-formatInstruction _dstate (BIT bit r) = twoOperands "BIT" bit r
-formatInstruction _dstate (RES bit r) = twoOperands "RES" bit r
-formatInstruction _dstate (SET bit r) = twoOperands "SET" bit r
-formatInstruction _dstate NEG = zeroOperands "NEG"
-formatInstruction _dstate RETI = zeroOperands "RETI"
-formatInstruction _dstate RETN = zeroOperands "RETN"
-formatInstruction _dstate (IM mode) = oneOperand "IM" mode
-formatInstruction _dstate RLD = zeroOperands "RLD"
-formatInstruction _dstate RRD = zeroOperands "RRD"
-formatInstruction _dstate LDI = zeroOperands "LDI"
-formatInstruction _dstate CPI = zeroOperands "CPI"
-formatInstruction _dstate INI = zeroOperands "INI"
-formatInstruction _dstate OUTI = zeroOperands "OUTI"
-formatInstruction _dstate LDD = zeroOperands "LDD"
-formatInstruction _dstate CPD = zeroOperands "CPD"
-formatInstruction _dstate IND = zeroOperands "IND"
-formatInstruction _dstate OUTD = zeroOperands "OUTD"
-formatInstruction _dstate LDIR = zeroOperands "LDIR"
-formatInstruction _dstate CPIR = zeroOperands "CPIR"
-formatInstruction _dstate INIR = zeroOperands "INIR"
-formatInstruction _dstate OTIR = zeroOperands "OTIR"
-formatInstruction _dstate LDDR = zeroOperands "LDDR"
-formatInstruction _dstate CPDR = zeroOperands "CPDR"
-formatInstruction _dstate INDR = zeroOperands "INDR"
-formatInstruction _dstate OTDR = zeroOperands "OTDR"
+formatInstruction _dstate (RLC r)                 = oneOperand "RLC" r
+formatInstruction _dstate (RRC r)                 = oneOperand "RRC" r
+formatInstruction _dstate (RL r)                  = oneOperand "RL" r
+formatInstruction _dstate (RR r)                  = oneOperand "RR" r
+formatInstruction _dstate (SLA r)                 = oneOperand "SLA" r
+formatInstruction _dstate (SRA r)                 = oneOperand "SRA" r
+formatInstruction _dstate (SLL r)                 = oneOperand "SLL" r
+formatInstruction _dstate (SRL r)                 = oneOperand "SRL" r
+formatInstruction _dstate (BIT bit r)             = twoOperands "BIT" bit r
+formatInstruction _dstate (RES bit r)             = twoOperands "RES" bit r
+formatInstruction _dstate (SET bit r)             = twoOperands "SET" bit r
+formatInstruction _dstate NEG                     = zeroOperands "NEG"
+formatInstruction _dstate RETI                    = zeroOperands "RETI"
+formatInstruction _dstate RETN                    = zeroOperands "RETN"
+formatInstruction _dstate (IM mode)               = oneOperand "IM" mode
+formatInstruction _dstate RLD                     = zeroOperands "RLD"
+formatInstruction _dstate RRD                     = zeroOperands "RRD"
+formatInstruction _dstate LDI                     = zeroOperands "LDI"
+formatInstruction _dstate CPI                     = zeroOperands "CPI"
+formatInstruction _dstate INI                     = zeroOperands "INI"
+formatInstruction _dstate OUTI                    = zeroOperands "OUTI"
+formatInstruction _dstate LDD                     = zeroOperands "LDD"
+formatInstruction _dstate CPD                     = zeroOperands "CPD"
+formatInstruction _dstate IND                     = zeroOperands "IND"
+formatInstruction _dstate OUTD                    = zeroOperands "OUTD"
+formatInstruction _dstate LDIR                    = zeroOperands "LDIR"
+formatInstruction _dstate CPIR                    = zeroOperands "CPIR"
+formatInstruction _dstate INIR                    = zeroOperands "INIR"
+formatInstruction _dstate OTIR                    = zeroOperands "OTIR"
+formatInstruction _dstate LDDR                    = zeroOperands "LDDR"
+formatInstruction _dstate CPDR                    = zeroOperands "CPDR"
+formatInstruction _dstate INDR                    = zeroOperands "INDR"
+formatInstruction _dstate OTDR                    = zeroOperands "OTDR"
 
 -- formatInstruction _ = zeroOperands "--!!"
 
@@ -251,8 +310,9 @@ twoOperandAddr :: forall operand1. (DisOperandFormat operand1) =>
 twoOperandAddr mne op1 addr dstate = (mne, BC.concat [ formatOperand op1
                                                      , ", "
                                                      , (case Map.lookup addr (get symbolTab dstate) of
-                                                          Nothing    -> formatOperand addr
-                                                          Just label -> label)
+                                                            Nothing    -> formatOperand addr
+                                                            Just label -> label
+                                                       )
                                                      ]
                                      )
 
@@ -296,6 +356,21 @@ indirect16LoadStore rp addr loadStore =
                   , ")"
                   ]
 
+-- | Output an I/O port operand
+ioPortOperand :: OperIO                         -- ^ Operand
+              -> Bool                           -- ^ 'True' means an IN instruction, 'False' means an OUT instruction
+              -> ByteString                     -- ^ Operand string
+ioPortOperand port inOut = case port of
+                             (PortImm imm)  -> formatOperand imm
+                             (CIndIO reg8)  -> if inOut then
+                                                 BC.append (formatOperand reg8) ", (C)"
+                                               else
+                                                 BC.append "(C), " (formatOperand reg8)
+                             CIndIO0        -> if inOut then
+                                                 "(C)"
+                                               else
+                                                 "(C), 0"
+
 class DisOperandFormat x where
   formatOperand :: x -> ByteString
 
@@ -318,6 +393,10 @@ instance DisOperandFormat OperALU where
   formatOperand (ALUHLindirect) = "(HL)"
   formatOperand (ALUIXindirect disp) = BC.append ", (IX" (BC.append (showDisp disp) ")")
   formatOperand (ALUIYindirect disp) = BC.append ", (IY" (BC.append (showDisp disp) ")")
+
+instance DisOperandFormat OperExtendedALU where
+  formatOperand (OrdinaryALU op) = formatOperand op
+  formatOperand (HLRegPairALU rp) = BC.append "HL, " (formatOperand rp)
 
 instance DisOperandFormat RegPairSP where
   formatOperand (RPair16 r) = formatOperand r
@@ -357,15 +436,14 @@ instance DisOperandFormat RegPairAF where
 formatPseudo :: Z80PseudoOps
              -> Z80Disassembly
              -> ByteString
-             -> ByteString
 
-formatPseudo (ByteRange sAddr bytes) dstate acc = 
+formatPseudo (ByteRange sAddr bytes) dstate = 
   let outF vec =  BC.concat [ padTo lenMnemonic "DB"
                             , BC.intercalate ", " [ oldStyleHex x | x <- DVU.toList vec ]
                             ]
-  in  BC.append (fmtByteGroup dstate bytes sAddr 0 outF) acc
+  in  fmtByteGroup dstate bytes sAddr 0 outF
 
-formatPseudo (AsciiZ sAddr str) dstate acc =
+formatPseudo (AsciiZ sAddr str) dstate =
   let initSlice     = DVU.slice 0 (if DVU.length str <= 8; then DVU.length str; else 8) str
       nonNullSlice  = DVU.slice 0 (DVU.length str - 1) str
       mkString      = BC.cons '\'' (BC.snoc (BC.pack [ (chr . fromIntegral) x | x <- DVU.toList nonNullSlice ]) '\'')
@@ -375,10 +453,9 @@ formatPseudo (AsciiZ sAddr str) dstate acc =
                 , mkString
                 , "\n"
                 , fmtByteGroup dstate str (sAddr + 8) 8 outF
-                , acc
                 ]
 
-formatPseudo (Ascii sAddr str) dstate acc =
+formatPseudo (Ascii sAddr str) dstate =
   let initSlice     = DVU.slice 0 (if DVU.length str <= 8; then DVU.length str; else 8) str
       mkString      = BC.cons '\'' (BC.snoc (BC.pack [ (chr . fromIntegral) x | x <- DVU.toList str ]) '\'')
       outF _vec     = BC.empty
@@ -387,10 +464,9 @@ formatPseudo (Ascii sAddr str) dstate acc =
                 , mkString
                 , "\n"
                 , fmtByteGroup dstate str (sAddr + 8) 8 outF
-                , acc
                 ]
 
-formatPseudo (Equate _saddr _label) _dstate acc = acc
+formatPseudo (Equate _saddr _label) _dstate = BC.empty
 
 -- | Format groups of bytes by groups of 8
 fmtByteGroup :: Z80Disassembly
