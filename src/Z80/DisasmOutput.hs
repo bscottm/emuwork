@@ -224,15 +224,15 @@ formatInstruction _dstate DAA                     = zeroOperands "DAA"
 formatInstruction _dstate CPL                     = zeroOperands "CPL"
 formatInstruction _dstate SCF                     = zeroOperands "SCF"
 formatInstruction _dstate CCF                     = zeroOperands "CCF"
-formatInstruction dstate (DJNZ addr)              = oneOperandAddr "DJNZ" addr dstate
-formatInstruction dstate (JR addr)                = oneOperandAddr "JR" addr dstate
-formatInstruction dstate (JRCC cc addr)           = twoOperandAddr "JR" cc addr dstate
-formatInstruction dstate (JP addr)                = oneOperandAddr "JP" addr dstate
-formatInstruction dstate (JPCC cc addr)           = twoOperandAddr "JP" cc addr dstate
+formatInstruction _dstate (DJNZ addr)             = oneOperand "DJNZ" addr
+formatInstruction _dstate (JR addr)               = oneOperand "JR" addr
+formatInstruction _dstate (JRCC cc addr)          = twoOperands "JR" cc addr
+formatInstruction _dstate (JP addr)               = oneOperand "JP" addr 
+formatInstruction _dstate (JPCC cc addr)          = twoOperands "JP" cc addr
 formatInstruction _dstate (IN port)               = ("IN", ioPortOperand port True)
 formatInstruction _dstate (OUT port)              = ("OUT", ioPortOperand port False)
-formatInstruction dstate (CALL addr)              = oneOperandAddr "CALL" addr dstate
-formatInstruction dstate (CALLCC cc addr)         = twoOperandAddr "CALL" cc addr dstate
+formatInstruction _dstate (CALL addr)             = oneOperand "CALL" addr
+formatInstruction _dstate (CALLCC cc addr)        = twoOperands "CALL" cc addr
 formatInstruction _dstate RET                     = zeroOperands "RET"
 formatInstruction _dstate (RETCC cc)              = oneOperand "RET" cc
 formatInstruction _dstate (PUSH r)                = oneOperand "PUSH" r
@@ -287,6 +287,7 @@ oneOperand :: forall operand. (DisOperandFormat operand) =>
            -> (ByteString, ByteString)
 oneOperand mne op = (mne, formatOperand op)
 
+{-
 -- | Disassembly output with an instruction having one operand
 oneOperandAddr :: ByteString
                -> OperAddr
@@ -297,6 +298,7 @@ oneOperandAddr mne addr dstate = case addr of
                                                           Nothing    -> (mne, formatOperand absAddr)
                                                           Just label -> (mne, label)
                                    (SymAddr label)   -> (mne, label)
+-}
 
 -- | Disassembly output with a two operand instruction
 twoOperands :: forall operand1 operand2. (DisOperandFormat operand1, DisOperandFormat operand2) =>
@@ -310,6 +312,7 @@ twoOperands mne op1 op2 = (mne, BC.concat [ formatOperand op1
                                           ]
                           )
 
+{-
 -- | Disassembly output with a two operand instruction, second operand is an address
 twoOperandAddr :: forall operand1. (DisOperandFormat operand1) =>
                   ByteString
@@ -327,6 +330,7 @@ twoOperandAddr mne op1 addr dstate = (mne, BC.concat [ formatOperand op1
                                                        )
                                                      ]
                                      )
+-}
 
 -- | Output an accumulator load or store
 accumLoadStore :: AccumLoadStore                -- ^ Operand to output
@@ -465,6 +469,22 @@ formatPseudo (ByteRange sAddr bytes) dstate =
                             , BC.intercalate ", " [ oldStyleHex x | x <- DVU.toList vec ]
                             ]
   in  fmtByteGroup dstate bytes sAddr 0 outF
+
+formatPseudo (ByteExpression addr expr word) dstate = 
+  let outF _vec = BC.concat [ padTo lenMnemonic "DB"
+                              , if (not . BC.null) expr then
+                                  expr
+                                else
+                                  upperHex word
+                            ]
+  in  fmtByteGroup dstate (DVU.singleton word) addr 0 outF
+
+formatPseudo (AddrWord sAddr addr bytes) dstate =
+  BC.concat [ formatLinePrefix bytes sAddr dstate
+            , padTo lenMnemonic "DA"
+            , formatOperand addr
+            , "\n"
+            ]
 
 formatPseudo (AsciiZ sAddr str) dstate =
   let initSlice     = DVU.slice 0 (if DVU.length str <= 8; then DVU.length str; else 8) str

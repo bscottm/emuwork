@@ -24,6 +24,7 @@ module Z80.InstructionSet
   , getWord
   , getNextWord
   , getNextDisplacement
+  , getAddress
 
   -- * Index register transform functions
   , Z80reg8XForm
@@ -34,6 +35,7 @@ module Z80.InstructionSet
   , z80iyTransform
   ) where
 
+import Data.Bits
 import Data.Vector.Unboxed (Vector, (!))
 import Data.ByteString.Lazy.Char8 (ByteString)
 
@@ -167,7 +169,7 @@ data Z80instruction where
 
   -- Increment, Increment-Repeat instructions
   LDI, CPI, INI, OUTI, LDD, CPD, IND, OUTD, LDIR, CPIR, INIR, OTIR, LDDR, CPDR, INDR, OTDR :: Z80instruction
-	
+        
 -- | Z80instruction -> String serialization
 instance Show Z80instruction where
   show (Z80undef bytes) = "Z80undef " ++ (as0xHexS bytes)
@@ -246,9 +248,9 @@ instance Show Z80instruction where
   show (SRA r) = "SRA(" ++ (show r) ++ ")"
   show (SLL r) = "SLL(" ++ (show r) ++ ")"
   show (SRL r) = "SRL(" ++ (show r) ++ ")"
-  show (BIT bit r) = "BIT(" ++ (show bit) ++ "," ++ (show r) ++ ")"
-  show (RES bit r) = "RES(" ++ (show bit) ++ "," ++ (show r) ++ ")"
-  show (SET bit r) = "SET(" ++ (show bit) ++ "," ++ (show r) ++ ")"
+  show (BIT bitno r) = "BIT(" ++ (show bitno) ++ "," ++ (show r) ++ ")"
+  show (RES bitno r) = "RES(" ++ (show bitno) ++ "," ++ (show r) ++ ")"
+  show (SET bitno r) = "SET(" ++ (show bitno) ++ "," ++ (show r) ++ ")"
 
   show NEG = "NEG"
 
@@ -492,6 +494,16 @@ getNextDisplacement :: Z80memory                -- ^ The Z80's memory
                     -> Z80addr                  -- ^ The program counter/address
                     -> Z80disp
 getNextDisplacement mem pc = fromIntegral $ mem ! (fromIntegral (pc + 1))
+
+-- | Fetch an address (LSB, MSB) from the specified address
+getAddress :: Z80memory                         -- ^ The Z80's memory
+           -> Z80addr                           -- ^ The program counter/address
+           -> Z80addr                           -- ^ The address fetched from pc and pc+1
+getAddress mem pc =
+  let pc' = fromIntegral pc
+      lsb = fromIntegral (mem ! pc') :: Z80addr
+      msb = fromIntegral (mem ! (pc' + 1)) :: Z80addr
+  in  (msb `shiftL` 8) .|. lsb
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Index register transform functions:
