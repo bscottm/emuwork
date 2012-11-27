@@ -1,3 +1,7 @@
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TemplateHaskell #-}
+
 -- | The main module, where all of the fun happens.
 module Main (main) where
 
@@ -7,41 +11,39 @@ import System.Exit
 import System.Console.GetOpt
 import Data.List
 import Control.Monad
+import Control.Lens
 
 import qualified Machine
 import qualified Z80
 
+-- Emit Template Haskell hair for the lenses
+makeLenses ''Machine.EmulatedProcessor
+
+-- | Where all of the emulator stuff starts...
 main::IO ()
 main =
   do
     (flags, others) <- parseOptions
     case Machine.emulator flags of
-      Nothing          -> hPutStrLn stderr "Emulator not specified on command line with '--processor.' flag."
-                          >> dumpEmulators
-      Just theEmulator -> doDispatch theEmulator others
+      ""      -> hPutStrLn stderr "Emulator not specified on command line with '--processor.' flag."
+                 >> dumpEmulators
+      emuName  -> doDispatch emuName others
 
-doDispatch :: Machine.EmulatedProcessor
-           -> [String]
+-- | Dispatch the command to the appropriate emulator.
+--
+-- (Wish this could be list-driven, but the type system doesn't allow the kind of type-based polymorphism
+-- required as the result of type variable rigidity.)
+doDispatch :: String                            -- ^ The requested emulator's name
+           -> [String]                          -- ^ Command line (emulator-specific)
            -> IO ()
-doDispatch (Machine.EmulatedProcessor _machine _names dispatch theInternals) emuOpts = dispatch theInternals emuOpts
-
--- | Lookup an 'Machine.EmulatedProcessor' from an internal list of known
--- emulators.
-lookupEmulator :: String
-               -> Maybe Machine.EmulatedProcessor
-lookupEmulator emuname = lookupEmulator' emuname knownProcessorEmulators
-  where
-    lookupEmulator' _name [] = Nothing
-    lookupEmulator' name (e:emus) = if (name `elem` (Machine.names e))
-                                    then Just e
-                                    else lookupEmulator' name emus
-
--- | List of known emulators. This is different from a list of known emulated systems.
-knownProcessorEmulators :: [Machine.EmulatedProcessor]
-knownProcessorEmulators =
-  [ Machine.nullProcessor
-  , Z80.z80processor
-  ]
+doDispatch emuName emuOpts
+  | nullproc <- Machine.nullProcessor, Machine.procIdentify nullproc emuName =
+    Machine.cmdDispatch nullproc emuOpts
+  | z80proc  <- Z80.z80processor, Machine.procIdentify z80proc emuName =
+    Machine.cmdDispatch z80proc emuOpts
+  | otherwise =
+    hPutStrLn stderr ("Unsupported or unknown processor emulator: '" ++ (show emuName) ++ "'")
+    >> dumpEmulators
 
 -- | Parse command line flags and options, returning a 'Machine.CommonEmulatorOptions' record (options) and
 -- remaining command line parameters wrapped in the IO monad
@@ -81,15 +83,7 @@ options =
   , Option ['?'] ["help"]       (NoArg  doUsage)              "Get help"
   ]
   where
-    setEmulator emuname flags   = 
-      case theEmulator of
-        Nothing         -> do
-          hPutStrLn stderr ("Unrecognized emulator name: " ++ emuname)
-          dumpEmulators
-          exitFailure
-        Just _something -> return flags { Machine.emulator = theEmulator }
-      where
-        theEmulator = lookupEmulator emuname
+    setEmulator emuname flags   = return $ flags { Machine.emulator = emuname }
 
     doUsage           _flags    = do 
       showUsage
@@ -115,19 +109,21 @@ exitError msg = do
     exitFailure
 -}
 
--- | Pretty print the known emulator list:
+-- | Dump the known emulators
 dumpEmulators :: IO ()
 dumpEmulators = do
-  hPutStrLn stderr "Known emulators are:" >> mapM_ prettyEmu knownProcessorEmulators
+    hPutStrLn stderr "Available emulators are:"
+      >> prettyEmu Machine.nullProcessor
+      >> prettyEmu Z80.z80processor
   where
     prefix = "-- "
     indent = "   "
     indentLen = length indent
-    initialString emu = prefix ++ (Machine.machineName emu) ++ " ("
+    initialString emu = prefix ++ (emu ^. procPrettyName) ++ " ("
 
     prettyEmu emu = do
       hPutStr stderr (initialString emu)
-      prettyEmuNames (Machine.names emu) (length (initialString emu))
+      prettyEmuNames (emu ^. procAliases) (length (initialString emu))
 
     prettyEmuNames []         _accLen = hPutStrLn stderr ""
     prettyEmuNames (eName:[]) _accLen = hPutStrLn stderr ("\"" ++ eName ++ "\")")

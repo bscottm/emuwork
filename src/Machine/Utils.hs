@@ -1,5 +1,5 @@
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
+
 -- | Various and sundry utility functions
 module Machine.Utils 
   ( ShowHex(..)
@@ -44,7 +44,7 @@ instance (ShowHex x) => ShowHex [x] where
   as0xHex x = BC.append "[" $ asHexList (as0xHex) x BC.empty
 
 -- | Helper function for converting lists of things into hex
-asHexList :: forall x. ShowHex x => (x -> ByteString)
+asHexList :: ShowHex x => (x -> ByteString)
           -> [x]
           -> ByteString
           -> ByteString
