@@ -5,8 +5,7 @@
 -- | The Z80 disassembler module
 module Z80.Disassembler
   ( -- * Types
-    Z80memory
-  , Z80Disassembly
+    Z80Disassembly
   , Z80PseudoOps(..)
 
     -- * Functions
@@ -39,10 +38,13 @@ import Z80.Processor
 import Z80.InstructionSet
 
 -- Emit Template Haskell hair for lenses used to set/get/modify the Disassembly state:
-mkLabels [ ''Disassembly ]
+mkLabels [ ''Disassembly, ''Z80indexTransform ]
 
 -- | Pseudo disassembler operations: These are elements such as bytes to dump, various types of strings, etc.
 data Z80PseudoOps where
+  -- Disassembly origin marker, generally used in disassembly output
+  DisOrigin :: Z80addr
+            -> Z80PseudoOps
   -- Range of bytes to dump
   ByteRange :: Z80addr                          -- Start address
             -> Vector Z80word                   -- Bytes
@@ -55,15 +57,17 @@ data Z80PseudoOps where
   Ascii     :: Z80addr
             -> Vector Z80word
             -> Z80PseudoOps
-  -- Symbol equation (associates a symbol with a number, usually the address of something
-  Equate :: Z80addr
-         -> ByteString
-         -> Z80PseudoOps
+  -- Address equation: associates a symbol with an address of something, which is also added to the
+  -- disassembler's symbol table
+  AddrEquate :: ByteString
+             -> Z80addr
+             -> Z80PseudoOps
+  -- Comment, printed as a line, as opposed to after an mnemonic and operands
+  LineComment :: ByteString
+              -> Z80PseudoOps
 
--- | Shorthand for the 'Vector' of Z80words
-type Z80memory = Vector Z80word
 -- | Shorthand for the 'Disassembly' state for the Z80
-type Z80Disassembly = Disassembly Z80addr Z80word Instruction Z80PseudoOps
+type Z80Disassembly = Disassembly Z80addr Z80word Z80instruction Z80PseudoOps
 
 -- | The Z80 disassembler, which just invokes the 'Disassembly' class instance of 'disassemble'
 z80disassembler :: Z80memory                    -- ^ Vector of bytes to disassemble
@@ -116,7 +120,7 @@ z80disascii mem origin sAddr nBytes dstate = let sAddr'    = fromIntegral sAddr
                                              in  set disasmSeq (disSeq |> DisasmPseudo theBytes) dstate
 
 -- | The 'Disassembly' class instance for the Z80.
-instance Disassembler Z80addr Z80disp Z80word Instruction Z80PseudoOps where
+instance Disassembler Z80addr Z80disp Z80word Z80instruction Z80PseudoOps where
     disassemble mem origin startAddr nBytes disassembled = disasm mem origin pc lastpc disassembled
       where
         pc = startAddr - origin
@@ -129,104 +133,105 @@ disasm :: Z80memory                             -- ^ The "memory" vector of byte
        -> Z80addr                               -- ^ The disassembly's last address
        -> Z80Disassembly
        -> Z80Disassembly
-disasm theMem origin thePc lastpc dis
+disasm theMem origin thePc lastpc dstate
   {-  | trace ("disasm: pc = " ++ (show thePc)) False = undefined -}
-  | thePc >= lastpc = dis
+  | thePc >= lastpc = dstate
   | otherwise =
     let opc = (theMem !? fromIntegral(thePc))
     in  case opc of
           Nothing     -> error ("Z80 disasm: invalid fetch at pc = " ++ (show thePc))
-          Just theOpc -> case (shiftR theOpc 6) .&. 3 of
-                           0          -> let (newpc, ins) = group0decode theMem thePc theOpc
-                                         in  disasm theMem origin (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
-                           1          -> let ins = group1decode theOpc
-                                         in  disasm theMem origin (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
-                           2          -> let ins = group2decode theOpc
-                                         in  disasm theMem origin (thePc + 1) lastpc $ mkDisasmInst thePc thePc ins
-                           3          -> let (newpc, ins) = group3decode theMem thePc theOpc
-                                         in  disasm theMem origin (newpc + 1) lastpc $ mkDisasmInst thePc newpc ins
-                           _otherwise -> error (errorStr ++ "x out of range?")
+          Just theOpc -> case theOpc of
+                           0xdd       -> indexedPrefix z80ixTransform
+                           0xfd       -> indexedPrefix z80iyTransform
+                           _otherwise -> let (newpc, ins, dstate')  = decodeInst theMem thePc theOpc dstate z80nullTransform
+                                             newDState              = mkDisasmInst thePc newpc ins dstate'
+                                         in  disasm theMem origin newpc lastpc newDState
   where
-    -- Save the opcode bytes, now that we know how many correspond the the instruction
-    getOpcodes x y = let x' = (fromIntegral x) :: Int
-                         y' = (fromIntegral y) :: Int
-                     in  DVU.slice x' (y' - x' + 1) theMem
     -- Note: 'set' and 'get' come from Data.Label.
-    mkDisasmInst oldpc newpc ins = let disasmPC = oldpc + origin
-                                       opcodes = getOpcodes oldpc newpc
-                                       newDisasmSeq = (get disasmSeq dis) |> DisasmInst disasmPC opcodes ins
-                                   in  set disasmSeq newDisasmSeq $ annotateAddr ins dis
-    -- Annotate labels on instructions that contain addresses
-    annotateAddr ins theDState = case ins of
-                                   (DJNZ addr)     -> jumpLabel addr theDState
-                                   (JR addr)       -> jumpLabel addr theDState
-                                   (JRCC _cc addr) -> jumpLabel addr theDState
-                                   (CALL addr)     -> subLabel  addr theDState
-                                   (JP addr)       -> jumpLabel addr theDState
-                                   (JPCC _cc addr) -> jumpLabel addr theDState
-                                   _otherwise      -> theDState
-    -- Create a label signifying the destination of a jump
-    jumpLabel addr theDState = let symTab = get symbolTab theDState
-                               in  if ((get addrInDisasmRange theDState) addr) && Map.notMember addr symTab then
-                                     let label = BC.cons 'L' (BC.pack . show $ get labelNum theDState)
-                                         updsyms = Map.insert addr label symTab
-                                     in set symbolTab updsyms $ modify labelNum (+ 1) theDState
-                                   else
-                                     theDState   -- No change to the disassembler state
-    -- Create a label signifying the destination of a subrouting
-    subLabel addr theDState = let symTab = get symbolTab theDState
-                              in  if ((get addrInDisasmRange theDState) addr) && Map.notMember addr symTab then
-                                    let label = BC.append "SUB" (BC.pack . show $ get labelNum theDState)
-                                        updsyms = Map.insert addr label symTab
-                                    in set symbolTab updsyms $ modify labelNum (+ 1) theDState
-                                  else
-                                    theDState
+    mkDisasmInst oldpc newpc ins theDState = let disasmPC     = oldpc + origin
+                                                 opcodes      = let oldpc' = (fromIntegral oldpc) :: Int
+                                                                    newpc' = (fromIntegral newpc) :: Int
+                                                                in  DVU.slice oldpc' (newpc' - oldpc') theMem
+                                                 newDisasmSeq = (get disasmSeq theDState) |> DisasmInst disasmPC opcodes ins
+                                             in  set disasmSeq newDisasmSeq theDState
+    -- Deal with an index register prefix
+    indexedPrefix xForms = let newOpc                 = getNextWord theMem thePc
+                               (newpc, ins, dstate')  = decodeInst theMem (thePc + 1) newOpc dstate xForms
+                               newDState              = mkDisasmInst thePc newpc ins dstate'
+                           in  case newOpc of
+                                 -- Deal with "weird" IX bit operation layout
+                                 0xcb       -> undefined
+                                 _otherwise -> disasm theMem origin newpc lastpc newDState
+
+-- | Decode one instruction, returning the new program counter and disassembly state.
+decodeInst :: Z80memory                         -- ^ The "memory" vector of bytes from which instructions are read
+           -> Z80addr                           -- ^ The current PC from which the instruction will be decoded
+           -> Z80word                           -- ^ Current opcode at the current PC
+           -> Z80Disassembly                    -- ^ Current disassembly state
+           -> Z80indexTransform                 -- ^ Register transform functions (convert HL to IX or IY, as needed)
+           -> (Z80addr, Z80instruction, Z80Disassembly) -- ^ Resulting disassembly state.
+decodeInst theMem pc opc dstate xForms = 
+  case (opc `shiftR` 6) .&. 3 of
+    0          -> let (newpc, ins, dstate') = group0decode theMem dstate xForms pc opc
+                  in  (newpc + 1, ins, dstate')
+    1          -> let (newpc, ins) = group1decode xForms theMem pc opc
+                  in  (newpc + 1, ins, dstate)
+    2          -> let (newpc, ins) = group2decode xForms theMem pc opc
+                  in  (newpc + 1, ins, dstate)
+    3          -> let (newpc, ins, dstate') = group3decode theMem dstate xForms pc opc
+                  in  (newpc + 1, ins, dstate')
+    _otherwise -> undefined
 
 group0decode :: Z80memory                       -- ^ Memory image
+             -> Z80Disassembly                  -- ^ Current disassembly state
+             -> Z80indexTransform               -- ^ Index register transform function
              -> Z80addr                         -- ^ Current PC
              -> Z80word                         -- ^ Opcode
-             -> (Z80addr, Instruction)          -- ^ (new PC, instruction)
+             -> (Z80addr, Z80instruction, Z80Disassembly) -- ^ (new PC, instruction, new disassembly state)
 
-group0decode image pc opc
+group0decode image dstate xForm pc opc
   | z == 0 = case y of
-               0                  -> (pc, NOP)
-               1                  -> (pc, EXAFAF')
-               2                  -> displacementInstruction image pc DJNZ
-               3                  -> displacementInstruction image pc JR
-               _otherwise         -> displacementInstruction image pc $ JRCC (condC (y - 4))
-  | z == 1 = case q of
-               0                  -> (pc + 2, LD16 (pairSP p) (getAddr image (pc + 1)))
-               1                  -> (pc, ADD $ HLRegPairALU (pairSP p))
-               _otherwise         -> undefined
+               0                  -> (pc, NOP, dstate)
+               1                  -> (pc, EXAFAF', dstate)
+               2                  -> displacementInstruction image dstate pc DJNZ
+               3                  -> displacementInstruction image dstate pc JR
+               _otherwise         -> displacementInstruction image dstate pc $ JRCC (condC (y - 4))
+  | z == 1, q == 0 = symAbsAddress image dstate False "" pc (LD16 (pairSP reg16XFormF p))
+  | z == 1, q == 1 = (pc, ADD $ ALU16 (pairSP reg16XFormF p), dstate)
   | z == 2, q == 0 = case p of
-                       0          -> (pc, STA BCIndirect)
-                       1          -> (pc, STA DEIndirect)
-                       2          -> (pc + 2, STHL (getAddr image (pc + 1)))
-                       3          -> (pc + 2, STA (Imm16Indirect (getAddr image (pc + 1))))
+                       0          -> (pc, STA BCIndirect, dstate)
+                       1          -> (pc, STA DEIndirect, dstate)
+                       2          -> symAbsAddress image dstate False "" pc STHL
+                       3          -> symAbsAddress image dstate False "" pc (STA . Imm16Indirect)
                        _otherwise -> undefined
   | z == 2, q == 1 = case p of
-                       0          -> (pc, LDA BCIndirect)
-                       1          -> (pc, LDA DEIndirect)
-                       2          -> (pc + 2, LDHL (getAddr image (pc + 1)))
-                       3          -> (pc + 2, LDA (Imm16Indirect (getAddr image (pc + 1))))
+                       0          -> (pc, LDA BCIndirect, dstate)
+                       1          -> (pc, LDA DEIndirect, dstate)
+                       2          -> symAbsAddress image dstate False "" pc LDHL
+                       3          -> symAbsAddress image dstate False "" pc (LDA . Imm16Indirect)
                        _otherwise -> undefined
   | z == 3 = case q of
-               0                  -> (pc, INC16 (pairSP p))
-               1                  -> (pc, DEC16 (pairSP p))
+               0                  -> (pc, INC16 (pairSP reg16XFormF p), dstate)
+               1                  -> (pc, DEC16 (pairSP reg16XFormF p), dstate)
                _otherwise         -> undefined
-  | z == 4 = (pc, INC (reg8 y))
-  | z == 5 = (pc, DEC (reg8 y))
-  | z == 6 = (pc + 1, LD8 (Reg8Imm (reg8 y) (getNextWord image pc)))
-  | z == 7 = (pc, accumOps IntMap.! (fromIntegral y))
-  | otherwise = (pc, Z80undef [opc])
+  | z == 4 = let (newpc, theReg) = reg8 reg8XFormF image pc y
+             in  (newpc, INC theReg, dstate)
+  | z == 5 = let (newpc, theReg) = reg8 reg8XFormF image pc y
+             in  (newpc, DEC theReg, dstate)
+  | z == 6 = let (newpc, theReg) = reg8 reg8XFormF image pc y
+             in  (newpc + 1, LD8 (Reg8Imm theReg (getNextWord image newpc)), dstate)
+  | z == 7 = (pc, accumOps IntMap.! (fromIntegral y), dstate)
+  | otherwise = (pc, Z80undef [opc], dstate)
   where
-    z = (opc .&. 7)
-    y = (shiftR opc 3) .&. 7
-    p  = (shiftR opc 4) .&. 3
-    q  = (shiftR opc 3) .&. 1
+    z           = (opc .&. 7)
+    y           = (shiftR opc 3) .&. 7
+    p           = (shiftR opc 4) .&. 3
+    q           = (shiftR opc 3) .&. 1
+    reg8XFormF  = get reg8XForm xForm
+    reg16XFormF = get reg16XForm xForm
 
 -- | Accumulator operations map
-accumOps :: IntMap Instruction
+accumOps :: IntMap Z80instruction
 accumOps = IntMap.fromList [ (0, RLCA)
                            , (1, RRCA)
                            , (2, RLA)
@@ -238,99 +243,125 @@ accumOps = IntMap.fromList [ (0, RLCA)
                            ]
 
 -- | 8-bit loads and HALT
-group1decode :: Z80word
-             -> Instruction
-group1decode opc 
-  | z == 6, y == 6  = HALT
-  | otherwise       = LD8 (Reg8Reg8 (reg8 y) (reg8 z))
+group1decode :: Z80indexTransform
+             -> Z80memory
+             -> Z80addr
+             -> Z80word
+             -> (Z80addr, Z80instruction)
+group1decode xform mem pc opc
+  | z == 6, y == 6  = (pc, HALT)
+  | otherwise       = let reg8XFormF      = get reg8XForm xform
+                          (pcdst, dstReg) = reg8 reg8XFormF mem pc y
+                          (pcsrc, srcReg) = reg8 reg8XFormF mem pc z
+                          newpc           = pcdst `max` pcsrc
+                      in  (newpc, LD8 (Reg8Reg8 dstReg srcReg))
   where
     z = (opc .&. 7)
     y = (shiftR opc 3) .&. 7
 
 -- | ALU instruction decode (group 2)
-group2decode :: Z80word
-             -> Instruction
-group2decode opc = let reg      =  (opc .&. 7)
-                   in  case opc `shiftR` 3 .&. 7 of 
-                         0          -> (ADD . OrdinaryALU . aluReg8) reg
-                         1          -> (ADC . OrdinaryALU . aluReg8) reg
-                         2          -> (SUB . aluReg8) reg
-                         3          -> (SBC . OrdinaryALU . aluReg8) reg
-                         4          -> (AND . aluReg8) reg
-                         5          -> (XOR . aluReg8) reg
-                         6          -> (OR  . aluReg8) reg
-                         7          -> (CP  . aluReg8) reg
-                         _otherwise -> undefined
+group2decode :: Z80indexTransform               -- ^ HL -> index register transform collection
+             -> Z80memory                       -- ^ Z80 memory being disassembled
+             -> Z80addr                         -- ^ Current program counter, may be updated by a transform function
+             -> Z80word                         -- ^ Opcode
+             -> (Z80addr, Z80instruction)       -- ^ Resulting program counter, instruction tuple
+group2decode xForms mem pc opc =
+  let reg                  = opc .&. 7
+      (newPc, alu8operand) = aluReg8 (get reg8XForm xForms) mem pc reg
+      insCTor    = case opc `shiftR` 3 .&. 7 of 
+                     0          -> ADD . ALU8
+                     1          -> ADC . ALU8
+                     2          -> SUB
+                     3          -> SBC . ALU8
+                     4          -> AND
+                     5          -> XOR
+                     6          -> OR
+                     7          -> CP
+                     _otherwise -> undefined
+  in  (newPc, insCTor alu8operand)
 
 -- | Group 3 instructions
 group3decode :: Z80memory                       -- ^ Memory image
+             -> Z80Disassembly                  -- ^ Current disassembly state
+             -> Z80indexTransform               -- ^ HL to IX or IY conversion functions
              -> Z80addr                         -- ^ Current PC
              -> Z80word                         -- ^ Opcode
-             -> (Z80addr, Instruction)          -- ^ (new PC, instruction)
-group3decode image pc opc
-  | z == 0          = (pc, RETCC . condC $ y)
-  | z == 1, q == 0  = (pc, (POP . pairAF) $ p)
+             -> (Z80addr, Z80instruction, Z80Disassembly) -- ^ (new PC, instruction, new disassembly state)
+group3decode image dstate xForm pc opc
+  | z == 0          = (pc, RETCC . condC $ y, dstate)
+  | z == 1, q == 0  = (pc, (POP . pairAF reg16XFormF) $ p, dstate)
   | z == 1, q == 1  = case p of
-                        0          -> (pc, RET)
-                        1          -> (pc, EXX)
-                        2          -> (pc, JPHL)
-                        3          -> (pc, LDSPHL)
+                        0          -> (pc, RET, dstate)
+                        1          -> (pc, EXX, dstate)
+                        2          -> (pc, JPHL, dstate)
+                        3          -> (pc, LDSPHL, dstate)
                         _otherwise -> undefined
-  | z == 2          = (pc + 2, JPCC (condC y) (getAddr image (pc + 1)))
+  | z == 2          = symAbsAddress image dstate True "L" pc (JPCC (condC y))
   | z == 3          = case y of
-                        0          -> (pc + 2, JP (getAddr image (pc + 1)))
-                        1          -> bitopsDecode image pc
-                        2          -> (pc + 1, (OUT . PortImm) $ getNextWord image pc)
-                        3          -> (pc + 1, (IN . PortImm)  $ getNextWord image pc)
-                        4          -> (pc, EXSPHL)
-                        5          -> (pc, EXDEHL)
-                        6          -> (pc, DI)
-                        7          -> (pc, EI)
+                        0          -> symAbsAddress image dstate True "L" pc JP
+                        -- CB instruction prefix
+                        1          -> let nextOpc = getNextWord image pc
+                                          ins = bitopsDecode image pc nextOpc
+                                      in  (pc + 1, ins, dstate)
+                        2          -> (pc + 1, (OUT . PortImm) $ getNextWord image pc, dstate)
+                        3          -> (pc + 1, (IN . PortImm)  $ getNextWord image pc, dstate)
+                        4          -> (pc, EXSPHL, dstate)
+                        5          -> (pc, EXDEHL, dstate)
+                        6          -> (pc, DI, dstate)
+                        7          -> (pc, EI, dstate)
                         _otherwise -> undefined
-  | z == 4           = (pc + 2, CALLCC (condC y) (getAddr image (pc + 1)))
-  | z == 5, q == 0   = (pc, PUSH . pairAF $ p)
+  | z == 4           = symAbsAddress image dstate True "SUB" pc (CALLCC (condC y))
+  | z == 5, q == 0   = (pc, PUSH $ pairAF reg16XFormF p, dstate)
   | z == 5, q == 1   = case p of
-                         0          -> (pc + 2, CALL (getAddr image (pc + 1)))
-                         1          -> (pc, Z80undef [opc]) -- dd prefix
-                         2          -> edPrefixDecode image pc
-                         3          -> (pc, Z80undef [opc]) -- fd prefix
+                         0          -> symAbsAddress image dstate True "SUB" pc CALL
+                         -- DD instruction prefix (should never reach here.)
+                         1          -> undefined
+                         2          -> edPrefixDecode image dstate pc
+                         3          -> (pc, Z80undef [opc], dstate) -- fd prefix
                          _otherwise -> undefined
-  | z == 6           = let imm = ALUimm $ (getNextWord image pc)
-                       in  (pc + 1, case y of
-                                      0          -> (ADD . OrdinaryALU) $ imm
-                                      1          -> (ADC . OrdinaryALU) $ imm
-                                      2          -> SUB imm
-                                      3          -> (SBC . OrdinaryALU) $ imm
-                                      4          -> AND imm
-                                      5          -> XOR imm
-                                      6          -> OR  imm
-                                      7          -> CP  imm
-                                      _otherwise -> undefined
-                             )
-  | z == 7           = (pc, RST y)
-  | otherwise        = (pc, Z80undef [opc])
+  | z == 6           = let imm     = ALUimm (getNextWord image pc)
+                           insCTor = case y of
+                                       0          -> (ADD . ALU8)
+                                       1          -> (ADC . ALU8)
+                                       2          -> SUB
+                                       3          -> (SBC . ALU8)
+                                       4          -> AND
+                                       5          -> XOR
+                                       6          -> OR
+                                       7          -> CP
+                                       _otherwise -> undefined
+                       in  (pc + 1, insCTor imm, dstate)
+  | z == 7           = (pc, RST (y * 8), dstate)
+  | otherwise        = (pc, Z80undef [opc], dstate)
   where
     z = (opc .&. 7)
     y = (shiftR opc 3) .&. 7
     p  = (shiftR opc 4) .&. 3
     q  = (shiftR opc 3) .&. 1
+    reg16XFormF = get reg16XForm xForm
 
-bitopsDecode :: Z80memory                       -- ^ Memory
-             -> Z80addr                         -- ^ Current PC (but we increment it locally)
-             -> (Z80addr, Instruction)          -- ^ The result
-bitopsDecode image pc = case (shiftR opc 6) .&. 3 of
-                           0          -> let rotOp = rotOps IntMap.! (fromIntegral y)
-                                         in  (pc + 1, (rotOp . reg8) $ z)
-                           1          -> (pc + 1, (BIT y (reg8 z)))
-                           2          -> (pc + 1, (RES y (reg8 z)))
-                           3          -> (pc + 1, (SET y (reg8 z)))
-                           _otherwise -> undefined
+-- | The SET, RESet, BIT instructions and rotation operations. Note that this is not suitable for dealing with the
+-- IX and IY indexed instructions, since the instruction format is 'DDCB <displacement> <opcode>', and has to be
+-- handled seperately.
+bitopsDecode :: Z80memory                       -- ^ Z80 memory (required to use the null register transform)
+             -> Z80addr                         -- ^ Current program counter (required to use the null register transform)
+             -> Z80word                         -- ^ Bit/rotate operation opcode
+             -> Z80instruction                  -- ^ The result
+bitopsDecode mem pc opc =
+  case (shiftR opc 6) .&. 3 of
+    0          -> let rotOp       = rotOps IntMap.! (fromIntegral y)
+                  in  rotOp theReg
+    1          -> BIT y theReg
+    2          -> RES y theReg
+    3          -> SET y theReg
+    _otherwise -> undefined
   where
-    opc = getNextWord image pc
     z = (opc .&. 7)
     y = (shiftR opc 3) .&. 7
+    nullXFormF = get reg8XForm z80nullTransform
+    (_, theReg) = reg8 nullXFormF mem pc z
 
-rotOps :: IntMap (Z80reg8 -> Instruction)
+rotOps :: IntMap (Z80reg8 -> Z80instruction)
 rotOps = IntMap.fromList [ (0, RLC)
                          , (1, RRC)
                          , (2, RL)
@@ -343,70 +374,67 @@ rotOps = IntMap.fromList [ (0, RLC)
 
 -- | Decode 'ED'-prefixed instructions
 edPrefixDecode :: Z80memory
+               -> Z80Disassembly
                -> Z80addr
-               -> (Z80addr, Instruction)
-edPrefixDecode image pc = case (shiftR opc 6) .&. 3 of
-                            0         -> invalid
-                            1         -> case z of
-                                           0 -> (pc + 1, IN $ if y /= 6 then
-                                                                CIndIO $ reg8 y
-                                                              else
-                                                                CIndIO0
-                                                )
-                                           1 -> (pc + 1, OUT $ if y /= 6 then
-                                                                 CIndIO $ reg8 y
-                                                               else
-                                                                 CIndIO0
-                                                )
-                                           2 -> let rp = pairSP p
-                                                    ins 
-                                                      | q == 0    = SBC
-                                                      | q == 1    = ADC
-                                                      | otherwise = undefined
-                                                in  (pc + 1, (ins . HLRegPairALU) rp)
-                                           3 -> let rp    = pairSP p
-                                                    addr  = (getAddr image (pc + 1))
-                                                    ins
-                                                      | q == 0    = ST16Indirect addr rp
-                                                      | q == 1    = LD16Indirect rp addr
-                                                      | otherwise = undefined
-                                                in (pc + 2, ins)
-
-                                           4 -> (pc + 1, NEG)
-                                           5 -> (pc + 1, if y == 1 then
-                                                           RETI
-                                                         else
-                                                           RETN)
-                                                  
-                                           6 -> (pc + 1, IM (interruptMode IntMap.! (fromIntegral y)))
-                                           7 -> case y of
-                                                  0          -> (pc + 1, (STA IReg))
-                                                  1          -> (pc + 1, (STA RReg))
-                                                  2          -> (pc + 1, (LDA IReg))
-                                                  3          -> (pc + 1, (LDA RReg))
-                                                  4          -> (pc + 1, RLD)
-                                                  5          -> (pc + 1, RRD)
-                                                  6          -> invalid
-                                                  7          -> invalid
-                                                  _otherwise -> error ("edPrefixDecode, x = 1, z = 7: invalid y = " ++ (show y))
-                                           _otherwise -> error ("edPrefixDecode, x = 1: undefined/invalid z = " ++ (show z))
-                            2         -> if z <= 3 && y >= 4 then
-                                           -- Increment, Increment-Repeat instructions
-                                           (pc + 1, ((incdecOps IntMap.! (fromIntegral y)) IntMap.! (fromIntegral z)))
-                                         else
-                                           invalid
-                            3         -> invalid
-                            _otherise -> error "edPrefixDecode: invalid x"
+               -> (Z80addr, Z80instruction, Z80Disassembly)
+edPrefixDecode image dstate pc
+  | x == 0 = invalid
+  | x == 1, z == 0, y /= 6 = let (_, theReg) = reg8 nullXFormF image pc y
+                             in  (pc + 1, IN $ CIndIO theReg , dstate)
+  | x == 1, z == 0, y == 6 = (pc + 1, IN CIndIO0, dstate)
+  | x == 1, z == 1, y /= 6 = let (_, theReg) = reg8 nullXFormF image pc y
+                             in  (pc + 1, OUT $ CIndIO theReg, dstate)
+  | x == 1, z == 1, y == 6 = (pc + 1, OUT $ CIndIO0, dstate)
+  | x == 1, z == 2, q == 0 = let rp = pairSP nullReg16XFormF p
+                             in  (pc + 1, (SBC . ALU16) rp, dstate)
+  | x == 1, z == 2, q == 1 = let rp = pairSP nullReg16XFormF p
+                             in  (pc + 1, (ADC . ALU16) rp, dstate)
+  | x == 1, z == 2         = invalid
+  | x == 1, z == 3, q == 0 = let rp    = pairSP nullReg16XFormF p
+                                 addr  = (getAddr image (pc + 1))
+                             in (pc + 2, ST16Indirect addr rp, dstate)
+  | x == 1, z == 3, q == 1 = let rp    = pairSP nullReg16XFormF p
+                                 addr  = (getAddr image (pc + 1))
+                             in (pc + 2, LD16Indirect rp addr, dstate)
+  | x == 1, z == 3         = invalid
+  | x == 1, z == 4         = (pc + 1, NEG, dstate)
+  | x == 1, z == 5, y == 1 = (pc + 1, RETI, dstate)
+  | x == 1, z == 5, y /= 1 = (pc + 1, RETN, dstate)
+  | x == 1, z == 6         = (pc + 1, IM (interruptMode IntMap.! (fromIntegral y)), dstate)
+  | x == 1, z == 7         = case y of
+                               0          -> (pc + 1, (STA IReg), dstate)
+                               1          -> (pc + 1, (STA RReg), dstate)
+                               2          -> (pc + 1, (LDA IReg), dstate)
+                               3          -> (pc + 1, (LDA RReg), dstate)
+                               4          -> (pc + 1, RLD, dstate)
+                               5          -> (pc + 1, RRD, dstate)
+                               6          -> invalid
+                               7          -> invalid
+                               _otherwise -> error ("edPrefixDecode, x = 1, z = 7: invalid y = " ++ (show y))
+  | x == 2, z <= 3, y >= 4 = -- Increment, Increment-Repeat instructions
+                             (pc + 1, ((incdecOps IntMap.! (fromIntegral y)) IntMap.! (fromIntegral z)), dstate)
+  | x == 2                 = invalid
+  | x == 3                 = invalid
+  -- Should never be matched...
+  | otherwise              = error ("edPrefixDecode: could not decode instruction, x == "
+                                    ++ (show x)
+                                    ++ ", z == "
+                                    ++ (show z)
+                                    ++ ", y == "
+                                    ++ (show y))
   where
     opc = getNextWord image pc
-    z = (opc .&. 7)
+    x = (opc `shiftR` 6) .&. 3
     y = (opc `shiftR` 3) .&. 7
+    z = (opc .&. 7)
     p = (y `shiftR` 1) .&. 3
     q = y .&. 1
-    invalid = (pc + 1, Z80undef [0xed, opc])
+    invalid = (pc + 1, Z80undef [0xed, opc], dstate)
+    nullXFormF = get reg8XForm z80nullTransform
+    nullReg16XFormF = get reg16XForm z80nullTransform
 
 -- | Block/compare/input/output increment-decrement lookup table
-incdecOps :: IntMap (IntMap Instruction)
+incdecOps :: IntMap (IntMap Z80instruction)
 incdecOps = IntMap.fromList [ (4, IntMap.fromList [ (0, LDI )
                                                   , (1, CPI )
                                                   , (2, INI )
@@ -442,40 +470,49 @@ interruptMode = IntMap.fromList [ (0, 0)
                                 ]
 
 -- | Convert 16-bit register pair/SP index to a 'RegPairSP' operand
-pairSP :: Z80word
-       -> RegPairSP
-pairSP 0 = RPair16 BC
-pairSP 1 = RPair16 DE
-pairSP 2 = RPair16 HL
-pairSP 3 = SP
-pairSP x = error ("pairSP: invalid 16-bit register code " ++ (show x))
+pairSP :: (Z80reg16 -> Z80reg16)                -- ^ Transform function for index registers, when neeeded
+       -> Z80word                               -- ^ Register code
+       -> RegPairSP                             -- ^ Resulting register pair
+pairSP _xform 0 = RPair16 BC
+pairSP _xform 1 = RPair16 DE
+pairSP  xform 2 = (RPair16 . xform) HL
+pairSP _xform 3 = SP
+pairSP _      x = error ("pairSP: invalid 16-bit register code " ++ (show x))
 
 -- | Convert 16-bit register pair/SP index to a 'RegPairSP' operand
-pairAF :: Z80word
-       -> RegPairAF
-pairAF 0 = RPair16' BC
-pairAF 1 = RPair16' DE
-pairAF 2 = RPair16' HL
-pairAF 3 = AF
-pairAF x = error ("pairAF: invalid 16-bit register code " ++ (show x))
+pairAF :: (Z80reg16 -> Z80reg16)                -- ^ Transform function, when needed
+       -> Z80word                               -- ^ Register pair index
+       -> RegPairAF                             -- ^ Resulting register pair
+pairAF _xform 0 = RPair16' BC
+pairAF _xform 1 = RPair16' DE
+pairAF  xform 2 = (RPair16' . xform) HL
+pairAF _xform 3 = AF
+pairAF _      x = error ("pairAF: invalid 16-bit register code " ++ (show x))
 
 -- | Convert 8-bit register index to a 'Z80reg8' operand
-reg8 :: Z80word
-     -> Z80reg8
-reg8 0 = B
-reg8 1 = C
-reg8 2 = D
-reg8 3 = E
-reg8 4 = H
-reg8 5 = L
-reg8 6 = HLindirect
-reg8 7 = A
-reg8 x = error ("reg8: Invalid 8-bit register code " ++ (show x))
+reg8 :: Z80reg8XForm
+     -> Z80memory
+     -> Z80addr
+     -> Z80word
+     -> (Z80addr, Z80reg8)
+reg8 _xform _mem  pc 0 = (pc, B)
+reg8 _xform _mem  pc 1 = (pc, C)
+reg8 _xform _mem  pc 2 = (pc, D)
+reg8 _xform _mem  pc 3 = (pc, E)
+reg8 _xform _mem  pc 4 = (pc, H)
+reg8 _xform _mem  pc 5 = (pc, L)
+reg8  xform  mem  pc 6 = xform mem pc HLindirect
+reg8 _xform _mem  pc 7 = (pc, A)
+reg8 _xform _mem _pc  x = error ("reg8: Invalid 8-bit register code " ++ (show x))
 
 -- | Convert an 8-bit register index to an ALU operand 'OperALU'
-aluReg8 :: Z80word
-        -> OperALU
-aluReg8 = ALUreg8 . reg8
+aluReg8 :: Z80reg8XForm
+        -> Z80memory
+        -> Z80addr
+        -> Z80word
+        -> (Z80addr, OperALU)
+aluReg8 xform mem pc operand = let (newpc, theReg) = (reg8 xform mem pc operand)
+                               in  (newpc, ALUreg8 theReg)
 
 -- | Convert condition code
 condC :: Z80word
@@ -490,6 +527,58 @@ condC 6 = POS
 condC 7 = MI
 condC x = error ("condC: Invalid condition code index " ++ (show x))
 
+-- | Compute signed, relative displacement address' absolute address, generating a label for it
+-- if not already in the disassembler's symbol table.
+displacementInstruction :: Z80memory
+                        -> Z80Disassembly
+                        -> Z80addr
+                        -> (OperAddr -> Z80instruction)
+                        -> (Z80addr, Z80instruction, Z80Disassembly)
+displacementInstruction image dstate pc ins =
+  let pc'   = fromIntegral (pc + 1) :: Int
+      disp  = fromIntegral (image ! pc') :: Int16
+      disp' = if disp <= 0x7f then
+                disp
+              else
+                -((disp `xor` 0xff) + 1)
+      symTab       = get symbolTab dstate
+      addrInRangeF = get addrInDisasmRange dstate
+      destAddr     = pc + (fromIntegral disp') + 2
+      isInSymtab   = Map.member destAddr symTab
+  in  if (addrInRangeF destAddr) && not isInSymtab then
+        let label   = BC.cons 'L' (BC.pack . show $ get labelNum dstate)
+        in (pc + 1, (ins . SymAddr) label, modify symbolTab (Map.insert destAddr label) $ modify labelNum (+ 1) dstate)
+      else if isInSymtab then
+             (pc + 1, (ins . SymAddr) $ symTab Map.! destAddr, dstate)
+           else
+             (pc + 1, (ins . AbsAddr) destAddr, dstate)
+
+-- | Generate a label for an absolute address, if in the disassembler's range and no other label
+-- exists for the address.
+symAbsAddress :: Z80memory                      -- ^ Z80 "memory"
+              -> Z80Disassembly                 -- ^ Current disassembly state
+              -> Bool                           -- ^ 'True': generate a label for the address, if one doesn't already exist
+              -> ByteString                     -- ^ Label prefix, if one is generated
+              -> Z80addr
+              -> (OperAddr -> Z80instruction)
+              -> (Z80addr, Z80instruction, Z80Disassembly)
+symAbsAddress image dstate makeLabel prefix pc ins =
+  let destAddr     = getAddr image (pc + 1)
+      symTab       = get symbolTab dstate
+      addrInRangeF = get addrInDisasmRange dstate
+      isInSymtab   = Map.member destAddr symTab
+      defaultTuple = (pc + 2, (ins . AbsAddr) destAddr, dstate)
+  in  if (addrInRangeF destAddr) && not isInSymtab then
+        if makeLabel then
+          let label   = BC.append prefix (BC.pack . show $ get labelNum dstate)
+          in (pc + 2, (ins . SymAddr) label, modify symbolTab (Map.insert destAddr label) $ modify labelNum (+ 1) dstate)
+        else
+          defaultTuple
+      else if isInSymtab then
+             (pc + 2, (ins . SymAddr) $ symTab Map.! destAddr, dstate)
+           else
+             defaultTuple
+
 -- | Fetch an absolute (16-bit) address
 getAddr :: Z80memory
         -> Z80addr
@@ -498,31 +587,3 @@ getAddr image pc = let pc' = fromIntegral pc :: Int
                        lo = fromIntegral (image ! pc') :: Z80addr
                        hi = fromIntegral (image ! (pc' + 1)) :: Z80addr
                     in (shiftL hi 8) .|. lo
-
-displacementInstruction :: Z80memory
-                        -> Z80addr
-                        -> (Z80addr -> Instruction)
-                        -> (Z80addr, Instruction)
-displacementInstruction image pc ins = let pc'   = fromIntegral (pc + 1) :: Int
-                                           disp  = fromIntegral (image ! pc') :: Int16
-                                           disp' = fromIntegral (if disp <= 0x7f then
-                                                                   disp
-                                                                 else
-                                                                   -((disp `xor` 0xff) + 1))
-                                       in  (pc + 1, ins $ (pc + disp' + 2))
-
--- | Get a byte
-getWord :: Z80memory
-        -> Z80addr
-        -> Z80word
-getWord image pc = let pc' = fromIntegral pc :: Int
-                   in  image ! pc'
-
--- | Get following byte (shorthand)
-getNextWord :: Z80memory
-            -> Z80addr
-            -> Z80word
-getNextWord image pc = getWord image (pc + 1)
-
-errorStr :: String
-errorStr = "z80disassembler: error: "

@@ -155,27 +155,35 @@ formatBytes bytes = padTo lenInsBytes $ BC.intercalate " " [ upperHex x | x <- D
 
 -- Lengths of various output columns:
 
+-- | Length of instruction opcode output: 8 bytes max to dump, 3 spaces per byte
 lenInsBytes :: Int64
-lenInsBytes = (lenAsChars * 3)                  -- ^ 8 bytes max to dump, 3 spaces per byte
-
+lenInsBytes = (lenAsChars * 3)
+-- | Length of opcode-as-characters output: 8 characters, as the bytes are dumped as characters
 lenAsChars :: Int64
-lenAsChars = 8                                  -- ^ 8 characters, as the bytes are dumped as characters
-
+lenAsChars = 8
+-- | Length of the label colum: 8 characters plus ": "
 lenSymLabel :: Int64
-lenSymLabel = BC.length("XXXXXXXXXXXX") + 2     -- ^ Label colum is 8 characters plus ": "
-
-lenInstruction :: Int64                         -- ^ Total length of the instruction+operands output
+lenSymLabel = BC.length("XXXXXXXXXXXX") + 2
+-- | Total length of the instruction+operands output
+lenInstruction :: Int64
 lenInstruction = 24
-
-lenMnemonic :: Int64                            -- ^ Length of the instruction mnemonic
-lenMnemonic = 8
-
+-- | Length of the instruction mnemonic
+lenMnemonic :: Int64
+lenMnemonic = 6
+-- | Length of the output address
+lenAddress :: Int64
+lenAddress = 4 + 2                              -- "XXXX" ++ ": "
+-- | Length of the line's prefix
+lenOutputPrefix :: Int64
+lenOutputPrefix = lenAddress + lenInsBytes + lenAsChars + 3
+-- | Total length of each output line:
 lenOutputLine :: Int64
-lenOutputLine = lenInsBytes + lenAsChars + 2 + lenSymLabel + lenInstruction
+lenOutputLine = lenOutputPrefix + lenSymLabel + lenInstruction
 
-formatInstruction :: Z80Disassembly
-                  -> Instruction
-                  -> (ByteString, ByteString)
+-- | The main workhourse of this module: Format a 'Z80instruction' as the tuple '(mnemonic, operands)'
+formatInstruction :: Z80Disassembly             -- ^ Disassembly state, used to grab the disassembly symbol table
+                  -> Z80instruction             -- ^ Instruction to format
+                  -> (ByteString, ByteString)   -- ^ '(mnemonic, operands)' result tuple
 
 formatInstruction _dstate (Z80undef _)            = zeroOperands "???"
 formatInstruction _dstate (LD8 x)                 = oneOperand "LD" x
@@ -281,12 +289,14 @@ oneOperand mne op = (mne, formatOperand op)
 
 -- | Disassembly output with an instruction having one operand
 oneOperandAddr :: ByteString
-               -> Z80addr
+               -> OperAddr
                -> Z80Disassembly
                -> (ByteString, ByteString)
-oneOperandAddr mne addr dstate = case Map.lookup addr (get symbolTab dstate) of
-                                   Nothing    -> (mne, formatOperand addr)
-                                   Just label -> (mne, label)
+oneOperandAddr mne addr dstate = case addr of
+                                   (AbsAddr absAddr) -> case Map.lookup absAddr (get symbolTab dstate) of
+                                                          Nothing    -> (mne, formatOperand absAddr)
+                                                          Just label -> (mne, label)
+                                   (SymAddr label)   -> (mne, label)
 
 -- | Disassembly output with a two operand instruction
 twoOperands :: forall operand1 operand2. (DisOperandFormat operand1, DisOperandFormat operand2) =>
@@ -304,14 +314,16 @@ twoOperands mne op1 op2 = (mne, BC.concat [ formatOperand op1
 twoOperandAddr :: forall operand1. (DisOperandFormat operand1) =>
                   ByteString
                -> operand1
-               -> Z80addr
+               -> OperAddr
                -> Z80Disassembly
             -> (ByteString, ByteString)
 twoOperandAddr mne op1 addr dstate = (mne, BC.concat [ formatOperand op1
                                                      , ", "
-                                                     , (case Map.lookup addr (get symbolTab dstate) of
-                                                            Nothing    -> formatOperand addr
-                                                            Just label -> label
+                                                     , (case addr of 
+                                                          (AbsAddr absAddr) -> case Map.lookup absAddr (get symbolTab dstate) of
+                                                                                 Nothing    -> formatOperand absAddr
+                                                                                 Just label -> label
+                                                          (SymAddr label)   -> label
                                                        )
                                                      ]
                                      )
@@ -320,17 +332,14 @@ twoOperandAddr mne op1 addr dstate = (mne, BC.concat [ formatOperand op1
 accumLoadStore :: AccumLoadStore                -- ^ Operand to output
                -> Bool                          -- ^ True = store, False = load
                -> ByteString
-accumLoadStore operand loadStore =
+accumLoadStore operand isStore =
   let arg1 = case operand of
                BCIndirect           -> "(BC)"
                DEIndirect           -> "(DE)"
-               (Imm16Indirect addr) -> BC.concat [ "("
-                                                 , formatOperand addr
-                                                 , ")"
-                                                 ]
+               (Imm16Indirect addr) -> BC.cons '(' $ BC.snoc (formatOperand addr) ')'
                IReg                 -> "I"
                RReg                 -> "R"
-  in  if loadStore then
+  in  if isStore then
         BC.append arg1 ", A"
       else
         BC.append "A, " arg1
@@ -371,6 +380,8 @@ ioPortOperand port inOut = case port of
                                                else
                                                  "(C), 0"
 
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
 class DisOperandFormat x where
   formatOperand :: x -> ByteString
 
@@ -391,12 +402,10 @@ instance DisOperandFormat OperALU where
   formatOperand (ALUimm imm) = formatOperand imm
   formatOperand (ALUreg8 r) = formatOperand r
   formatOperand (ALUHLindirect) = "(HL)"
-  formatOperand (ALUIXindirect disp) = BC.append ", (IX" (BC.append (showDisp disp) ")")
-  formatOperand (ALUIYindirect disp) = BC.append ", (IY" (BC.append (showDisp disp) ")")
 
 instance DisOperandFormat OperExtendedALU where
-  formatOperand (OrdinaryALU op) = formatOperand op
-  formatOperand (HLRegPairALU rp) = BC.append "HL, " (formatOperand rp)
+  formatOperand (ALU8 op)  = formatOperand op
+  formatOperand (ALU16 rp) = BC.append "HL, " (formatOperand rp)
 
 instance DisOperandFormat RegPairSP where
   formatOperand (RPair16 r) = formatOperand r
@@ -411,25 +420,39 @@ instance DisOperandFormat Z80reg8 where
   formatOperand H = "H"
   formatOperand L = "L"
   formatOperand HLindirect = "(HL)"
+  formatOperand (IXindirect disp) = BC.concat ["(IX"
+                                              , showDisp disp
+                                              , ")"
+                                              ]
+  formatOperand (IYindirect disp) = BC.concat [ "(IY"
+                                              , showDisp disp
+                                              , ")"
+                                              ]
 
 instance DisOperandFormat Z80reg16 where
   formatOperand BC = "BC"
   formatOperand DE = "DE"
   formatOperand HL = "HL"
+  formatOperand IX = "IX"
+  formatOperand IY = "IY"
 
 instance DisOperandFormat Z80condC where
-  formatOperand NZ  = "NZ"
-  formatOperand Z = "Z"
-  formatOperand NC = "NC"
-  formatOperand CY = "C"
-  formatOperand PO = "PO"
-  formatOperand PE = "PE"
-  formatOperand POS = "P"
-  formatOperand MI = "M"
+  formatOperand NZ   = "NZ"
+  formatOperand Z    = "Z"
+  formatOperand NC   = "NC"
+  formatOperand CY   = "C"
+  formatOperand PO   = "PO"
+  formatOperand PE   = "PE"
+  formatOperand POS  = "P"
+  formatOperand MI   = "M"
 
 instance DisOperandFormat RegPairAF where
   formatOperand (RPair16' r) = formatOperand r
   formatOperand AF = "AF"
+
+instance DisOperandFormat OperAddr where
+  formatOperand (AbsAddr addr) = formatOperand addr
+  formatOperand (SymAddr label) = label
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -466,7 +489,24 @@ formatPseudo (Ascii sAddr str) dstate =
                 , fmtByteGroup dstate str (sAddr + 8) 8 outF
                 ]
 
-formatPseudo (Equate _saddr _label) _dstate = BC.empty
+formatPseudo (DisOrigin origin) _dstate   = BC.concat [ BC.replicate (lenOutputPrefix + lenSymLabel) ' '
+                                                      , padTo lenMnemonic "ORG"
+                                                      , asHex origin
+                                                      , "\n"
+                                                      ]
+
+formatPseudo (AddrEquate label addr) _dstate = BC.concat [ BC.replicate lenOutputPrefix ' '
+                                                         , padTo lenSymLabel label
+                                                         , padTo lenMnemonic "="
+                                                         , upperHex addr
+                                                         , "\n"
+                                                         ]
+
+formatPseudo (LineComment comment) _dstate = BC.concat [ BC.replicate lenOutputPrefix ' '
+                                                       , "; "
+                                                       , comment
+                                                       , "\n"
+                                                       ]
 
 -- | Format groups of bytes by groups of 8
 fmtByteGroup :: Z80Disassembly
@@ -494,7 +534,7 @@ fmtByteGroup dstate bytes addr idx outF
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-showDisp :: Z80word
+showDisp :: Z80disp
          -> ByteString
 showDisp disp
   | disp < 0  = BC.pack . show $ disp

@@ -63,7 +63,8 @@ executable trs80l2rom
                       bytestring >= 0.9,
                       vector >= 0.10,
                       fclabels,
-                      transformers
+                      transformers,
+                      haskell-src
   ghc-options:        -Wall
   default-extensions: MultiParamTypeClasses, TypeSynonymInstances, GADTs
   other-modules:   

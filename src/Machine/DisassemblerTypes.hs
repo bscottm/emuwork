@@ -10,7 +10,6 @@ module Machine.DisassemblerTypes
   , mkInitialDisassembly
   ) where
 
-import Data.Label
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Sequence (Seq)
@@ -34,8 +33,8 @@ data Disassembly addrType wordType instructionType pseudoOpType =
   { -- | A general-purpose label counter, useful for local labels, e.g., "L1", "L2", etc., that are inserted into the symbol table.
     _labelNum :: Int
   -- | Predicate: Is the address in the disassembler's range? Note that the default function always returns 'True'.
-  , _addrInDisasmRange :: addrType              -- ^ The address to test
-                       -> Bool                  -- ^ 'True' if in disassembler's range, 'False' otherwise.
+  , _addrInDisasmRange :: addrType              -- The address to test
+                       -> Bool                  -- 'True' if in disassembler's range, 'False' otherwise.
   -- | The symbol table mapping between addresses and symbol names in 'disasmSeq'
   , _symbolTab :: Map addrType ByteString
   -- | The sequence of tuples, each of which is an address, words corresponding to the disassembled instruction, and the
@@ -57,9 +56,11 @@ class Disassembler addrType dispType wordType instructionType pseudoOpType where
 -- binary.
 data NullPseudoOp = NullPseudoOp
 
--- Emit Template Haskell splices for lenses
-mkLabels [ ''Disassembly ]
-
 -- | Make an initial 'Disassembly' record
 mkInitialDisassembly :: Disassembly addrType wordType instructionType pseudoOpType
-mkInitialDisassembly = Disassembly 0 (\_ -> True) Map.empty DS.empty
+mkInitialDisassembly = Disassembly
+                       { _labelNum           = 0
+                       , _addrInDisasmRange  = (\_ -> True)
+                       , _symbolTab          = Map.empty
+                       , _disasmSeq          = DS.empty
+                       }
