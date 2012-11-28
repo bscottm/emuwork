@@ -1,18 +1,22 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeFamilies #-}
+--
 -- | The Z80 disassembler module
 module Z80.Disassembler
   ( -- * Types
-    Z80Disassembly
+    Z80DisasmState(..)
+  , Z80DisasmElt(..)
   , Z80PseudoOps(..)
+  , Disassembly(..)
 
     -- * Functions
-  , z80disassembler
   , z80disbytes
   , z80disasciiz
   , z80disascii
+  , mkInitialDisassembly
   , group0decode
   , group1decode
   , group2decode
@@ -24,10 +28,12 @@ module Z80.Disassembler
 import Data.Label
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
-import Data.Sequence ((|>))
+import Data.Map (Map)
+import qualified Data.Map as Map
+import Data.Sequence (Seq, (|>))
+import qualified Data.Sequence as Seq
 import Data.Vector.Unboxed (Vector, (!?), (!))
 import qualified Data.Vector.Unboxed as DVU
-import qualified Data.Map as Map
 import Data.ByteString.Lazy.Char8 (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BC
 import Data.Int
@@ -36,9 +42,6 @@ import Data.Bits
 import Machine.DisassemblerTypes
 import Z80.Processor
 import Z80.InstructionSet
-
--- Emit Template Haskell hair for lenses used to set/get/modify the Disassembly state:
-mkLabels [ ''Disassembly, ''Z80indexTransform ]
 
 -- | Pseudo disassembler operations: These are elements such as bytes to dump, various types of strings, etc.
 data Z80PseudoOps where
@@ -76,73 +79,53 @@ data Z80PseudoOps where
   LineComment :: ByteString
               -> Z80PseudoOps
 
--- | Shorthand for the 'Disassembly' state for the Z80
-type Z80Disassembly = Disassembly Z80addr Z80word Z80instruction Z80PseudoOps
+-- | Disassembler state, which indexes the 'Disassembly' type family.
+data Z80DisasmState =
+  Z80DisasmState
+  { -- | A general-purpose label counter, useful for local labels, e.g., "L1", "L2", etc., that are inserted into the symbol table.
+    _labelNum :: Int
+  -- | Predicate: Is the address in the disassembler's range? Note that the default function always returns 'True'.
+  , _addrInDisasmRange :: Z80addr               -- The address to test
+                       -> Bool                  -- 'True' if in disassembler's range, 'False' otherwise.
+  -- | The symbol table mapping between addresses and symbol names in 'disasmSeq'
+  , _symbolTab :: Map Z80addr  ByteString
+  -- | The sequence of tuples, each of which is an address, words corresponding to the disassembled instruction, and the
+  -- disassembled instruction.
+  , _disasmSeq :: Seq Z80DisasmElt
+  }
 
--- | The Z80 disassembler, which just invokes the 'Disassembly' class instance of 'disassemble'
-z80disassembler :: Z80memory                    -- ^ Vector of bytes to disassemble
-                -> Z80addr                      -- ^ Origin, i.e., output's starting address
-                -> Z80addr                      -- ^ Start address, relative to origin, to start disassembling
-                -> Z80disp                      -- ^ Number of bytes to disassemble
-                -> Z80Disassembly               -- ^ Existing list of disassembled instructions
-                -> Z80Disassembly
-z80disassembler image origin startAddr nBytes disassembled = disassemble image origin startAddr nBytes disassembled
+-- | Make an initial 'Z80DisasmState' record
+mkInitialDisassembly :: Z80DisasmState
+mkInitialDisassembly = Z80DisasmState
+                       { _labelNum           = 0
+                       , _addrInDisasmRange  = (\_ -> True)
+                       , _symbolTab          = Map.empty
+                       , _disasmSeq          = Seq.empty
+                       }
 
--- | Grab a sequence of bytes from the memory image, add to the disassembly sequence as a 'ByteRange' pseudo instruction
-z80disbytes :: Z80memory                        -- ^ Vector of bytes from which to extract some data
-            -> Z80addr                          -- ^ Output's origin address
-            -> Z80addr                          -- ^ Start address, relative to the origin, to start extracting bytes
-            -> Z80disp                          -- ^ Number of bytes to extract
-            -> Z80Disassembly                   -- ^ Current disassembly state
-            -> Z80Disassembly                   -- ^ Resulting diassembly state
-z80disbytes mem origin sAddr nBytes dstate = let sAddr' = fromIntegral sAddr
-                                                 nBytes' = fromIntegral nBytes
-                                                 theBytes = ByteRange (sAddr + origin) $ DVU.slice sAddr' nBytes' mem
-                                             in  modify disasmSeq (|> DisasmPseudo theBytes) dstate
+-- | 'DisasmElement' is a dissassembly element: a disassembled instruction (with corresponding address and instruction
+-- words) or pseudo operation.
+data Z80DisasmElt where
+  DisasmInst   :: Z80addr
+               -> Vector Z80word
+               -> Z80instruction
+               -> Z80DisasmElt
+  DisasmPseudo :: Z80PseudoOps
+               -> Z80DisasmElt
 
--- | Grab (what is presumably) an ASCII string sequence, terminating at the first 0 encountered. This is somewhat inefficient
--- because multiple 'Vector' slices get created.
-z80disasciiz :: Z80memory                       -- ^ Vector of bytes from which to extract some data
-             -> Z80addr                         -- ^ Output's origin address
-             -> Z80addr                         -- ^ Start address, relative to the origin, to start extracting bytes
-             -> Z80Disassembly                  -- ^ Current disassembly state
-             -> Z80Disassembly                  -- ^ Resulting diassembly state
-z80disasciiz mem origin sAddr dstate = let sAddr'       = fromIntegral sAddr
-                                           toSearch     = DVU.slice sAddr' (DVU.length mem - sAddr') mem
-                                           foundStr idx = DisasmPseudo (AsciiZ (sAddr + origin) (DVU.slice sAddr' (idx + 1) mem))
-                                       in  case DVU.elemIndex 0 toSearch of
-                                             Nothing  -> dstate -- No found?
-                                             Just idx -> modify disasmSeq (|> foundStr idx) dstate
-
--- | Grab a sequence of bytes from the memory image, add to the disassembly sequence as a 'ByteRange' pseudo instruction
-z80disascii :: Z80memory                        -- ^ Vector of bytes from which to extract some data
-            -> Z80addr                          -- ^ Output's origin address
-            -> Z80addr                          -- ^ Start address, relative to the origin, to start extracting bytes
-            -> Z80disp                          -- ^ Number of bytes to extract
-            -> Z80Disassembly                   -- ^ Current disassembly state
-            -> Z80Disassembly                   -- ^ Resulting diassembly state
-z80disascii mem origin sAddr nBytes dstate = let sAddr'    = fromIntegral sAddr
-                                                 nBytes'  = fromIntegral nBytes
-                                                 theBytes = Ascii (sAddr + origin) $ DVU.slice sAddr' nBytes' mem
-                                             in  modify disasmSeq (|> DisasmPseudo theBytes) dstate
-
--- | The 'Disassembly' class instance for the Z80.
-instance Disassembler Z80addr Z80disp Z80word Z80instruction Z80PseudoOps where
-    disassemble mem origin startAddr nBytes disassembled = disasm mem origin pc lastpc disassembled
-      where
-        pc = startAddr - origin
-        lastpc = pc + (fromIntegral nBytes)
+-- Emit Template Haskell hair for lenses used to set/get/modify the Disassembly state:
+mkLabelsMono [ ''Z80DisasmState, ''Z80indexTransform ]
 
 -- | Where the real work of the Z80 disassembly happens...
 disasm :: Z80memory                             -- ^ The "memory" vector of bytes
        -> Z80addr                               -- ^ The disassembly origin
        -> Z80addr                               -- ^ The disassembly start address, realtive to the origin
        -> Z80addr                               -- ^ The disassembly's last address
-       -> Z80Disassembly
-       -> Z80Disassembly
-disasm theMem origin thePc lastpc dstate
+       -> Disassembly Z80DisasmState
+       -> Disassembly Z80DisasmState
+disasm theMem origin thePc lastpc (Z80Disassembly dstate)
   {-  | trace ("disasm: pc = " ++ (show thePc)) False = undefined -}
-  | thePc >= lastpc = dstate
+  | thePc >= lastpc = Z80Disassembly dstate
   | otherwise =
     let opc = (theMem !? fromIntegral(thePc))
     in  case opc of
@@ -152,7 +135,7 @@ disasm theMem origin thePc lastpc dstate
                            0xfd       -> indexedPrefix z80iyTransform
                            _otherwise -> let (newpc, ins, dstate')  = decodeInst theMem thePc theOpc dstate z80nullTransform
                                              newDState              = mkDisasmInst thePc newpc ins dstate'
-                                         in  disasm theMem origin newpc lastpc newDState
+                                         in  disasm theMem origin newpc lastpc (Z80Disassembly newDState)
   where
     -- Note: modify comes from Data.Label
     mkDisasmInst oldpc newpc ins theDState = let disasmPC     = oldpc + origin
@@ -167,15 +150,65 @@ disasm theMem origin thePc lastpc dstate
                            in  case newOpc of
                                  -- Deal with "weird" IX bit operation layout
                                  0xcb       -> undefined
-                                 _otherwise -> disasm theMem origin newpc lastpc newDState
+                                 _otherwise -> disasm theMem origin newpc lastpc (Z80Disassembly newDState)
+
+-- | 'Disassembler' type family instance for the Z80's disassembler
+instance Disassembler Z80DisasmState Z80addr Z80word Z80disp where
+  data Disassembly Z80DisasmState   = Z80Disassembly Z80DisasmState
+
+  disassemble mem origin startAddr nBytes z80dstate =
+    let pc = startAddr - origin
+        lastpc = pc + (fromIntegral nBytes)
+    in  disasm mem origin pc lastpc z80dstate
+
+-- | Grab a sequence of bytes from the memory image, add to the disassembly sequence as a 'ByteRange' pseudo instruction
+z80disbytes :: Z80memory                        -- ^ Vector of bytes from which to extract some data
+            -> Z80addr                          -- ^ Output's origin address
+            -> Z80addr                          -- ^ Start address, relative to the origin, to start extracting bytes
+            -> Z80disp                          -- ^ Number of bytes to extract
+            -> Disassembly Z80DisasmState       -- ^ Current disassembly state
+            -> Disassembly Z80DisasmState       -- ^ Resulting diassembly state
+z80disbytes mem origin sAddr nBytes (Z80Disassembly dstate) =
+  let sAddr' = fromIntegral sAddr
+      nBytes' = fromIntegral nBytes
+      theBytes = ByteRange (sAddr + origin) $ DVU.slice sAddr' nBytes' mem
+  in  Z80Disassembly $ modify disasmSeq (|> DisasmPseudo theBytes) dstate
+
+-- | Grab (what is presumably) an ASCII string sequence, terminating at the first 0 encountered. This is somewhat inefficient
+-- because multiple 'Vector' slices get created.
+z80disasciiz :: Z80memory                       -- ^ Vector of bytes from which to extract some data
+             -> Z80addr                         -- ^ Output's origin address
+             -> Z80addr                         -- ^ Start address, relative to the origin, to start extracting bytes
+             -> Disassembly Z80DisasmState      -- ^ Current disassembly state
+             -> Disassembly Z80DisasmState      -- ^ Resulting diassembly state
+z80disasciiz mem origin sAddr (Z80Disassembly dstate) =
+  let sAddr'       = fromIntegral sAddr
+      toSearch     = DVU.slice sAddr' (DVU.length mem - sAddr') mem
+      foundStr idx = DisasmPseudo (AsciiZ (sAddr + origin) (DVU.slice sAddr' (idx + 1) mem))
+  in  case DVU.elemIndex 0 toSearch of
+        Nothing  -> Z80Disassembly dstate -- No found?
+        Just idx -> Z80Disassembly $ modify disasmSeq (|> foundStr idx) dstate
+
+-- | Grab a sequence of bytes from the memory image, add to the disassembly sequence as a 'ByteRange' pseudo instruction
+z80disascii :: Z80memory                        -- ^ Vector of bytes from which to extract some data
+            -> Z80addr                          -- ^ Output's origin address
+            -> Z80addr                          -- ^ Start address, relative to the origin, to start extracting bytes
+            -> Z80disp                          -- ^ Number of bytes to extract
+            -> Disassembly Z80DisasmState       -- ^ Current disassembly state
+            -> Disassembly Z80DisasmState       -- ^ Resulting diassembly state
+z80disascii mem origin sAddr nBytes (Z80Disassembly dstate) =
+  let sAddr'    = fromIntegral sAddr
+      nBytes'  = fromIntegral nBytes
+      theBytes = Ascii (sAddr + origin) $ DVU.slice sAddr' nBytes' mem
+  in  Z80Disassembly $ modify disasmSeq (|> DisasmPseudo theBytes) dstate
 
 -- | Decode one instruction, returning the new program counter and disassembly state.
 decodeInst :: Z80memory                         -- ^ The "memory" vector of bytes from which instructions are read
            -> Z80addr                           -- ^ The current PC from which the instruction will be decoded
            -> Z80word                           -- ^ Current opcode at the current PC
-           -> Z80Disassembly                    -- ^ Current disassembly state
+           -> Z80DisasmState                    -- ^ Current disassembly state
            -> Z80indexTransform                 -- ^ Register transform functions (convert HL to IX or IY, as needed)
-           -> (Z80addr, Z80instruction, Z80Disassembly) -- ^ Resulting disassembly state.
+           -> (Z80addr, Z80instruction, Z80DisasmState) -- ^ Resulting disassembly state.
 decodeInst theMem pc opc dstate xForms = 
   case (opc `shiftR` 6) .&. 3 of
     0          -> let (newpc, ins, dstate') = group0decode theMem dstate xForms pc opc
@@ -189,11 +222,11 @@ decodeInst theMem pc opc dstate xForms =
     _otherwise -> undefined
 
 group0decode :: Z80memory                       -- ^ Memory image
-             -> Z80Disassembly                  -- ^ Current disassembly state
+             -> Z80DisasmState                  -- ^ Current disassembly state
              -> Z80indexTransform               -- ^ Index register transform function
              -> Z80addr                         -- ^ Current PC
              -> Z80word                         -- ^ Opcode
-             -> (Z80addr, Z80instruction, Z80Disassembly) -- ^ (new PC, instruction, new disassembly state)
+             -> (Z80addr, Z80instruction, Z80DisasmState) -- ^ (new PC, instruction, new disassembly state)
 
 group0decode image dstate xForm pc opc
   | z == 0 = case y of
@@ -288,11 +321,11 @@ group2decode xForms mem pc opc =
 
 -- | Group 3 instructions
 group3decode :: Z80memory                       -- ^ Memory image
-             -> Z80Disassembly                  -- ^ Current disassembly state
+             -> Z80DisasmState                  -- ^ Current disassembly state
              -> Z80indexTransform               -- ^ HL to IX or IY conversion functions
              -> Z80addr                         -- ^ Current PC
              -> Z80word                         -- ^ Opcode
-             -> (Z80addr, Z80instruction, Z80Disassembly) -- ^ (new PC, instruction, new disassembly state)
+             -> (Z80addr, Z80instruction, Z80DisasmState) -- ^ (new PC, instruction, new disassembly state)
 group3decode image dstate xForm pc opc
   | z == 0          = (pc, RETCC . condC $ y, dstate)
   | z == 1, q == 0  = (pc, (POP . pairAF reg16XFormF) $ p, dstate)
@@ -380,9 +413,9 @@ rotOps = IntMap.fromList [ (0, RLC)
 
 -- | Decode 'ED'-prefixed instructions
 edPrefixDecode :: Z80memory
-               -> Z80Disassembly
+               -> Z80DisasmState
                -> Z80addr
-               -> (Z80addr, Z80instruction, Z80Disassembly)
+               -> (Z80addr, Z80instruction, Z80DisasmState)
 edPrefixDecode image dstate pc
   | x == 0 = invalid
   | x == 1, z == 0, y /= 6 = let (_, theReg) = reg8 nullXFormF image pc y
@@ -536,10 +569,10 @@ condC x = error ("condC: Invalid condition code index " ++ (show x))
 -- | Compute signed, relative displacement address' absolute address, generating a label for it
 -- if not already in the disassembler's symbol table.
 displacementInstruction :: Z80memory
-                        -> Z80Disassembly
+                        -> Z80DisasmState
                         -> Z80addr
                         -> (OperAddr -> Z80instruction)
-                        -> (Z80addr, Z80instruction, Z80Disassembly)
+                        -> (Z80addr, Z80instruction, Z80DisasmState)
 displacementInstruction mem dstate pc ins =
   let pc'   = fromIntegral (pc + 1) :: Int
       disp  = (fromIntegral (mem ! pc'):: Int16)
@@ -562,12 +595,12 @@ displacementInstruction mem dstate pc ins =
 -- | Generate a label for an absolute address, if in the disassembler's range and no other label
 -- exists for the address.
 symAbsAddress :: Z80memory                      -- ^ Z80 "memory"
-              -> Z80Disassembly                 -- ^ Current disassembly state
+              -> Z80DisasmState                 -- ^ Current disassembly state
               -> Bool                           -- ^ 'True': generate a label for the address, if one doesn't already exist
               -> ByteString                     -- ^ Label prefix, if one is generated
               -> Z80addr
               -> (OperAddr -> Z80instruction)
-              -> (Z80addr, Z80instruction, Z80Disassembly)
+              -> (Z80addr, Z80instruction, Z80DisasmState)
 symAbsAddress image dstate makeLabel prefix pc ins =
   let destAddr     = getAddr image (pc + 1)
       symTab       = get symbolTab dstate

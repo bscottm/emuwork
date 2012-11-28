@@ -2,6 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
+
 module Z80.DisasmOutput
   ( outputDisassembly
   ) where
@@ -19,18 +20,18 @@ import Data.Vector.Unboxed (Vector)
 import qualified Data.Vector.Unboxed as DVU
 
 import Machine.Utils
-import Machine.DisassemblerTypes
 import Z80.InstructionSet
 import Z80.Processor
 import Z80.Disassembler
 
 -- | Emit Template Haskell hair for lenses
-mkLabel ''Disassembly
+mkLabel ''Z80DisasmState
 
 -- | The disassembly output function
-outputDisassembly :: Z80Disassembly -> ByteString
-outputDisassembly dstate = BC.append (doOutput (viewl (get disasmSeq dstate)) BC.empty)
-                                     (formatSymTab (get symbolTab dstate))
+outputDisassembly :: (Disassembly Z80DisasmState)
+                  -> ByteString
+outputDisassembly (Z80Disassembly dstate) = BC.append (doOutput (viewl (get disasmSeq dstate)) BC.empty)
+                                                      (formatSymTab (get symbolTab dstate))
   where
     -- | Recurse through the left view
     doOutput EmptyL acc = acc
@@ -114,7 +115,7 @@ oldStyleHex x = BC.snoc (upperHex x) 'H'
 -- | Format the beginning of the line (address, bytes, label, etc.)
 formatLinePrefix :: Vector Z80word
                  -> Z80addr
-                 -> Z80Disassembly
+                 -> Z80DisasmState
                  -> ByteString
 formatLinePrefix bytes addr dstate =
   let label               = case Map.lookup addr (get symbolTab dstate) of
@@ -181,7 +182,7 @@ lenOutputLine :: Int64
 lenOutputLine = lenOutputPrefix + lenSymLabel + lenInstruction
 
 -- | The main workhourse of this module: Format a 'Z80instruction' as the tuple '(mnemonic, operands)'
-formatInstruction :: Z80Disassembly             -- ^ Disassembly state, used to grab the disassembly symbol table
+formatInstruction :: Z80DisasmState             -- ^ Disassembly state, used to grab the disassembly symbol table
                   -> Z80instruction             -- ^ Instruction to format
                   -> (ByteString, ByteString)   -- ^ '(mnemonic, operands)' result tuple
 
@@ -287,19 +288,6 @@ oneOperand :: forall operand. (DisOperandFormat operand) =>
            -> (ByteString, ByteString)
 oneOperand mne op = (mne, formatOperand op)
 
-{-
--- | Disassembly output with an instruction having one operand
-oneOperandAddr :: ByteString
-               -> OperAddr
-               -> Z80Disassembly
-               -> (ByteString, ByteString)
-oneOperandAddr mne addr dstate = case addr of
-                                   (AbsAddr absAddr) -> case Map.lookup absAddr (get symbolTab dstate) of
-                                                          Nothing    -> (mne, formatOperand absAddr)
-                                                          Just label -> (mne, label)
-                                   (SymAddr label)   -> (mne, label)
--}
-
 -- | Disassembly output with a two operand instruction
 twoOperands :: forall operand1 operand2. (DisOperandFormat operand1, DisOperandFormat operand2) =>
                ByteString
@@ -311,26 +299,6 @@ twoOperands mne op1 op2 = (mne, BC.concat [ formatOperand op1
                                           , formatOperand op2
                                           ]
                           )
-
-{-
--- | Disassembly output with a two operand instruction, second operand is an address
-twoOperandAddr :: forall operand1. (DisOperandFormat operand1) =>
-                  ByteString
-               -> operand1
-               -> OperAddr
-               -> Z80Disassembly
-            -> (ByteString, ByteString)
-twoOperandAddr mne op1 addr dstate = (mne, BC.concat [ formatOperand op1
-                                                     , ", "
-                                                     , (case addr of 
-                                                          (AbsAddr absAddr) -> case Map.lookup absAddr (get symbolTab dstate) of
-                                                                                 Nothing    -> formatOperand absAddr
-                                                                                 Just label -> label
-                                                          (SymAddr label)   -> label
-                                                       )
-                                                     ]
-                                     )
--}
 
 -- | Output an accumulator load or store
 accumLoadStore :: AccumLoadStore                -- ^ Operand to output
@@ -461,7 +429,7 @@ instance DisOperandFormat OperAddr where
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 formatPseudo :: Z80PseudoOps
-             -> Z80Disassembly
+             -> Z80DisasmState
              -> ByteString
 
 formatPseudo (ByteRange sAddr bytes) dstate = 
@@ -529,7 +497,7 @@ formatPseudo (LineComment comment) _dstate = BC.concat [ BC.replicate lenOutputP
                                                        ]
 
 -- | Format groups of bytes by groups of 8
-fmtByteGroup :: Z80Disassembly
+fmtByteGroup :: Z80DisasmState
              -> Vector Z80word
              -> Z80addr
              -> Int

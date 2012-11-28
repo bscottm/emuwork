@@ -1,7 +1,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeFamilies #-}
 
 -- | The venerable TRS-80 Level II ROM disassembly module.
 --
@@ -34,7 +34,7 @@ import Z80.DisasmOutput
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- Template Haskell hair for lenses
-mkLabel ''Disassembly
+mkLabel ''Z80DisasmState
 
 -- | Disassembler "guidance": When to disassemble, when to dump bytes, ... basically guidance to the drive
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
@@ -80,7 +80,7 @@ trs80Rom imgName = readRawWord8Vector imgName
                    -- >> putStrLn (prettyPrint actions)
   where
     -- Initial disassembly state: known symbols and disassembly address range predicate
-    initialDisassembly = set symbolTab knownSymbols $ set addrInDisasmRange trs80RomRange mkInitialDisassembly
+    initialDisassembly = Z80Disassembly $ set symbolTab knownSymbols $ set addrInDisasmRange trs80RomRange mkInitialDisassembly
     lastAddr = 0x2fff
     -- ROM range for 'addrInDisasmRange' predicate
     trs80RomRange addr = addr >= romOrigin && addr <= lastAddr
@@ -193,7 +193,16 @@ actions = [ SetOrigin romOrigin
           , GrabBytes romOrigin 0x192e 2
           , GrabAscii romOrigin 0x1930 5
           , GrabBytes romOrigin 0x1935 1
-          , nextSeg 0x1935 0x2fff
+          , nextSeg 0x1935 0x1c96
+          , AddLineComment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
+          , AddLineComment "Compare A against character following the RST 08 instruction."
+          , AddLineComment "Return address is pointed to by SP, which is transferred into HL"
+          , AddLineComment "The return address is incremented so that the RET returns to the"
+          , AddLineComment "instruction following the character."
+          , AddLineComment BS.empty
+          , AddLineComment "It's a neat hack."
+          , AddLineComment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
+          , nextSeg 0x1c96 0x2fff
           ]
   where
     nextSeg sAddr eAddr = DoDisasm romOrigin sAddr (fromIntegral (eAddr - sAddr) :: Z80disp)
@@ -297,27 +306,34 @@ knownSymbols   = Map.fromList [ (0x0000, "RST00")
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 collectRom :: Z80memory
-           -> Z80Disassembly
+           -> Disassembly Z80DisasmState
            -> [Guidance]
-           -> Z80Disassembly
-collectRom img dstate theActions = DL.foldl (doAction img) dstate theActions
+           -> Disassembly Z80DisasmState
+collectRom img dstate theActions = DL.foldl' (doAction img) dstate theActions
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 doAction :: Z80memory
-         -> Z80Disassembly
+         -> Disassembly Z80DisasmState
          -> Guidance
-         -> Z80Disassembly
-doAction _img dstate (SetOrigin origin)               = modify disasmSeq (|> DisasmPseudo (DisOrigin origin)) dstate
-doAction _img dstate (AddAddrEquate label addr)       = modify symbolTab (Map.insert addr label) $
-                                                        modify disasmSeq (|> DisasmPseudo (AddrEquate label addr)) dstate
-doAction _img dstate (AddLineComment comment)         = modify disasmSeq (|> DisasmPseudo (LineComment comment)) dstate
-doAction img dstate (DoDisasm origin sAddr nBytes)    = z80disassembler img origin sAddr nBytes dstate
-doAction img dstate (GrabBytes origin sAddr nBytes)   = z80disbytes img origin sAddr nBytes dstate
-doAction img dstate (GrabAsciiZ origin sAddr)         = z80disasciiz img origin sAddr dstate
-doAction img dstate (GrabAscii origin sAddr nBytes)   = z80disascii img origin sAddr nBytes dstate
-doAction img dstate (HighBitTable origin addr nBytes) = highbitCharTable img origin addr nBytes dstate
-doAction img dstate (JumpTable origin addr nBytes)    = jumpTable img origin addr nBytes dstate
+         -> Disassembly Z80DisasmState
+
+doAction _img (Z80Disassembly dstate) (SetOrigin origin)               =
+  Z80Disassembly $ modify disasmSeq (|> DisasmPseudo (DisOrigin origin)) dstate
+
+doAction _img (Z80Disassembly dstate) (AddAddrEquate label addr)       =
+  Z80Disassembly $ modify symbolTab (Map.insert addr label) $
+                   modify disasmSeq (|> DisasmPseudo (AddrEquate label addr)) dstate
+
+doAction _img (Z80Disassembly dstate) (AddLineComment comment)         =
+  Z80Disassembly $ modify disasmSeq (|> DisasmPseudo (LineComment comment)) dstate
+
+doAction img dstate (DoDisasm origin sAddr nBytes)                     = disassemble img origin sAddr nBytes dstate
+doAction img dstate (GrabBytes origin sAddr nBytes)                    = z80disbytes img origin sAddr nBytes dstate
+doAction img dstate (GrabAsciiZ origin sAddr)                          = z80disasciiz img origin sAddr dstate
+doAction img dstate (GrabAscii origin sAddr nBytes)                    = z80disascii img origin sAddr nBytes dstate
+doAction img dstate (HighBitTable origin addr nBytes)                  = highbitCharTable img origin addr nBytes dstate
+doAction img dstate (JumpTable origin addr nBytes)                     = jumpTable img origin addr nBytes dstate
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -328,8 +344,8 @@ highbitCharTable :: Z80memory                   -- ^ Vector of bytes from which 
                  -> Z80addr                     -- ^ Output's origin address
                  -> Z80addr                     -- ^ Start address, relative to the origin, to start extracting bytes
                  -> Z80disp                     -- ^ Number of bytes to extract
-                 -> Z80Disassembly              -- ^ Current disassembly state
-                 -> Z80Disassembly              -- ^ Resulting diassembly state
+                 -> Disassembly Z80DisasmState  -- ^ Current disassembly state
+                 -> Disassembly Z80DisasmState  -- ^ Resulting diassembly state
 highbitCharTable mem origin sAddr nBytes dstate =
   let sAddr'   = fromIntegral sAddr
       nBytes'  = fromIntegral nBytes
@@ -345,7 +361,7 @@ highbitCharTable mem origin sAddr nBytes dstate =
               memidx' = byteidxs ! (idx + 1)
           in  grabStrings (idx + 1) $ grabString memidx memidx' theDState
       -- Grab an individual string from a memory range
-      grabString memidx memidx' theDState =
+      grabString memidx memidx' (Z80Disassembly z80dstate) =
         let theChar = mem ! memidx
             theChar' = fromIntegral theChar :: Int
             firstByte = BS.concat [ "'"
@@ -355,11 +371,11 @@ highbitCharTable mem origin sAddr nBytes dstate =
             firstBytePseudo = DisasmPseudo $ ByteExpression (origin + (fromIntegral memidx)) firstByte theChar
             theString = DisasmPseudo $ Ascii (origin + (fromIntegral memidx) + 1)
                                              (DVU.slice (memidx + 1) (memidx' - memidx - 1) mem)
-        in  if (memidx + 1) /= memidx' then
-              modify disasmSeq (|> theString) $
-              modify disasmSeq (|> firstBytePseudo) theDState
-            else
-              modify disasmSeq (|> firstBytePseudo) theDState
+        in  Z80Disassembly $ if (memidx + 1) /= memidx' then
+                               modify disasmSeq (|> theString) $
+                               modify disasmSeq (|> firstBytePseudo) z80dstate
+                             else
+                               modify disasmSeq (|> firstBytePseudo) z80dstate
   in  grabStrings 0 dstate
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -368,18 +384,18 @@ jumpTable :: Z80memory                   -- ^ Vector of bytes from which to extr
           -> Z80addr                     -- ^ Output's origin address
           -> Z80addr                     -- ^ Start address, relative to the origin, to start extracting bytes
           -> Z80disp                     -- ^ Number of bytes to extract
-          -> Z80Disassembly              -- ^ Current disassembly state
-          -> Z80Disassembly              -- ^ Resulting diassembly state
+          -> Disassembly Z80DisasmState  -- ^ Current disassembly state
+          -> Disassembly Z80DisasmState  -- ^ Resulting diassembly state
 jumpTable mem origin sAddr nBytes dstate =
   let endAddr = sAddr + (fromIntegral nBytes)
-      generateAddr addr theDState
+      generateAddr addr theDState@(Z80Disassembly z80dstate)
         | addr < endAddr - 2  = generateAddr (addr + 2) $ operAddrPseudo (getAddress mem addr)
         | addr == endAddr - 2 = operAddrPseudo (getAddress mem addr)
         | otherwise           = z80disbytes mem origin addr (fromIntegral $ endAddr - addr) theDState
         where
-          operAddrPseudo theAddr = modify disasmSeq (|> DisasmPseudo (operAddr theAddr)) theDState
+          operAddrPseudo theAddr = Z80Disassembly $ modify disasmSeq (|> DisasmPseudo (operAddr theAddr)) z80dstate
           operAddr theAddr = 
-            let symTab = get symbolTab theDState
+            let symTab = get symbolTab z80dstate
                 oper   = if Map.member theAddr symTab then
                            SymAddr $ symTab Map.! theAddr
                          else

@@ -149,12 +149,13 @@ cmdDisassemble disAsm =
     doDisAsm img theOrigin theStartAddr theNBytesToDis theImageLen
       | theStartAddr < theOrigin =
         hPutStrLn stderr "start address < origin"
-        >> return mkInitialDisassembly
+        >> return z80disasmState
       | theStartAddr + fromIntegral(theNBytesToDis) > fromIntegral theImageLen =
         hPutStrLn stderr "number of bytes to disassemble exceeds image length, truncating"
-        >> (return $ z80disassembler img theStartAddr (theStartAddr - theOrigin) theNBytesToDis mkInitialDisassembly)
+        >> (return $ disassemble img theStartAddr (theStartAddr - theOrigin) theNBytesToDis z80disasmState)
       | otherwise =
-        return $ z80disassembler img theOrigin theStartAddr theNBytesToDis mkInitialDisassembly
+        return $ disassemble img theOrigin theStartAddr theNBytesToDis z80disasmState
+    z80disasmState = Z80Disassembly mkInitialDisassembly
 
 -- | Ensure that 'Z80Command' can be fully evaluated by 'deepseq'. Notably, this is used to catch
 -- integer parsing errors as early as possible.

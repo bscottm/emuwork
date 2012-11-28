@@ -510,14 +510,14 @@ getAddress mem pc =
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Shorthand for 8-bit register transform
-type Z80reg8XForm = (Z80memory                  -- ^ Z80's memory
-                     -> Z80addr                 -- ^ Current program counter
-                     -> Z80reg8                 -- ^ Register to be transformed
-                     -> (Z80addr, Z80reg8))     -- ^ Resulting program counter, transformed register pair tuple
+type Z80reg8XForm = (Z80memory                  -- Z80's memory
+                     -> Z80addr                 -- Current program counter
+                     -> Z80reg8                 -- Register to be transformed
+                     -> (Z80addr, Z80reg8))     -- Resulting program counter, transformed register pair tuple
 
 -- | Shorthand for 16-bit register transform
-type Z80reg16XForm = (Z80reg16                 -- ^ Register pair to be transformed
-                      -> Z80reg16)             -- ^ Resulting transformed register pair
+type Z80reg16XForm = (Z80reg16                 -- Register pair to be transformed
+                      -> Z80reg16)             -- Resulting transformed register pair
 
 -- | Transform the 8-bit register operand to the IX register and displacement, only
 -- if the operand is indirect via HL
