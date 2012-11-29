@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module Z80.DisasmOutput
   ( outputDisassembly
@@ -101,13 +100,13 @@ outputDisassembly (Z80Disassembly dstate) = BC.append (doOutput (viewl (get disa
          )
 
 -- | Output a formatted address in uppercase hex
-upperHex :: forall operand. ShowHex operand => 
+upperHex :: ShowHex operand => 
             operand
          -> ByteString
 upperHex = (makeUpper . asHex)
 
 -- | Output an 'upperHex' address with the appended 'H'
-oldStyleHex :: forall operand. ShowHex operand =>
+oldStyleHex :: ShowHex operand =>
                operand
             -> ByteString
 oldStyleHex x = BC.snoc (upperHex x) 'H'
@@ -282,14 +281,14 @@ zeroOperands :: ByteString
 zeroOperands mne = (mne, BC.empty)
 
 -- | Disassembly output with an instruction having one operand
-oneOperand :: forall operand. (DisOperandFormat operand) =>
+oneOperand :: DisOperandFormat operand =>
               ByteString
            -> operand
            -> (ByteString, ByteString)
 oneOperand mne op = (mne, formatOperand op)
 
 -- | Disassembly output with a two operand instruction
-twoOperands :: forall operand1 operand2. (DisOperandFormat operand1, DisOperandFormat operand2) =>
+twoOperands :: (DisOperandFormat operand1, DisOperandFormat operand2) =>
                ByteString
             -> operand1
             -> operand2

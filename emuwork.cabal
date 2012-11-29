@@ -23,7 +23,6 @@ library
                       fclabels,
                       transformers
   ghc-options:        -Wall
-  default-extensions: MultiParamTypeClasses, TypeSynonymInstances, GADTs, TemplateHaskell
   exposed-modules:   
                       Machine,
                       Reader,
@@ -44,7 +43,6 @@ executable emuwork
                       fclabels,
                       transformers
   ghc-options:        -Wall
-  default-extensions: MultiParamTypeClasses, TypeSynonymInstances, GADTs
   other-modules:   
                       Machine,
                       Reader,
@@ -66,7 +64,6 @@ executable trs80l2rom
                       transformers,
                       haskell-src
   ghc-options:        -Wall
-  default-extensions: MultiParamTypeClasses, TypeSynonymInstances, GADTs
   other-modules:   
                       Machine,
                       Reader,

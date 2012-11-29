@@ -1,7 +1,5 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeOperators #-}
 
 -- | The Haskell representation of the Z80 instruction set
 module Z80.InstructionSet

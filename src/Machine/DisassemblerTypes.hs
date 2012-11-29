@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 -- | Basic types for all machine disassemblers
 module Machine.DisassemblerTypes

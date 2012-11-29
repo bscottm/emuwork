@@ -1,6 +1,6 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 -- | The Z80 processor emulation module.
 module Z80.Processor (

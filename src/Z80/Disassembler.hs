@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
-
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 --
@@ -114,7 +115,7 @@ data Z80DisasmElt where
                -> Z80DisasmElt
 
 -- Emit Template Haskell hair for lenses used to set/get/modify the Disassembly state:
-mkLabelsMono [ ''Z80DisasmState, ''Z80indexTransform ]
+mkLabels [ ''Z80DisasmState, ''Z80indexTransform ]
 
 -- | Where the real work of the Z80 disassembly happens...
 disasm :: Z80memory                             -- ^ The "memory" vector of bytes
@@ -138,11 +139,11 @@ disasm theMem origin thePc lastpc (Z80Disassembly dstate)
                                          in  disasm theMem origin newpc lastpc (Z80Disassembly newDState)
   where
     -- Note: modify comes from Data.Label
-    mkDisasmInst oldpc newpc ins theDState = let disasmPC     = oldpc + origin
+    mkDisasmInst oldpc newpc ins z80dstate = let disasmPC     = oldpc + origin
                                                  opcodes      = let oldpc' = (fromIntegral oldpc) :: Int
                                                                     newpc' = (fromIntegral newpc) :: Int
                                                                 in  DVU.slice oldpc' (newpc' - oldpc') theMem
-                                             in  modify disasmSeq (|> DisasmInst disasmPC opcodes ins) theDState
+                                             in  modify disasmSeq (|> DisasmInst disasmPC opcodes ins) z80dstate
     -- Deal with an index register prefix
     indexedPrefix xForms = let newOpc                 = getNextWord theMem thePc
                                (newpc, ins, dstate')  = decodeInst theMem (thePc + 1) newOpc dstate xForms
