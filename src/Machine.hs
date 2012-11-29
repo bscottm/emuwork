@@ -2,6 +2,7 @@
 
 module Machine
        ( module Machine.EmulatedProcessor
+       , module Machine.DisassemblerTypes
        , module Machine.NullProcessor
        , module Machine.Utils
        , CommonEmulatorOptions(..)
@@ -9,6 +10,7 @@ module Machine
        ) where
 
 import Machine.EmulatedProcessor
+import Machine.DisassemblerTypes
 import Machine.NullProcessor
 import Machine.Utils
 

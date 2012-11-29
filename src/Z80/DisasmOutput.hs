@@ -10,10 +10,10 @@ module Z80.DisasmOutput
 
 import Data.Int
 import Data.Char
-import Data.Label
+import Control.Lens
+import Data.Foldable (foldr')
 import Data.ByteString.Lazy.Char8 (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BC
-import Data.Sequence (ViewL(..), viewl)
 import qualified Data.Map as Map
 import Data.Vector.Unboxed (Vector)
 import qualified Data.Vector.Unboxed as DVU
@@ -24,18 +24,14 @@ import Z80.Processor
 import Z80.Disassembler
 
 -- | Emit Template Haskell hair for lenses
-mkLabel ''Z80DisasmState
+makeLenses ''Z80DisasmState
 
 -- | The disassembly output function
 outputDisassembly :: (Disassembly Z80DisasmState)
                   -> ByteString
-outputDisassembly (Z80Disassembly dstate) = BC.append (doOutput (viewl (get disasmSeq dstate)) BC.empty)
-                                                      (formatSymTab (get symbolTab dstate))
+outputDisassembly (Z80Disassembly dstate) = BC.append (foldr' formatElem BC.empty $ dstate ^. disasmSeq)
+                                                      (formatSymTab $ dstate ^. symbolTab)
   where
-    -- | Recurse through the left view
-    doOutput EmptyL acc = acc
-    doOutput (left :< rest) acc = formatElem left (doOutput (viewl rest) acc)
-
     formatElem thing acc = BC.append ( case thing of
                                          (DisasmInst addr bytes ins) -> BC.concat [ formatLinePrefix bytes addr dstate
                                                                                   , formatIns ins
@@ -117,8 +113,8 @@ formatLinePrefix :: Vector Z80word
                  -> Z80DisasmState
                  -> ByteString
 formatLinePrefix bytes addr dstate =
-  let label               = case Map.lookup addr (get symbolTab dstate) of
-                              Nothing  -> ""
+  let label               = case Map.lookup addr (dstate ^. symbolTab) of
+                              Nothing  -> BC.empty
                               Just lab -> BC.snoc lab ':'
       bytesToChars vec    = padTo lenAsChars  $ DVU.foldl (\s x -> BC.append s (mkPrintable x)) BC.empty vec
       mkPrintable x       = if x > 0x20 && x < 0x7f then (BC.singleton . chr . fromIntegral) x; else " "
@@ -237,7 +233,7 @@ formatInstruction _dstate RET                     = zeroOperands "RET"
 formatInstruction _dstate (RETCC cc)              = oneOperand "RET" cc
 formatInstruction _dstate (PUSH r)                = oneOperand "PUSH" r
 formatInstruction _dstate (POP r)                 = oneOperand "POP" r
-formatInstruction _dstate (RST rst)               = oneOperand "RST" rst
+formatInstruction _dstate (RST rst)               = ("RST", (upperHex rst))
 
 formatInstruction _dstate (RLC r)                 = oneOperand "RLC" r
 formatInstruction _dstate (RRC r)                 = oneOperand "RRC" r

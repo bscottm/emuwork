@@ -11,7 +11,7 @@ module Main where
 import System.IO (stderr, hPutStrLn)
 import System.Environment
 import qualified Data.List as DL
-import Data.Label
+import Control.Lens
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.ByteString.Lazy.Char8 (ByteString)
@@ -24,17 +24,24 @@ import Data.Char
 
 -- import Language.Haskell.Pretty
 
-import Reader.RawFormat
-import Machine.DisassemblerTypes
+-- import Reader.RawFormat
+-- import Machine.DisassemblerTypes
+
+import Reader
+import Machine
+import Z80
+
+{- 
 import Z80.Processor
 import Z80.InstructionSet (Z80memory, getAddress, OperAddr(..))
 import Z80.Disassembler
 import Z80.DisasmOutput
+-}
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- Template Haskell hair for lenses
-mkLabel ''Z80DisasmState
+makeLenses ''Z80DisasmState
 
 -- | Disassembler "guidance": When to disassemble, when to dump bytes, ... basically guidance to the drive
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
@@ -101,6 +108,12 @@ actions = [ SetOrigin romOrigin
           , AddAddrEquate "RST28VEC" 0x400c
           , AddAddrEquate "RST30VEC" 0x400f
           , AddAddrEquate "RST38VEC" 0x4012
+          , AddLineComment "Cursor position (2 bytes, LSB/MSB)"
+          , AddAddrEquate "CSRPOS"   0x4020
+          , AddLineComment "Cursor position (2 bytes, LSB/MSB)"
+          , AddAddrEquate "CASPPRTWIDTH" 0x403d
+          , AddLineComment "Line printer device control block"
+          , AddAddrEquate "LPDCB"    0x4025
           , AddLineComment "Memory mapped I/O addresses"
           , AddAddrEquate "LPPORT" 0x37e8
           , AddAddrEquate "DSKCMDSTATUS" 0x37ec
@@ -319,14 +332,13 @@ doAction :: Z80memory
          -> Disassembly Z80DisasmState
 
 doAction _img (Z80Disassembly dstate) (SetOrigin origin)               =
-  Z80Disassembly $ modify disasmSeq (|> DisasmPseudo (DisOrigin origin)) dstate
+  Z80Disassembly $ disasmSeq %~ (|> DisasmPseudo (DisOrigin origin)) $ dstate
 
 doAction _img (Z80Disassembly dstate) (AddAddrEquate label addr)       =
-  Z80Disassembly $ modify symbolTab (Map.insert addr label) $
-                   modify disasmSeq (|> DisasmPseudo (AddrEquate label addr)) dstate
+  Z80Disassembly $ (symbolTab %~ (Map.insert addr label)) .  (disasmSeq %~ (|> DisasmPseudo (AddrEquate label addr))) $ dstate
 
 doAction _img (Z80Disassembly dstate) (AddLineComment comment)         =
-  Z80Disassembly $ modify disasmSeq (|> DisasmPseudo (LineComment comment)) dstate
+  Z80Disassembly $ disasmSeq %~ (|> DisasmPseudo (LineComment comment)) $ dstate
 
 doAction img dstate (DoDisasm origin sAddr nBytes)                     = disassemble img origin sAddr nBytes dstate
 doAction img dstate (GrabBytes origin sAddr nBytes)                    = z80disbytes img origin sAddr nBytes dstate
@@ -372,10 +384,9 @@ highbitCharTable mem origin sAddr nBytes dstate =
             theString = DisasmPseudo $ Ascii (origin + (fromIntegral memidx) + 1)
                                              (DVU.slice (memidx + 1) (memidx' - memidx - 1) mem)
         in  Z80Disassembly $ if (memidx + 1) /= memidx' then
-                               modify disasmSeq (|> theString) $
-                               modify disasmSeq (|> firstBytePseudo) z80dstate
+                               disasmSeq %~ (|> theString) $ disasmSeq %~ (|> firstBytePseudo) $ z80dstate
                              else
-                               modify disasmSeq (|> firstBytePseudo) z80dstate
+                               disasmSeq %~ (|> firstBytePseudo) $ z80dstate
   in  grabStrings 0 dstate
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -393,9 +404,9 @@ jumpTable mem origin sAddr nBytes dstate =
         | addr == endAddr - 2 = operAddrPseudo (getAddress mem addr)
         | otherwise           = z80disbytes mem origin addr (fromIntegral $ endAddr - addr) theDState
         where
-          operAddrPseudo theAddr = Z80Disassembly $ modify disasmSeq (|> DisasmPseudo (operAddr theAddr)) z80dstate
+          operAddrPseudo theAddr = Z80Disassembly $ disasmSeq %~ (|> DisasmPseudo (operAddr theAddr)) $ z80dstate
           operAddr theAddr = 
-            let symTab = get symbolTab z80dstate
+            let symTab = view symbolTab z80dstate
                 oper   = if Map.member theAddr symTab then
                            SymAddr $ symTab Map.! theAddr
                          else
