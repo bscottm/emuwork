@@ -65,3 +65,5 @@ executable trs80l2rom
                        vector >= 0.10,
                        emuwork
   ghc-options:        -Wall -O2
+  other-modules:      Guidance,
+                      KnownSymbols

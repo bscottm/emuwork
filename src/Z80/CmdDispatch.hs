@@ -16,14 +16,9 @@ module Z80.CmdDispatch
 
 import Prelude hiding(catch)
 import System.IO
--- redundant: import System.Environment
--- redundant: import System.FilePath
--- redundant: import System.Directory
--- redundant: import System.Exit
 import System.Console.GetOpt
 import Control.DeepSeq
 import Control.Exception
-import qualified Data.ByteString.Lazy.Char8 as BS
 import Data.Maybe
 import Data.List (foldl')
 import qualified Data.Vector.Unboxed as DVU
@@ -142,7 +137,7 @@ cmdDisassemble disAsm =
 						      , (show theNBytesToDis)
 						      ])
                                      >> doDisAsm img theOrigin theStartAddr theNBytesToDis theImageLen
-                                     >>= (\ dis -> BS.putStrLn $ outputDisassembly dis)
+                                     >>= (\ dis -> outputDisassembly stdout dis)
 				 else
 				   putStrLn "-- Error reading image"
   where
