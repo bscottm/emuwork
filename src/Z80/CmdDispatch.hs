@@ -1,4 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
+
 -- | The Z80 emulation's command dispatch module.
 --
 -- The normal way of invoking these commands is:
@@ -10,9 +12,7 @@
 -- @disassemble@, @disasm@
 --   Disassemble an image, e.g., raw ROM file
 
-module Z80.CmdDispatch
-       ( z80cmdDispatch
-       ) where
+module Z80.CmdDispatch () where
 
 import Prelude hiding(catch)
 import System.IO
@@ -23,7 +23,7 @@ import Data.Maybe
 import Data.List (foldl')
 import qualified Data.Vector.Unboxed as DVU
 
-import Machine.DisassemblerTypes
+import Machine
 import Reader
 import Z80.Processor
 import Z80.Disassembler
@@ -39,16 +39,15 @@ data Z80Command = NoCommand
                   , nBytesToDis :: Maybe Z80disp
                   }
 
--- | The Z80 command line interface dispatch function
-z80cmdDispatch :: Z80state
-               -> [String]
-               -> IO ()
-z80cmdDispatch _machine options =
+instance EmuCommandLineDispatch Z80state where
+  -- | The Z80 command line interface dispatch function
+  cmdDispatch _z80state options =
     case parseCmd options of
       NoCommand               -> hPutStrLn stderr "No command?"
       InvalidCommand errs     -> hPutStrLn stderr ("Invalid command" ++ (show errs))
       disAsm@Disassemble { }  -> (cmdDisassemble disAsm) `catch` (\ exc -> hPutStrLn stderr (show (exc :: ErrorCall)))
 
+-- | Parse the command line, create a Z80Command record.
 parseCmd :: [String]
          -> Z80Command
 parseCmd [] = NoCommand

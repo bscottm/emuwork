@@ -12,6 +12,7 @@ module Z80.DisasmOutput
 import System.IO
 import Data.Int
 import Data.Char
+import Data.Tuple
 import Control.Lens
 import qualified Data.Foldable as Foldable
 import Data.Sequence (Seq, (|>), (<|), (><))
@@ -37,7 +38,7 @@ z80DisasmToByteStringSeq :: Disassembly Z80DisasmState
 z80DisasmToByteStringSeq (Z80Disassembly dstate) =
   -- Append the symbol table to the formatted instruction sequence
   -- Unfortunately (maybe not...?) the foldl results in the concatenation of many singletons.
-  formatSymTab (dstate ^. symbolTab) $ Foldable.foldl formatElem Seq.empty (dstate ^. disasmSeq)
+  dstate ^. symbolTab ^& formatSymTab $ dstate ^. disasmSeq ^& Foldable.foldl formatElem Seq.empty 
   where
     formatElem accSeq (DisasmInst addr bytes ins) = accSeq >< formatLinePrefix bytes addr (formatIns ins dstate) dstate
     formatElem accSeq (DisasmPseudo pseudo)       = accSeq >< formatPseudo pseudo dstate
@@ -55,7 +56,7 @@ formatSymTab :: Map Z80addr ByteString
 formatSymTab symTab outSeq =
   let maxsym     = Map.foldl' (\len str -> if len < BC.length str; then BC.length str; else len) 0 symTab
       totalCols  = fromIntegral(((lenOutputLine - maxsym) `div` (maxsym + extraSymPad)) + 1) :: Int
-      byNameSyms =  Map.fromList [ (y, x) | (x, y) <- Map.assocs symTab ]
+      byNameSyms =  Map.fromList $ map swap $ Map.assocs symTab
       byAddrSeq = BC.empty
                   <| BC.empty
                   <| "Symbol Table (numeric):"
@@ -350,6 +351,7 @@ ioPortOperand port inOut = case port of
 -- | Disassembler operand format function class. Make life easy on ourselves when
 -- formatting assembler operands.
 class DisOperandFormat x where
+  -- | Convert an operand into its appropriate representation
   formatOperand :: x -> ByteString
 
 instance DisOperandFormat Z80word where

@@ -17,11 +17,11 @@ import Machine.Utils
 -- | Common command line option data record
 data CommonEmulatorOptions =
   EmulatorOptions
-  { emulator :: Maybe EmulatedProcessor         -- ^ The processor emulator
+  { emulator :: String                  -- ^ The processor emulator's name
   }
 
 -- | The default emulator options
 defaultCommonEmulatorOptions :: CommonEmulatorOptions
 defaultCommonEmulatorOptions = EmulatorOptions
-                         { emulator = Nothing
+                         { emulator = ""
                          }

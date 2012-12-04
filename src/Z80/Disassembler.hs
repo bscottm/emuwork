@@ -83,15 +83,16 @@ data Z80PseudoOps where
 -- | Disassembler state, which indexes the 'Disassembly' type family.
 data Z80DisasmState =
   Z80DisasmState
-  { -- | A general-purpose label counter, useful for local labels, e.g., "L1", "L2", etc., that are inserted into the symbol table.
+  { -- | A general-purpose label counter, useful for local labels, e.g., "L1", "L2", etc., that are inserted
+    -- into the symbol table.
     _labelNum :: Int
-  -- | Predicate: Is the address in the disassembler's range? Note that the default function always returns 'True'.
+    -- | Predicate: Is the address in the disassembler's range? Note that the default function always returns 'True'.
   , _addrInDisasmRange :: Z80addr               -- The address to test
                        -> Bool                  -- 'True' if in disassembler's range, 'False' otherwise.
-  -- | The symbol table mapping between addresses and symbol names in 'disasmSeq'
+    -- | The symbol table mapping between addresses and symbol names in 'disasmSeq'
   , _symbolTab :: Map Z80addr  ByteString
-  -- | The sequence of tuples, each of which is an address, words corresponding to the disassembled instruction, and the
-  -- disassembled instruction.
+    -- | The sequence of tuples, each of which is an address, words corresponding to the disassembled instruction, and the
+    -- disassembled instruction.
   , _disasmSeq :: Seq Z80DisasmElt
   }
 
