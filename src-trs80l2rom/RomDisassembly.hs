@@ -14,13 +14,16 @@ import qualified Data.List as DL
 import Control.Lens
 import qualified Data.Map as Map
 import qualified Data.ByteString.Lazy.Char8 as BS
-import Data.Sequence ((|>))
+import Data.Sequence ((|>), (><))
+import qualified Data.Sequence as Seq
 import Data.Vector.Unboxed ((!))
 import qualified Data.Vector.Unboxed as DVU
+import qualified Data.Foldable as Foldable
 import Data.Bits
 import Data.Char
 
 -- import Language.Haskell.Pretty
+-- import Debug.Trace
 
 -- import Reader.RawFormat
 -- import Machine.DisassemblerTypes
@@ -45,7 +48,7 @@ trs80Rom imgName = readRawWord8Vector imgName
                    -- >> putStrLn (prettyPrint actions)
   where
     -- Initial disassembly state: known symbols and disassembly address range predicate
-    initialDisassembly = Z80Disassembly $ set symbolTab knownSymbols $ set addrInDisasmRange trs80RomRange mkInitialDisassembly
+    initialDisassembly = Z80Disassembly $ symbolTab .~ knownSymbols $ addrInDisasmRange .~ trs80RomRange $ mkInitialDisassembly
     lastAddr = 0x2fff
     -- ROM range for 'addrInDisasmRange' predicate
     trs80RomRange addr = addr >= romOrigin && addr <= lastAddr
@@ -68,10 +71,10 @@ doAction :: Z80memory
 doAction _img (Z80Disassembly dstate) (SetOrigin origin)               =
   Z80Disassembly $ disasmSeq %~ (|> DisasmPseudo (DisOrigin origin)) $ dstate
 
-doAction _img (Z80Disassembly dstate) (AddAddrEquate label addr)       =
+doAction _img (Z80Disassembly dstate) (Equate label addr)       =
   Z80Disassembly $ (symbolTab %~ (Map.insert addr label)) .  (disasmSeq %~ (|> DisasmPseudo (AddrEquate label addr))) $ dstate
 
-doAction _img (Z80Disassembly dstate) (AddLineComment comment)         =
+doAction _img (Z80Disassembly dstate) (Comment comment)         =
   Z80Disassembly $ disasmSeq %~ (|> DisasmPseudo (LineComment comment)) $ dstate
 
 doAction img dstate (DoDisasm origin sAddr nBytes)                     = disassemble img origin sAddr nBytes dstate
@@ -92,22 +95,17 @@ highbitCharTable :: Z80memory                   -- ^ Vector of bytes from which 
                  -> Z80disp                     -- ^ Number of bytes to extract
                  -> Disassembly Z80DisasmState  -- ^ Current disassembly state
                  -> Disassembly Z80DisasmState  -- ^ Resulting diassembly state
-highbitCharTable mem origin sAddr nBytes dstate =
+highbitCharTable mem origin sAddr nBytes (Z80Disassembly z80dstate) =
   let sAddr'   = fromIntegral sAddr
       nBytes'  = fromIntegral nBytes
       -- Look for the high bit characters within the address range, then convert back to addresses
       byteidxs = DVU.map (\x -> x + sAddr') $ DVU.findIndices (\x -> x >= 0x80) $ DVU.slice sAddr' nBytes' mem
-      -- Iterate through byteidxs' indices, grabbing the strings
-      grabStrings idx theDState
-        | idx == (DVU.length byteidxs) - 1 =
-          -- last string to generate
-          grabString (byteidxs ! idx) (sAddr' + nBytes' + 1) theDState
-        | otherwise =
-          let memidx  = byteidxs ! idx
-              memidx' = byteidxs ! (idx + 1)
-          in  grabStrings (idx + 1) $ grabString memidx memidx' theDState
+      -- Set up a secondary index vector to make a working zipper
+      byteidx2 = DVU.force $ (DVU.drop 1 byteidxs) `DVU.snoc` (sAddr' + nBytes' + 1)
+      -- Zip the two index vectors to a sequence
+      disasmElts   = Foldable.foldl' (><) Seq.empty (DL.zipWith grabString (DVU.toList byteidxs) (DVU.toList byteidx2))
       -- Grab an individual string from a memory range
-      grabString memidx memidx' (Z80Disassembly z80dstate) =
+      grabString memidx memidx' =
         let theChar = mem ! memidx
             theChar' = fromIntegral theChar :: Int
             firstByte = BS.concat [ "'"
@@ -117,11 +115,11 @@ highbitCharTable mem origin sAddr nBytes dstate =
             firstBytePseudo = DisasmPseudo $ ByteExpression (origin + (fromIntegral memidx)) firstByte theChar
             theString = DisasmPseudo $ Ascii (origin + (fromIntegral memidx) + 1)
                                              (DVU.slice (memidx + 1) (memidx' - memidx - 1) mem)
-        in  Z80Disassembly $ if (memidx + 1) /= memidx' then
-                               disasmSeq %~ (|> theString) $ disasmSeq %~ (|> firstBytePseudo) $ z80dstate
-                             else
-                               disasmSeq %~ (|> firstBytePseudo) $ z80dstate
-  in  grabStrings 0 dstate
+        in  if (memidx + 1) /= memidx' then
+	      Seq.singleton firstBytePseudo |> theString
+	    else
+	      Seq.singleton firstBytePseudo
+  in  Z80Disassembly $ disasmSeq %~ (>< disasmElts) $ z80dstate
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
