@@ -1,14 +1,14 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Various and sundry utility functions
 module Machine.Utils 
   ( ShowHex(..)
   , zeroFill
   , padTo
   , makeUpper
+  , SignExtend(..)
   ) where
 
 import Data.Int
+import Data.Bits
 import Data.ByteString.Lazy.Char8 (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as BC
 import Numeric
@@ -79,3 +79,29 @@ padTo width s = let l = BC.length s
 makeUpper :: ByteString                         -- ^ Input 'ByteString'
           -> ByteString                         -- ^ Uppercased result
 makeUpper = BC.map (\c -> if isLower c; then toUpper c; else c)
+
+-- | Sign extension type class: generally useful for conversions to 'Int32' or 'Int64' when having to manipulate unsigned
+-- and signed types. GHC makes no formal guarantees on sign extension when using 'fromIntegral'. Minimum implementation
+-- is 'signExtend64', which can be truncated down to 'Int32'.
+class SignExtend wordType where
+  signExtend :: wordType
+             -> Int32
+  signExtend64 :: wordType
+                -> Int64
+
+  -- Default implementation is to 
+  signExtend = fromIntegral . signExtend64
+
+instance SignExtend Word16 where
+  signExtend64 x = let x' = fromIntegral x :: Int64
+                   in  if x <= 0x7fff then
+                         x'
+                       else
+                         x' .|. (complement 0xffff)
+
+instance SignExtend Int16 where
+  signExtend64 x = let x' = fromIntegral x :: Int64
+                   in  if x <= 0x7fff then
+                         x'
+                       else
+                         -((x' `xor` 0xffff) + 1)

@@ -1,25 +1,33 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeFamilies #-}
-
 -- | An minimal definition for an emulator, the 'null' processor
 module Machine.NullProcessor where
 
 import Data.Word
-import Data.Int
-import Machine.EmulatedProcessor
+import qualified Data.Vector.Unboxed as DVU
+
+import Machine.EmulatedSystem
 
 -- | There is no machine state for this processor.
 data NullProcState = NullProcState
 
--- | Instantiate the NullProcessor's emulator actions:
-instance EmulatorActions Word32 Word32 Int32 NullProcState where
-  pcStep addr _action = addr
+instance GenericPC NullProcState where
+  pcInc pc = pc
+  pcDec pc = pc
+  pcDisplace _ pc = pc
 
-nullProcessor :: EmulatedProcessor NullProcState
-nullProcessor = EmulatedProcessor { _procPrettyName = "Null (dummy) processor"
-                                  , _procAliases    = ["null", "dummy"] 
-                                  , _internals = NullProcState
-                                  }
+nullProcessor :: EmulatedSystem NullProcState NullProcState Word32 Word32
+nullProcessor = EmulatedSystem
+                { _processor = EmulatedProcessor
+                               { _procPrettyName = "Null (dummy) processor"
+                               , _procAliases    = ["null", "dummy"] 
+                               , _internals      = NullProcState
+                               }
+                , _memory    = MemorySystem
+                               { _memInternals = NullProcState
+                               , _mfetch       = (\_addr         -> 0 :: Word32)
+                               , _mfetchN      = (\_addr _nBytes -> DVU.empty)
+                               , _maxmem       = 0 :: Word32
+                               }
+                }
 
 -- | 'EmuCommandLineDispatch' type family instance for the null processor
 instance EmuCommandLineDispatch NullProcState where

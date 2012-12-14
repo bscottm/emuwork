@@ -1,7 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-
 module Z80.DisasmOutput
   ( z80DisasmToByteStringSeq
   , outputDisassembly
@@ -29,13 +25,10 @@ import Z80.InstructionSet
 import Z80.Processor
 import Z80.Disassembler
 
--- | Emit Template Haskell hair for lenses
-makeLenses ''Z80DisasmState
-
 -- | Convert the disassembly sequence into a sequence of formatted byte strings
-z80DisasmToByteStringSeq :: Disassembly Z80DisasmState
+z80DisasmToByteStringSeq :: Z80disassembly
                          -> Seq ByteString
-z80DisasmToByteStringSeq (Z80Disassembly dstate) =
+z80DisasmToByteStringSeq dstate =
   -- Append the symbol table to the formatted instruction sequence
   -- Unfortunately (maybe not...?) the foldl results in the concatenation of many singletons.
   dstate ^. symbolTab ^& formatSymTab $ dstate ^. disasmSeq ^& Foldable.foldl formatElem Seq.empty 
@@ -45,7 +38,7 @@ z80DisasmToByteStringSeq (Z80Disassembly dstate) =
 
 -- | Send the disassembly output to an 'IO' handle
 outputDisassembly :: Handle
-                  -> Disassembly Z80DisasmState
+                  -> Z80disassembly
                   -> IO ()
 outputDisassembly hOut dstate = Foldable.traverse_ (BC.hPutStrLn hOut) $ z80DisasmToByteStringSeq dstate
 
@@ -86,7 +79,7 @@ formatSymTab symTab outSeq =
 
 -- | Format a Z80 instruction
 formatIns :: Z80instruction
-          -> Z80DisasmState
+          -> Z80disassembly
           -> ByteString
 formatIns ins dstate = let (mnemonic, opers) = formatInstruction dstate ins
                        in  padTo lenInstruction $ BC.append (padTo lenMnemonic mnemonic) opers
@@ -107,7 +100,7 @@ oldStyleHex x = BC.snoc (upperHex x) 'H'
 formatLinePrefix :: Vector Z80word              -- ^ Opcode vector
                  -> Z80addr                     -- ^ Address of this output line
                  -> ByteString                  -- ^ Output to emit (formatted instruction, ...)
-                 -> Z80DisasmState              -- ^ Disassembler state
+                 -> Z80disassembly              -- ^ Disassembler state
                  -> Seq ByteString              -- ^ Resulting 'ByteString' output sequence
 formatLinePrefix bytes addr outString dstate =
   let label               = case Map.lookup addr (dstate ^. symbolTab) of
@@ -176,7 +169,7 @@ lenOutputLine :: Int64
 lenOutputLine = lenOutputPrefix + lenSymLabel + lenInstruction
 
 -- | The main workhourse of this module: Format a 'Z80instruction' as the tuple '(mnemonic, operands)'
-formatInstruction :: Z80DisasmState             -- ^ Disassembly state, used to grab the disassembly symbol table
+formatInstruction :: Z80disassembly             -- ^ Disassembly state, used to grab the disassembly symbol table
                   -> Z80instruction             -- ^ Instruction to format
                   -> (ByteString, ByteString)   -- ^ '(mnemonic, operands)' result tuple
 
@@ -203,12 +196,12 @@ formatInstruction _dstate (OR r)                  = oneOperand "OR" r
 formatInstruction _dstate (CP r)                  = oneOperand "CP" r
 formatInstruction _dstate HALT                    = zeroOperands "HALT"
 formatInstruction _dstate NOP                     = zeroOperands "NOP"
-formatInstruction _dstate EXAFAF'                 = ("EX", "AF, AF'")
-formatInstruction _dstate EXSPHL                  = ("EX", "(SP), HL")
-formatInstruction _dstate EXDEHL                  = ("EX", "DE, HL")
+formatInstruction _dstate (EXC AFAF')             = ("EX", "AF, AF'")
+formatInstruction _dstate (EXC SPHL)              = ("EX", "(SP), HL")
+formatInstruction _dstate (EXC DEHL)              = ("EX", "DE, HL")
 formatInstruction _dstate DI                      = zeroOperands "DI"
 formatInstruction _dstate EI                      = zeroOperands "EI"
-formatInstruction _dstate EXX                     = zeroOperands "EXX"
+formatInstruction _dstate (EXC Primes)            = zeroOperands "EXX"
 formatInstruction _dstate JPHL                    = ("JP", "HL")
 formatInstruction _dstate LDSPHL                  = ("LD", "SP, HL")
 formatInstruction _dstate RLCA                    = zeroOperands "RLCA"
@@ -426,7 +419,7 @@ instance DisOperandFormat OperAddr where
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 formatPseudo :: Z80PseudoOps
-             -> Z80DisasmState
+             -> Z80disassembly
              -> Seq ByteString
 
 formatPseudo (ByteRange sAddr bytes) dstate = 
@@ -479,7 +472,7 @@ formatPseudo (LineComment comment) _dstate = Seq.singleton $ BC.concat [ BC.repl
                                                                        ]
 
 -- | Format groups of bytes by groups of 8
-fmtByteGroup :: Z80DisasmState
+fmtByteGroup :: Z80disassembly
              -> Vector Z80word
              -> Z80addr
              -> Int

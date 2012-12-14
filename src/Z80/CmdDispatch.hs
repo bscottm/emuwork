@@ -1,6 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeFamilies #-}
-
 -- | The Z80 emulation's command dispatch module.
 --
 -- The normal way of invoking these commands is:
@@ -12,15 +9,17 @@
 -- @disassemble@, @disasm@
 --   Disassemble an image, e.g., raw ROM file
 
-module Z80.CmdDispatch () where
+module Z80.CmdDispatch (z80CommandDispatch) where
 
 import Prelude hiding(catch)
 import System.IO
 import System.Console.GetOpt
 import Control.DeepSeq
+import Control.Lens
 import Control.Exception
 import Data.Maybe
 import Data.List (foldl')
+import Data.Vector.Unboxed (Vector, (!))
 import qualified Data.Vector.Unboxed as DVU
 
 import Machine
@@ -39,9 +38,10 @@ data Z80Command = NoCommand
                   , nBytesToDis :: Maybe Z80disp
                   }
 
-instance EmuCommandLineDispatch Z80state where
-  -- | The Z80 command line interface dispatch function
-  cmdDispatch _z80state options =
+z80CommandDispatch :: EmulatedProcessor Z80state
+                   -> [String]
+                   -> IO ()
+z80CommandDispatch _z80state options =
     case parseCmd options of
       NoCommand               -> hPutStrLn stderr "No command?"
       InvalidCommand errs     -> hPutStrLn stderr ("Invalid command" ++ (show errs))
@@ -113,43 +113,62 @@ exitError msg = do
     exitFailure
 -}
 
+rawImageMemory :: Z80addr
+               -> Z80addr
+               -> Vector Z80word
+               -> Z80memory (Vector Z80word)
+rawImageMemory disorigin disStartAddr imgdata =
+        let preamble
+              | disStartAddr > disorigin = DVU.replicate (fromIntegral $ disStartAddr - disorigin) (0 :: Z80word)
+              | otherwise                = DVU.empty
+            rawMemSys = MemorySystem
+                        { _memInternals = DVU.concat [preamble,  imgdata]
+                        , _mfetch = (\addr -> rawMemSys ^. memInternals ^& (! (fromIntegral addr)))
+                        , _mfetchN = (\addr nBytes -> rawMemSys ^. memInternals ^& (DVU.slice (fromIntegral addr) nBytes))
+                        , _maxmem = fromIntegral (rawMemSys ^. memInternals ^& DVU.length)
+                        }
+        in  rawMemSys
+
 -- | Execute the Z80 disassembler!
 cmdDisassemble :: Z80Command
                -> IO ()
 cmdDisassemble disAsm =
   -- Force normal form evaluation on disAsm, to deal with potential parsing errors
   disAsm `deepseq` readRawWord8Vector (emuImage disAsm)
-		   >>= \img -> let theOrigin      = origin disAsm
-				   theStartAddr   = fromMaybe theOrigin (startAddr disAsm)
-				   theImageLen    = DVU.length img
-				   theNBytesToDis = fromMaybe (fromIntegral theImageLen) (nBytesToDis disAsm)
-			       in  if not . DVU.null $ img then
-				     putStrLn (concat [ "disassemble image "
-						      , (show . emuImage $ disAsm)
-						      , ", length "
-						      , (show theImageLen)
-						      , ", origin "
-						      , (show theOrigin)
-						      , ", start "
-						      , (show theStartAddr)
-						      , ", bytes to dump "
-						      , (show theNBytesToDis)
-						      ])
+                   >>= \img -> let theOrigin      = origin disAsm
+                                   theStartAddr   = fromMaybe theOrigin (startAddr disAsm)
+                                   theImageLen    = DVU.length img
+                                   theNBytesToDis = fromMaybe (fromIntegral theImageLen) (nBytesToDis disAsm)
+                               in  if not . DVU.null $ img then
+                                     putStrLn (concat [ "disassemble image "
+                                                      , (show . emuImage $ disAsm)
+                                                      , ", length "
+                                                      , (show theImageLen)
+                                                      , ", origin "
+                                                      , (show theOrigin)
+                                                      , ", start "
+                                                      , (show theStartAddr)
+                                                      , ", bytes to dump "
+                                                      , (show theNBytesToDis)
+                                                      ])
                                      >> doDisAsm img theOrigin theStartAddr theNBytesToDis theImageLen
-                                     >>= (\ dis -> outputDisassembly stdout dis)
-				 else
-				   putStrLn "-- Error reading image"
+                                     >>= (\dis -> outputDisassembly stdout dis)
+                                 else
+                                   putStrLn "-- Error reading image"
   where
     doDisAsm img theOrigin theStartAddr theNBytesToDis theImageLen
       | theStartAddr < theOrigin =
         hPutStrLn stderr "start address < origin"
-        >> return z80disasmState
+        >> return mkInitialDisassembly
       | theStartAddr + fromIntegral(theNBytesToDis) > fromIntegral theImageLen =
         hPutStrLn stderr "number of bytes to disassemble exceeds image length, truncating"
-        >> (return $ disassemble img theStartAddr (theStartAddr - theOrigin) theNBytesToDis z80disasmState)
+        >> (return $ disassemble mkInitialDisassembly (rawImageMemory theOrigin theStartAddr img)
+                                                      (PC theStartAddr)
+                                                      (PC $ theStartAddr + fromIntegral theNBytesToDis))
       | otherwise =
-        return $ disassemble img theOrigin theStartAddr theNBytesToDis z80disasmState
-    z80disasmState = Z80Disassembly mkInitialDisassembly
+        return $ disassemble mkInitialDisassembly (rawImageMemory theOrigin theStartAddr img)
+                                                  (PC theStartAddr) 
+                                                  (PC theStartAddr + fromIntegral theNBytesToDis)
 
 -- | Ensure that 'Z80Command' can be fully evaluated by 'deepseq'. Notably, this is used to catch
 -- integer parsing errors as early as possible.
@@ -160,3 +179,8 @@ instance NFData Z80Command where
                                            rnf org `seq`
                                            rnf sAddr `seq`
                                            rnf nBytes
+
+-- | Command line dispatch instance for the Z80
+instance EmuCommandLineDispatch Z80state where
+  -- | The Z80 command line interface dispatch function
+  cmdDispatch = z80CommandDispatch

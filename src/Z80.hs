@@ -1,6 +1,4 @@
-{- |
-  Re-export module for the Zilog Z80 processor.
--}
+-- | Re-export module for the Zilog Z80 processor.
 module Z80
        ( module Z80.Processor
        , module Z80.CmdDispatch
