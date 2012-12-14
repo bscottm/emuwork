@@ -1,7 +1,3 @@
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TemplateHaskell #-}
-
 -- | The main module, where all of the fun happens.
 module Main (main) where
 
@@ -15,9 +11,6 @@ import Control.Lens
 
 import qualified Machine
 import qualified Z80
-
--- Emit Template Haskell hair for the lenses
-makeLenses ''Machine.EmulatedProcessor
 
 -- | Where all of the emulator stuff starts...
 main::IO ()
@@ -37,8 +30,8 @@ doDispatch :: String                            -- ^ The requested emulator's na
            -> [String]                          -- ^ Command line (emulator-specific)
            -> IO ()
 doDispatch emuName emuOpts
-  | nullproc <- Machine.nullProcessor, Machine.procIdentify nullproc emuName =
-    Machine.cmdDispatch nullproc emuOpts
+  | nullproc <- Machine.nullProcessor, Machine.procIdentify (Machine.processor ^$ nullproc) emuName =
+    Machine.cmdDispatch (Machine.processor ^$ nullproc) emuOpts
   | z80proc  <- Z80.z80processor, Machine.procIdentify z80proc emuName =
     Machine.cmdDispatch z80proc emuOpts
   | otherwise =
@@ -113,17 +106,20 @@ exitError msg = do
 dumpEmulators :: IO ()
 dumpEmulators = do
     hPutStrLn stderr "Available emulators are:"
-      >> prettyEmu Machine.nullProcessor
+      >> prettyEmu (Machine.processor ^$ Machine.nullProcessor)
       >> prettyEmu Z80.z80processor
   where
     prefix = "-- "
     indent = "   "
     indentLen = length indent
-    initialString emu = prefix ++ (emu ^. procPrettyName) ++ " ("
 
+    initialString :: (Machine.EmulatedProcessor procInternals) -> String
+    initialString emu = prefix ++ (emu ^. Machine.procPrettyName) ++ " ("
+
+    prettyEmu :: (Machine.EmulatedProcessor procInternals) -> IO ()
     prettyEmu emu = do
       hPutStr stderr (initialString emu)
-      prettyEmuNames (emu ^. procAliases) (length (initialString emu))
+      prettyEmuNames (emu ^. Machine.procAliases) (length (initialString emu))
 
     prettyEmuNames []         _accLen = hPutStrLn stderr ""
     prettyEmuNames (eName:[]) _accLen = hPutStrLn stderr ("\"" ++ eName ++ "\")")

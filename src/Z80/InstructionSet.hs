@@ -1,11 +1,7 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE TemplateHaskell #-}
-
 -- | The Haskell representation of the Z80 instruction set
 module Z80.InstructionSet
   ( -- * Types
-    Z80memory
-  , Z80instruction(..)
+    Z80instruction(..)
   , Z80condC(..)
   , Z80reg8(..)
   , Z80reg16(..)
@@ -13,16 +9,10 @@ module Z80.InstructionSet
   , AccumLoadStore(..)
   , OperALU(..)
   , OperExtendedALU(..)
-  , OperAddr(..)
   , OperIO(..)
   , RegPairSP(..)
   , RegPairAF(..)
-
-  -- * Memory fetch primitives
-  , getWord
-  , getNextWord
-  , getNextDisplacement
-  , getAddress
+  , Z80ExchangeOper(..)
 
   -- * Index register transform functions
   , Z80reg8XForm
@@ -31,17 +21,16 @@ module Z80.InstructionSet
   , z80nullTransform
   , z80ixTransform
   , z80iyTransform
+
+  -- * Lens functions
+  , reg8XForm
+  , reg16XForm
   ) where
 
-import Data.Bits
-import Data.Vector.Unboxed (Vector, (!))
-import Data.ByteString.Lazy.Char8 (ByteString)
+import Control.Lens
 
-import Machine.Utils
+import Machine
 import Z80.Processor
-
--- | Shorthand for the 'Vector' of Z80words
-type Z80memory = Vector Z80word
 
 -- | The Z80 instruction set
 data Z80instruction where
@@ -55,7 +44,7 @@ data Z80instruction where
   -- LD r, (IX + d)
   -- LD r, (IY + d)
   LD8 :: OperLD8
-       -> Z80instruction
+      -> Z80instruction
   -- LD A, (BC)
   -- LD A, (DE)
   -- LD A, (nn)
@@ -72,13 +61,13 @@ data Z80instruction where
       -> Z80instruction
   -- LD rp, nn
   LD16 :: RegPairSP
-       -> OperAddr
+       -> SymAbsAddr Z80addr
        -> Z80instruction
   -- LD (nn), HL
   -- LD HL, (nn)
-  STHL :: OperAddr
+  STHL :: SymAbsAddr Z80addr
        -> Z80instruction
-  LDHL :: OperAddr
+  LDHL :: SymAbsAddr Z80addr
        -> Z80instruction
   -- 16-bit indirect loads and stores, e.g. LD BC, (4000H) [load BC from the contents of 0x4000]
   LD16Indirect :: RegPairSP
@@ -104,33 +93,36 @@ data Z80instruction where
   SBC :: OperExtendedALU
       -> Z80instruction
 
-  -- HALT; NOP; EX AF, AF'; DI; EI; EXX; JP HL; LD SP, HL
-  HALT, NOP, EXAFAF', EXDEHL, EXSPHL, DI, EI, EXX, JPHL, LDSPHL :: Z80instruction
+  -- HALT; NOP; Exchanges; DI; EI; JP HL; LD SP, HL
+  HALT, NOP, DI, EI, JPHL, LDSPHL :: Z80instruction
+  -- Exchanges:
+  EXC :: Z80ExchangeOper
+      -> Z80instruction
   -- Accumulator ops: RLCA, RRCA, RLA, RRA, DAA, CPL, SCF, CCF
   RLCA, RRCA, RLA, RRA, DAA, CPL, SCF, CCF :: Z80instruction
   -- Relative jumps: DJNZ and JR. Note: Even though these are relative jumps, the address is stored
   -- since it's easy to recompute the displacement.
-  DJNZ :: OperAddr
+  DJNZ :: SymAbsAddr Z80addr
        -> Z80instruction
-  JR   :: OperAddr
+  JR   :: SymAbsAddr Z80addr
        -> Z80instruction
   JRCC :: Z80condC
-       -> OperAddr
+       -> SymAbsAddr Z80addr
        -> Z80instruction
   -- Jumps
-  JP :: OperAddr
+  JP :: SymAbsAddr Z80addr
      -> Z80instruction
   JPCC :: Z80condC
-       -> OperAddr
+       -> SymAbsAddr Z80addr
        -> Z80instruction
   -- I/O instructions
   IN, OUT :: OperIO
           -> Z80instruction
   -- Subroutine call
-  CALL :: OperAddr
+  CALL :: SymAbsAddr Z80addr
        -> Z80instruction
   CALLCC :: Z80condC
-         -> OperAddr
+         -> SymAbsAddr Z80addr
          -> Z80instruction
   -- Return
   RET :: Z80instruction
@@ -185,12 +177,9 @@ instance Show Z80instruction where
 
   show HALT = "HALT"
   show NOP = "NOP"
-  show EXAFAF' = "EXAFAF'"
-  show EXSPHL = "EXSPHL"
-  show EXDEHL = "EXDEHL"
+  show (EXC exc) = "EXC(" ++ (show exc) ++ ")"
   show DI = "DI"
   show EI = "EI"
-  show EXX = "EXX"
   show JPHL = "JPHL"
   show LDSPHL = "LDSPHL"
 
@@ -309,7 +298,7 @@ instance Show OperLD8 where
 data AccumLoadStore where
   BCIndirect    :: AccumLoadStore
   DEIndirect    :: AccumLoadStore
-  Imm16Indirect :: OperAddr
+  Imm16Indirect :: SymAbsAddr Z80addr
                 -> AccumLoadStore
   IReg          :: AccumLoadStore
   RReg          :: AccumLoadStore
@@ -346,18 +335,6 @@ data OperExtendedALU where
 instance Show OperExtendedALU where
   show (ALU8 op)  = show op
   show (ALU16 rp) = "HL," ++ (show rp)
-
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- | Address operand, either as an absolute address or symbolic address name
-data OperAddr where
-  AbsAddr :: Z80addr
-          -> OperAddr
-  SymAddr :: ByteString
-          -> OperAddr
-
-instance Show OperAddr where
-  show (AbsAddr addr)  = as0xHexS addr
-  show (SymAddr label) = show label
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -441,7 +418,7 @@ instance Show Z80reg16 where
   show IY = "IY"
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
+-- | Register pair that includes SP (instead of AF)
 data RegPairSP where
   RPair16 :: Z80reg16
           -> RegPairSP
@@ -452,7 +429,7 @@ instance Show RegPairSP where
   show SP          = "SP"
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
+-- | Register pair that includes AF (instead of SP)
 data RegPairAF where
   RPair16' :: Z80reg16
            -> RegPairAF
@@ -461,6 +438,20 @@ data RegPairAF where
 instance Show RegPairAF where
   show (RPair16' x) = show x
   show AF           = "AF"
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Exchange instruction arguments
+data Z80ExchangeOper where
+  AFAF'  :: Z80ExchangeOper     -- AF with AF'
+  DEHL   :: Z80ExchangeOper     -- DE with HL
+  SPHL   :: Z80ExchangeOper     -- SP with HL
+  Primes :: Z80ExchangeOper     -- EXX (regular <-> primes)
+
+instance Show Z80ExchangeOper where
+  show AFAF'  = "AFAF'"
+  show DEHL   = "DEHL"
+  show SPHL   = "SPHL"
+  show Primes = "Primes"
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -472,62 +463,34 @@ showDisp disp
   | otherwise = "+" ++ (show disp)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- Memory fetches:
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
--- | Fetch a byte at the specified address
-getWord :: Z80memory                            -- ^ Z80 memory image
-        -> Z80addr                              -- ^ Address from which to fetch
-        -> Z80word                              -- ^ Resulting word
-getWord mem pc = mem ! (fromIntegral pc)
-
--- | Get byte following current program counter
-getNextWord :: Z80memory                        -- ^ The Z80's memory
-            -> Z80addr                          -- ^ The program counter/address
-            -> Z80word                          -- ^ The following byte
-getNextWord mem pc = getWord mem (pc + 1)
-
--- | Get the displacement byte following the current program counter
-getNextDisplacement :: Z80memory                -- ^ The Z80's memory
-                    -> Z80addr                  -- ^ The program counter/address
-                    -> Z80disp
-getNextDisplacement mem pc = fromIntegral $ mem ! (fromIntegral (pc + 1))
-
--- | Fetch an address (LSB, MSB) from the specified address
-getAddress :: Z80memory                         -- ^ The Z80's memory
-           -> Z80addr                           -- ^ The program counter/address
-           -> Z80addr                           -- ^ The address fetched from pc and pc+1
-getAddress mem pc =
-  let pc' = fromIntegral pc
-      lsb = fromIntegral (mem ! pc') :: Z80addr
-      msb = fromIntegral (mem ! (pc' + 1)) :: Z80addr
-  in  (msb `shiftL` 8) .|. lsb
-
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Index register transform functions:
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Shorthand for 8-bit register transform
-type Z80reg8XForm = (Z80memory                  -- Z80's memory
-                     -> Z80addr                 -- Current program counter
-                     -> Z80reg8                 -- Register to be transformed
-                     -> (Z80addr, Z80reg8))     -- Resulting program counter, transformed register pair tuple
+type Z80reg8XForm memSys = ( Z80memory memSys           -- The memory system
+                             -> Z80PC                   -- Program counter
+                             -> Z80reg8                 -- Register to be transformed
+                             -> (Z80PC, Z80reg8)        -- Possibly incremented program counter, transformed register pair tuple
+                           )
 
 -- | Shorthand for 16-bit register transform
-type Z80reg16XForm = (Z80reg16                 -- Register pair to be transformed
-                      -> Z80reg16)             -- Resulting transformed register pair
+type Z80reg16XForm = (Z80reg16                  -- Register pair to be transformed
+                      -> Z80reg16)              -- Resulting transformed register pair
 
 -- | Transform the 8-bit register operand to the IX register and displacement, only
 -- if the operand is indirect via HL
-ixXFormReg8 :: Z80reg8XForm
-ixXFormReg8 mem  pc HLindirect = (pc + 1, IXindirect (getNextDisplacement mem pc))
-ixXFormReg8 _mem pc operand    = (pc, operand)
+ixXFormReg8 :: Z80reg8XForm memSys
+-- Use lens transformations to operate on the second tuple member
+ixXFormReg8 z80mem  pc HLindirect    = _2 %~ (IXindirect . fromIntegral) $ memIncPCAndFetch z80mem pc
+ixXFormReg8 _z80mem z80state operand = (z80state, operand)
 
 -- | Transform the 8-bit register operand to the IY register and displacement, only
 -- if the operand is indirect via HL
-iyXFormReg8 :: Z80reg8XForm
-iyXFormReg8 mem  pc HLindirect = (pc + 1, IYindirect (getNextDisplacement mem pc))
-iyXFormReg8 _mem pc operand    = (pc, operand)
+iyXFormReg8 :: Z80reg8XForm memSys
+iyXFormReg8 z80mem  z80state HLindirect = let (procState, disp) = memFetchAndIncPC z80mem z80state
+                                              disp' = IXindirect $ fromIntegral disp
+                                          in  (procState, disp')
+iyXFormReg8 _z80mem z80state operand    = (z80state, operand)
 
 -- | Transform 16-bit register operands to an index register, only if HL happens
 -- to be the destination. Used when decoding 0xdd prefixed instructions
@@ -543,32 +506,31 @@ iyXFormReg16 other = other
 
 -- | A collection of register transforms. Note that access to individual elements of
 -- the record is mediated via 'Data.Label' lenses.
-data Z80indexTransform =
+data Z80indexTransform memSys =
   Z80indexTransform
-  { _reg8XForm  :: Z80reg8XForm                 -- Z80reg8 8-bit register transform
+  { _reg8XForm  :: Z80reg8XForm memSys          -- Z80reg8 8-bit register transform
   , _reg16XForm :: Z80reg16XForm                -- RegPairSP and RegPairAF 16-bit register transform
   }
 
--- Emit Template Haskell hair for the lenses:
--- mkLabel ''Z80indexTransform
-
 -- | Pass-through register transform: no transform required
-z80nullTransform :: Z80indexTransform
+z80nullTransform :: Z80indexTransform memSys
 z80nullTransform = Z80indexTransform
-                   { _reg8XForm = (\_mem pc oper -> (pc, oper))
+                   { _reg8XForm = (\_z80mem z80state operand -> (z80state, operand))
                    , _reg16XForm = id
                    }
 
 -- | HL -> IX register transform collection
-z80ixTransform :: Z80indexTransform
+z80ixTransform :: Z80indexTransform memSys
 z80ixTransform = Z80indexTransform
                  { _reg8XForm = ixXFormReg8
                  , _reg16XForm = ixXFormReg16
                  }
 
 -- | HL -> IY register transform collection
-z80iyTransform :: Z80indexTransform
+z80iyTransform :: Z80indexTransform memSys
 z80iyTransform = Z80indexTransform
                  { _reg8XForm = iyXFormReg8
                  , _reg16XForm = iyXFormReg16
                  }
+
+makeLenses ''Z80indexTransform

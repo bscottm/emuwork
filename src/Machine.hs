@@ -1,7 +1,6 @@
 -- | Re-export module for 'Machine'-related code.
-
 module Machine
-       ( module Machine.EmulatedProcessor
+       ( module Machine.EmulatedSystem
        , module Machine.DisassemblerTypes
        , module Machine.NullProcessor
        , module Machine.Utils
@@ -9,7 +8,7 @@ module Machine
        , defaultCommonEmulatorOptions
        ) where
 
-import Machine.EmulatedProcessor
+import Machine.EmulatedSystem
 import Machine.DisassemblerTypes
 import Machine.NullProcessor
 import Machine.Utils
