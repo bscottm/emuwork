@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 -- | The Z80 emulation's command dispatch module.
 --
 -- The normal way of invoking these commands is:
@@ -11,14 +13,18 @@
 
 module Z80.CmdDispatch (z80CommandDispatch) where
 
+#if __GLASGOW_HASKELL__ < 706
+-- Prelude no longer exports catch after GHC 7.6.1
 import Prelude hiding(catch)
+#endif
+
 import System.IO
 import System.Console.GetOpt
 import Control.DeepSeq
 import Control.Lens
 import Control.Exception
 import Data.Maybe
-import Data.List (foldl')
+import Data.Foldable (foldl')
 import Data.Vector.Unboxed (Vector, (!))
 import qualified Data.Vector.Unboxed as DVU
 
@@ -152,7 +158,7 @@ cmdDisassemble disAsm =
                                                       , (show theNBytesToDis)
                                                       ])
                                      >> doDisAsm img theOrigin theStartAddr theNBytesToDis theImageLen
-                                     >>= (\dis -> outputDisassembly stdout dis)
+                                     >>= (\dis -> z80AnalyticDisassemblyOutput stdout dis)
                                  else
                                    putStrLn "-- Error reading image"
   where
@@ -164,11 +170,13 @@ cmdDisassemble disAsm =
         hPutStrLn stderr "number of bytes to disassemble exceeds image length, truncating"
         >> (return $ disassemble mkInitialDisassembly (rawImageMemory theOrigin theStartAddr img)
                                                       (PC theStartAddr)
-                                                      (PC $ theStartAddr + fromIntegral theNBytesToDis))
+                                                      (PC $ theStartAddr + fromIntegral theNBytesToDis)
+                                                      z80DefaultPostProcessor)
       | otherwise =
         return $ disassemble mkInitialDisassembly (rawImageMemory theOrigin theStartAddr img)
                                                   (PC theStartAddr) 
                                                   (PC theStartAddr + fromIntegral theNBytesToDis)
+                                                  z80DefaultPostProcessor
 
 -- | Ensure that 'Z80Command' can be fully evaluated by 'deepseq'. Notably, this is used to catch
 -- integer parsing errors as early as possible.

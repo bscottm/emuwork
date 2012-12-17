@@ -9,7 +9,6 @@ module Z80.InstructionSet
   , AccumLoadStore(..)
   , OperALU(..)
   , OperExtendedALU(..)
-  , OperAddr(..)
   , OperIO(..)
   , RegPairSP(..)
   , RegPairAF(..)
@@ -29,7 +28,6 @@ module Z80.InstructionSet
   ) where
 
 import Control.Lens
-import Data.ByteString.Lazy.Char8 (ByteString)
 
 import Machine
 import Z80.Processor
@@ -63,13 +61,13 @@ data Z80instruction where
       -> Z80instruction
   -- LD rp, nn
   LD16 :: RegPairSP
-       -> OperAddr
+       -> SymAbsAddr Z80addr
        -> Z80instruction
   -- LD (nn), HL
   -- LD HL, (nn)
-  STHL :: OperAddr
+  STHL :: SymAbsAddr Z80addr
        -> Z80instruction
-  LDHL :: OperAddr
+  LDHL :: SymAbsAddr Z80addr
        -> Z80instruction
   -- 16-bit indirect loads and stores, e.g. LD BC, (4000H) [load BC from the contents of 0x4000]
   LD16Indirect :: RegPairSP
@@ -104,27 +102,27 @@ data Z80instruction where
   RLCA, RRCA, RLA, RRA, DAA, CPL, SCF, CCF :: Z80instruction
   -- Relative jumps: DJNZ and JR. Note: Even though these are relative jumps, the address is stored
   -- since it's easy to recompute the displacement.
-  DJNZ :: OperAddr
+  DJNZ :: SymAbsAddr Z80addr
        -> Z80instruction
-  JR   :: OperAddr
+  JR   :: SymAbsAddr Z80addr
        -> Z80instruction
   JRCC :: Z80condC
-       -> OperAddr
+       -> SymAbsAddr Z80addr
        -> Z80instruction
   -- Jumps
-  JP :: OperAddr
+  JP :: SymAbsAddr Z80addr
      -> Z80instruction
   JPCC :: Z80condC
-       -> OperAddr
+       -> SymAbsAddr Z80addr
        -> Z80instruction
   -- I/O instructions
   IN, OUT :: OperIO
           -> Z80instruction
   -- Subroutine call
-  CALL :: OperAddr
+  CALL :: SymAbsAddr Z80addr
        -> Z80instruction
   CALLCC :: Z80condC
-         -> OperAddr
+         -> SymAbsAddr Z80addr
          -> Z80instruction
   -- Return
   RET :: Z80instruction
@@ -300,7 +298,7 @@ instance Show OperLD8 where
 data AccumLoadStore where
   BCIndirect    :: AccumLoadStore
   DEIndirect    :: AccumLoadStore
-  Imm16Indirect :: OperAddr
+  Imm16Indirect :: SymAbsAddr Z80addr
                 -> AccumLoadStore
   IReg          :: AccumLoadStore
   RReg          :: AccumLoadStore
@@ -337,18 +335,6 @@ data OperExtendedALU where
 instance Show OperExtendedALU where
   show (ALU8 op)  = show op
   show (ALU16 rp) = "HL," ++ (show rp)
-
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- | Address operand, either as an absolute address or symbolic address name
-data OperAddr where
-  AbsAddr :: Z80addr
-          -> OperAddr
-  SymAddr :: ByteString
-          -> OperAddr
-
-instance Show OperAddr where
-  show (AbsAddr addr)  = as0xHexS addr
-  show (SymAddr label) = show label
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 

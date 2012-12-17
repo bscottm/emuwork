@@ -1,5 +1,4 @@
 -- | Re-export module for 'Machine'-related code.
-
 module Machine
        ( module Machine.EmulatedSystem
        , module Machine.DisassemblerTypes

@@ -1,6 +1,6 @@
 module Z80.DisasmOutput
-  ( z80DisasmToByteStringSeq
-  , outputDisassembly
+  ( z80AnalyticDisassembly
+  , z80AnalyticDisassemblyOutput
   ) where
 
 -- import Debug.Trace
@@ -20,27 +20,27 @@ import qualified Data.Map as Map
 import Data.Vector.Unboxed (Vector)
 import qualified Data.Vector.Unboxed as DVU
 
-import Machine.Utils
+import Machine
 import Z80.InstructionSet
 import Z80.Processor
 import Z80.Disassembler
 
 -- | Convert the disassembly sequence into a sequence of formatted byte strings
-z80DisasmToByteStringSeq :: Z80disassembly
-                         -> Seq ByteString
-z80DisasmToByteStringSeq dstate =
+z80AnalyticDisassembly :: Z80disassembly
+                       -> Seq ByteString
+z80AnalyticDisassembly dstate =
   -- Append the symbol table to the formatted instruction sequence
   -- Unfortunately (maybe not...?) the foldl results in the concatenation of many singletons.
   dstate ^. symbolTab ^& formatSymTab $ dstate ^. disasmSeq ^& Foldable.foldl formatElem Seq.empty 
   where
-    formatElem accSeq (DisasmInst addr bytes ins) = accSeq >< formatLinePrefix bytes addr (formatIns ins dstate) dstate
-    formatElem accSeq (DisasmPseudo pseudo)       = accSeq >< formatPseudo pseudo dstate
+    formatElem accSeq (DisasmInsn addr bytes ins cmnt) = accSeq >< formatLinePrefix bytes addr (formatIns ins cmnt dstate) dstate
+    formatElem accSeq pseudo                           = accSeq >< formatPseudo pseudo dstate
 
--- | Send the disassembly output to an 'IO' handle
-outputDisassembly :: Handle
-                  -> Z80disassembly
-                  -> IO ()
-outputDisassembly hOut dstate = Foldable.traverse_ (BC.hPutStrLn hOut) $ z80DisasmToByteStringSeq dstate
+-- | Generate the "analytic" version of the output (opcodes, ASCII representation) and output to an 'IO' handle.
+z80AnalyticDisassemblyOutput :: Handle
+                             -> Z80disassembly
+                             -> IO ()
+z80AnalyticDisassemblyOutput hOut dstate = Foldable.traverse_ (BC.hPutStrLn hOut) $ z80AnalyticDisassembly dstate
 
 -- | Format the accumulated symbol table as a sequence of 'ByteString's, in columnar format
 formatSymTab :: Map Z80addr ByteString
@@ -78,11 +78,12 @@ formatSymTab symTab outSeq =
     in  outSeq >< byNameSeq >< byAddrSeq
 
 -- | Format a Z80 instruction
-formatIns :: Z80instruction
-          -> Z80disassembly
-          -> ByteString
-formatIns ins dstate = let (mnemonic, opers) = formatInstruction dstate ins
-                       in  padTo lenInstruction $ BC.append (padTo lenMnemonic mnemonic) opers
+formatIns :: Z80instruction             -- ^ Instruction to format
+          -> ByteString                 -- ^ Optional appended comment
+          -> Z80disassembly             -- ^ Disassembler state
+          -> ByteString                 -- ^ Formatted result
+formatIns ins cmnt dstate = let (mnemonic, opers) = formatInstruction dstate ins
+                            in  BC.append (padTo lenInstruction $ BC.append (padTo lenMnemonic mnemonic) opers) cmnt
 
 -- | Output a formatted address in uppercase hex
 upperHex :: ShowHex operand => 
@@ -412,13 +413,13 @@ instance DisOperandFormat RegPairAF where
   formatOperand (RPair16' r) = formatOperand r
   formatOperand AF = "AF"
 
-instance DisOperandFormat OperAddr where
+instance DisOperandFormat (SymAbsAddr Z80addr) where
   formatOperand (AbsAddr addr) = formatOperand addr
   formatOperand (SymAddr label) = label
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-formatPseudo :: Z80PseudoOps
+formatPseudo :: Z80DisasmElt
              -> Z80disassembly
              -> Seq ByteString
 
@@ -428,7 +429,7 @@ formatPseudo (ByteRange sAddr bytes) dstate =
                             ]
   in  fmtByteGroup dstate bytes sAddr 0 outF
 
-formatPseudo (ByteExpression addr expr word) dstate = 
+formatPseudo (ExtPseudo (ByteExpression addr expr word)) dstate = 
   let outF _vec = BC.concat [ padTo lenMnemonic "DB"
                               , if (not . BC.null) expr then
                                   expr
@@ -437,7 +438,7 @@ formatPseudo (ByteExpression addr expr word) dstate =
                             ]
   in  fmtByteGroup dstate (DVU.singleton word) addr 0 outF
 
-formatPseudo (AddrWord sAddr addr bytes) dstate =
+formatPseudo (Addr sAddr addr bytes) dstate =
   formatLinePrefix bytes sAddr (BC.append (padTo lenMnemonic "DA") (formatOperand addr)) dstate
 
 formatPseudo (AsciiZ sAddr str) dstate =
@@ -460,7 +461,7 @@ formatPseudo (DisOrigin origin) _dstate   = Seq.singleton $ BC.concat [ BC.repli
                                                                       , asHex origin
                                                                       ]
 
-formatPseudo (AddrEquate label addr) _dstate = Seq.singleton $ BC.concat [ BC.replicate lenOutputPrefix ' '
+formatPseudo (Equate label addr) _dstate = Seq.singleton $ BC.concat [ BC.replicate lenOutputPrefix ' '
                                                                          , padTo lenSymLabel label
                                                                          , padTo lenMnemonic "="
                                                                          , upperHex addr
@@ -470,6 +471,8 @@ formatPseudo (LineComment comment) _dstate = Seq.singleton $ BC.concat [ BC.repl
                                                                        , "; "
                                                                        , comment
                                                                        ]
+
+formatPseudo _unknownPseudo _dstate        = Seq.singleton $ "[!!Unknown pseudo instruction]"
 
 -- | Format groups of bytes by groups of 8
 fmtByteGroup :: Z80disassembly

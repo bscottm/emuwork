@@ -11,166 +11,147 @@ import Z80
 data Guidance where
   SetOrigin      :: Z80addr                     -- Assembly origin address
                  -> Guidance
-  Equate         :: ByteString                  -- Symbolic name
+  SymEquate      :: ByteString                  -- Symbolic name
                  -> Z80addr                     -- Address to associate with the symbolic name
                  -> Guidance
   Comment        :: ByteString                  -- Comment to output
                  -> Guidance
-  DoDisasm       :: Z80addr                     -- Origin
-                 -> Z80addr                     -- Start of disassembly
+  DoDisasm       :: Z80addr                     -- Start of disassembly
                  -> Z80disp                     -- Number of bytes to disassemble
                  -> Guidance
-  GrabBytes      :: Z80addr                     -- Disassembly origin
-                 -> Z80addr                     -- Start of range
+  GrabBytes      :: Z80addr                     -- Start of range
                  -> Z80disp                     -- Number of bytes to grab
                  -> Guidance
-  GrabAsciiZ     :: Z80addr                     -- Disassembly origin
-                 -> Z80addr                     -- Start address to start grabbing 0-terminated ASCII string
+  GrabAsciiZ     :: Z80addr                     -- Start address to start grabbing 0-terminated ASCII string
                  -> Guidance
-  GrabAscii      :: Z80addr                     -- Disassembly origin
-                 -> Z80addr                     -- Start of range
+  GrabAscii      :: Z80addr                     -- Start of range
                  -> Z80disp                     -- Number of bytes to grab
                  -> Guidance
-  HighBitTable   :: Z80addr                     -- Disassembly origin
-                 -> Z80addr                     -- Start of table
+  HighBitTable   :: Z80addr                     -- Start of table
                  -> Z80disp                     -- Table length
                  -> Guidance
-  JumpTable      :: Z80addr                     -- Diassembly origin
-                 -> Z80addr                     -- Jump table start
+  JumpTable      :: Z80addr                     -- Jump table start
                  -> Z80disp                     -- Jump table length
                  -> Guidance
   deriving (Show)
 
-
--- The ROM's origin (constant)
-romOrigin :: Z80addr
-romOrigin = 0x0000
-
 -- Drive the disassembly process
 actions :: [Guidance]
-actions = [ SetOrigin romOrigin
+actions = [ SetOrigin 0x0000
           -- Jump vector equates
           , Comment "Restart vector redirections. These are 'JP' instructions"
-          , Equate "RST08VEC" 0x4000
-          , Equate "RST10VEC" 0x4003
-          , Equate "RST18VEC" 0x4006
-          , Equate "RST20VEC" 0x4009
-          , Equate "RST28VEC" 0x400c
-          , Equate "RST30VEC" 0x400f
-          , Equate "RST38VEC" 0x4012
-          , Equate "KIDCB" 0x4015
-          , Equate "CURSBLINK" 0x401c
+          , SymEquate "RST08VEC" 0x4000
+          , SymEquate "RST10VEC" 0x4003
+          , SymEquate "RST18VEC" 0x4006
+          , SymEquate "RST20VEC" 0x4009
+          , SymEquate "RST28VEC" 0x400c
+          , SymEquate "RST30VEC" 0x400f
+          , SymEquate "RST38VEC" 0x4012
+          , SymEquate "KIDCB" 0x4015
+          , SymEquate "CURSBLINK" 0x401c
           , Comment "Video device control block"
-          , Equate "DODCB" 0x401d
+          , SymEquate "DODCB" 0x401d
           , Comment "Cursor position (2 bytes, LSB/MSB)"
-          , Equate "CSRPOS"   0x4020
+          , SymEquate "CSRPOS"   0x4020
           , Comment "Line printer device control block"
-          , Equate "PRDCB"    0x4025
+          , SymEquate "PRDCB"    0x4025
           , Comment "Bad DCB vector, used by OUTDCB"
-          , Equate "BADDCBVEC" 0x4033
+          , SymEquate "BADDCBVEC" 0x4033
           , Comment "Cassette port and line printer width control byte"
           , Comment "0=64 char, 8=32 char."
-          , Equate "CASPLPRT" 0x403d
+          , SymEquate "CASPLPRT" 0x403d
           , Comment "OSVER$: DOS version number"
-          , Equate "DOSVER" 0x403e
+          , SymEquate "DOSVER" 0x403e
           , Comment "25 millisecond clock count"
-          , Equate "CLKTICK" 0x4040
+          , SymEquate "CLKTICK" 0x4040
           , Comment "TIME$: Time of day (seconds, minutes, hours)"
-          , Equate "SYSTIME" 0x4041
+          , SymEquate "SYSTIME" 0x4041
           , Comment "DATE$: Day of year (year, month, day)"
-          , Equate "SYSDATE" 0x4044
+          , SymEquate "SYSDATE" 0x4044
           , Comment "HIFH$: DOS highest unused RAM address"
-          , Equate "HIFH" 0x404a
+          , SymEquate "HIFH" 0x404a
           , Comment "4080 - 41FF: Basic reserved area. L2INIRESRVD initializes this area"
-          , Equate "BASICRESV" 0x4080
-          , Equate "USRFNPTR" 0x408e
+          , SymEquate "BASICRESV" 0x4080
+          , SymEquate "USRFNPTR" 0x408e
           , Comment "INKEY$ storage"
-          , Equate "INKEYSTO" 0x4099
+          , SymEquate "INKEYSTO" 0x4099
           , Comment "Error code for RESUME"
-          , Equate "RESUMEERC" 0x409a
+          , SymEquate "RESUMEERC" 0x409a
           , Comment "Printer carriage position"
-          , Equate "PRCURPOS" 0x409b
+          , SymEquate "PRCURPOS" 0x409b
           , Comment "Device type flag: -1 = tape, 0 = video, 1 = line printer"
-          , Equate "DEVTYPEFLAG" 0x409c
+          , SymEquate "DEVTYPEFLAG" 0x409c
           , Comment "PRINT# scratch space"
-          , Equate "PRNUMWORK" 0x409d
+          , SymEquate "PRNUMWORK" 0x409d
           , Comment "Pointer to lowest address available for string storage"
-          , Equate "STRINGLO" 0x40a0
+          , SymEquate "STRINGLO" 0x40a0
           , Comment "BASIC program line number counter, current line being processed"
-          , Equate "BASLINENO" 0x40a2
+          , SymEquate "BASLINENO" 0x40a2
           , Comment "Start of BASIC program pointer, first byte where BASIC programs are stored"
-          , Equate "BASPRGSTART" 0x40a4
+          , SymEquate "BASPRGSTART" 0x40a4
           , Comment "Line cursor position"
-          , Equate "LINECSRPOS" 0x40a6
+          , SymEquate "LINECSRPOS" 0x40a6
           , Comment "Input buffer pointer"
-          , Equate "INPBUFPTR" 0x40a7
+          , SymEquate "INPBUFPTR" 0x40a7
           , Comment "RND seed"
-          , Equate "RNDSEED" 0x40aa
+          , SymEquate "RNDSEED" 0x40aa
           , Comment "NTF: Numberic Type Flag"
           , Comment "2: Integer"
           , Comment "3: String"
           , Comment "4: Single precision floating point"
           , Comment "8: Double precision floating point"
           , Comment "(see CPDE2HL)"
-          , Equate "NTF" 0x40af
+          , SymEquate "NTF" 0x40af
           , Comment "Top of memory/highest memory address available for string"
           , Comment "storage. Memory above this address pointer is 'reserved'."
-          , Equate "MEMTOP" 0x40b1
+          , SymEquate "MEMTOP" 0x40b1
           , Comment "STRWORKPTR: String work area pointer"
-          , Equate "STRWORKPTR" 0x40b3
+          , SymEquate "STRWORKPTR" 0x40b3
           , Comment "String work area (0x40b5 - 0x40d5"
-          , Equate "STRWORKAREA" 0x40b5
+          , SymEquate "STRWORKAREA" 0x40b5
           , Comment "Pointer to next byte of string storage"
-          , Equate "NEXTSTRPTR" 0x40d6
+          , SymEquate "NEXTSTRPTR" 0x40d6
           , Comment "Double precision accumulator: LSB, LSB, LSB, LSB, LSB, LSB, MSB, EXP"
-          , Equate "DACC" 0x411d
+          , SymEquate "DACC" 0x411d
           , Comment "Integer accumulator: LSB, MSB"
           , Comment "Single precision accumulator, LSB, LSB, MSB, EXP"
-          , Equate "IACC" 0x4121
+          , SymEquate "IACC" 0x4121
           , Comment "\"Hex\" accumulator: integer, single, double precision aligned at"
           , Comment "the same location."
-          , Equate "HEXACC" 0x4127
+          , SymEquate "HEXACC" 0x4127
           , Comment "TRSDOS command vector redirections. These are also 'JP' instructions"
-          , Equate "DOSVECCMD" 0x4173
+          , SymEquate "DOSVECCMD" 0x4173
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Memory mapped I/O addresses"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , Equate "LPPORT" 0x37e8
-          , Equate "DSKCMDSTATUS" 0x37ec
-          , Equate "DSKTRKSEL" 0x37ed
-          , Equate "DSKSECSEL" 0x37ee
-          , Equate "DSKDATA" 0x37ef
-          , Equate "KBDLINE0" 0x3801
-          , Equate "KBDLINEFNKEYS" 0x3840
-          , Equate "KBDLINESHIFTS" 0x3880
-          , Equate "VIDRAM" 0x3c00
+          , SymEquate "LPPORT" 0x37e8
+          , SymEquate "DSKCMDSTATUS" 0x37ec
+          , SymEquate "DSKTRKSEL" 0x37ed
+          , SymEquate "DSKSECSEL" 0x37ee
+          , SymEquate "DSKDATA" 0x37ef
+          , SymEquate "KBDLINE0" 0x3801
+          , SymEquate "KBDLINEFNKEYS" 0x3840
+          , SymEquate "KBDLINESHIFTS" 0x3880
+          , SymEquate "VIDRAM" 0x3c00
           -- These are the locations where the BASIC CLOAD and SYSTEM "*"'s flicker.
-          , Equate "VIDLINE0RIGHT1" 0x3c3e
-          , Equate "VIDLINE0RIGHT2" 0x3c32
+          , SymEquate "VIDLINE0RIGHT1" 0x3c3e
+          , SymEquate "VIDLINE0RIGHT2" 0x3c32
           , Comment "USR function pointer"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "TRS-80 Model I Level II ROM disassembly:"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment ""
-          , DoDisasm romOrigin 0x0000 0x0050
-          , GrabBytes romOrigin 0x0050 0x0010
-          , nextSeg 0x0060 0x0105
-          , GrabAscii romOrigin 0x0105 (0x0110 - 0x0105)
-          , GrabBytes romOrigin 0x0110 1
-          , GrabAscii romOrigin 0x0111 (0x012b - 0x0111)
-          , GrabBytes romOrigin 0x012b 2
-          , nextSeg 0x012d 0x013c
-          , GrabAscii romOrigin 0x013c 1
-          , nextSeg 0x13d 0x0147
-          , GrabAscii romOrigin 0x0147 1
-          , nextSeg 0x0148 0x018d
-          , GrabAscii romOrigin 0x018d 1
-          , nextSeg 0x018e 0x0209
-          , GrabAscii romOrigin 0x0209 1
-          , nextSeg 0x020a 0x033a
+          , DoDisasm 0x0000 0x004f
+          , GrabBytes 0x0050 0x0010
+          , nextSeg 0x0060 0x0104
+          , GrabAscii 0x0105 (0x0110 - 0x0105)
+          , GrabBytes 0x0110 1
+          , GrabAscii 0x0111 (0x012b - 0x0111)
+          , GrabBytes 0x012b 2
+          , nextSeg 0x012d 0x0339
           , Comment "This is an alternate entry point into CHARPRINT, which preserves"
           , Comment "DE. Note that CHARPRINT will load DE with the DO DCB."
-          , nextSeg 0x033a 0x03c2
+          , nextSeg 0x033a 0x03c1
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Output character to a device, device control block is pointed to"
           , Comment "by DE, which is eventually transferred into IX. IX+1 -> L, IX + 2 -> H"
@@ -289,7 +270,7 @@ actions = [ SetOrigin romOrigin
           , Comment " (DEC) of the file."
           , Comment BC.empty
           , Comment BC.empty
-          , nextSeg 0x03c2 0x03e3
+          , nextSeg 0x03c2 0x03e2
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Read the keyboard's memory locations, determining if a key has"
           , Comment "been pressed. The scan starts as KBDLINE0, with the C register"
@@ -309,7 +290,7 @@ actions = [ SetOrigin romOrigin
           , Comment "-----------+------+------+------+------+------+------+------+-------"
           , Comment BC.empty
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , nextSeg 0x03e3 0x0458
+          , nextSeg 0x03e3 0x0457
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "DO (display output) DCB function"
           , Comment BC.empty
@@ -319,130 +300,132 @@ actions = [ SetOrigin romOrigin
           , Comment "(IX + 5): If non-zero, don't actually output the character, but"
           , Comment "do the rest of the character processing."
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , nextSeg 0x0458 0x058d
+          , nextSeg 0x0458 0x058c
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "PR (line printer output) DCB function"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , nextSeg 0x058d 0x0674
+          , nextSeg 0x058d 0x0673
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Initialize the restart vector table, located at RST08VEC"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , nextSeg 0x0674 0x06d2
+          , nextSeg 0x0674 0x06d1
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Restart vector initialization table. Yes, this is code that is"
           , Comment "copied into RAM."
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "0x4000 -> RST08 redirect"
-          , nextSeg 0x06d2 0x06d5
+          , nextSeg 0x06d2 0x06d4
           , Comment "0x4003 -> RST10 redirect"
-          , nextSeg 0x06d5 0x06d8
+          , nextSeg 0x06d5 0x06d7
           , Comment "0x4006 -> RST18 redirect"
-          , nextSeg 0x06d8 0x06db
+          , nextSeg 0x06d8 0x06da
           , Comment "0x4009 -> RST20 redirect"
-          , nextSeg 0x06db 0x06de
+          , nextSeg 0x06db 0x06dd
           , Comment "0x400c -> RST28 redirect"
-          , nextSeg 0x06de 0x06e1
+          , nextSeg 0x06de 0x06e0
           , Comment "0x400f -> RST30 redirect"
-          , nextSeg 0x06e1 0x06e4
+          , nextSeg 0x06e1 0x06e3
           , Comment "0x4012 -> RST38 redirect"
-          , nextSeg 0x06e4 0x06e7
+          , nextSeg 0x06e4 0x06e6
           , Comment "0x4015: KI (keyboard) device control block"
-          , GrabBytes romOrigin 0x06e7 1
-          , JumpTable romOrigin 0x06e8 2
-          , GrabBytes romOrigin 0x06ea 3
-          , GrabAscii romOrigin 0x06ed 2
+          , GrabBytes 0x06e7 1
+          , JumpTable 0x06e8 2
+          , GrabBytes 0x06ea 3
+          , GrabAscii 0x06ed 2
           , Comment "0x401d: DO (display output) device control block"
-          , GrabBytes romOrigin 0x06ef 1
-          , JumpTable romOrigin 0x06f0 2
-          , GrabBytes romOrigin 0x06f2 3
-          , GrabAscii romOrigin 0x06f5 2
+          , GrabBytes 0x06ef 1
+          , JumpTable 0x06f0 2
+          , GrabBytes 0x06f2 3
+          , GrabAscii 0x06f5 2
           , Comment "0x4025: PR (line printer output) device control block"
-          , GrabBytes romOrigin 0x06f7 1
-          , JumpTable romOrigin 0x06f8 2
-          , GrabBytes romOrigin 0x06fa 3
-          , GrabAscii romOrigin 0x06fd 2
+          , GrabBytes 0x06f7 1
+          , JumpTable 0x06f8 2
+          , GrabBytes 0x06fa 3
+          , GrabAscii 0x06fd 2
           , Comment "0x402d:"
-          , nextSeg 0x06ff 0x0705
+          , nextSeg 0x06ff 0x0704
           , Comment "0x4033: OUTDCB jumps here if the requested device type bit doesn't match"
-          , nextSeg 0x0705 0x0708
+          , nextSeg 0x0705 0x0707
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "End of the restart vector initialization table."
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , nextSeg 0x0708 0x09d2
+          , nextSeg 0x0708 0x09d1
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Copy bytes pointed to by HL to the buffer pointed to by DE"
           , Comment "This just exchanges DE and HL, falls through to CPDE2HL"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , nextSeg 0x09d2 0x09d3
+          , nextSeg 0x09d2 0x09d2
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Copy the bytes pointed to by DE to the buffer pointed to by HL"
           , Comment "A, B, DE and HL are not preserved. NTF (numeric type flag)"
           , Comment "indicates the number of bytes to copy."
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , nextSeg 0x09d3 0x137c
+          , nextSeg 0x09d3 0x137b
           , Comment "0.0 floating point constant"
-          , GrabBytes romOrigin 0x137c 4
+          , GrabBytes 0x137c 4
           , Comment "0.5 floating point constant"
-          , GrabBytes romOrigin 0x1380 4
+          , GrabBytes 0x1380 4
           , Comment "?? floating point constant"
-          , GrabBytes romOrigin 0x1384 4
-          , nextSeg 0x1388 0x158b
+          , GrabBytes 0x1384 4
+          , nextSeg 0x1388 0x158a
           , Comment "These four bytes are a floating point constant?"
-          , GrabBytes romOrigin 0x158b 4
-          , nextSeg 0x158f 0x1650
+          , GrabBytes 0x158b 4
+          , nextSeg 0x158f 0x164f
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "BASIC verb table -- first character has high bit set"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , HighBitTable romOrigin 0x1650 (0x1820 - 0x1650)
-          , JumpTable romOrigin 0x1820 (0x18c9 - 0x1820)
+          , HighBitTable 0x1650 (0x1820 - 0x1650)
+          , JumpTable 0x1820 (0x18c9 - 0x1820)
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "BASIC error codes:"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , GrabAscii romOrigin 0x18c9 2
-          , GrabAscii romOrigin 0x18cb 2
-          , GrabAscii romOrigin 0x18cd 2
-          , GrabAscii romOrigin 0x18cf 2
-          , GrabAscii romOrigin 0x18d1 2
-          , GrabAscii romOrigin 0x18d3 2
-          , GrabAscii romOrigin 0x18d5 2
-          , GrabAscii romOrigin 0x18d7 2
-          , GrabAscii romOrigin 0x18d9 2
-          , GrabAscii romOrigin 0x18db 2
-          , GrabAscii romOrigin 0x18dd 2
-          , GrabAscii romOrigin 0x18df 2
-          , GrabAscii romOrigin 0x18e1 2
-          , GrabAscii romOrigin 0x18e3 2
-          , GrabAscii romOrigin 0x18e5 2
-          , GrabAscii romOrigin 0x18e7 2
-          , GrabAscii romOrigin 0x18e9 2
-          , GrabAscii romOrigin 0x18eb 2
-          , GrabAscii romOrigin 0x18ed 2
-          , GrabAscii romOrigin 0x18ef 2
-          , GrabAscii romOrigin 0x18f1 2
-          , GrabAscii romOrigin 0x18f3 2
-          , GrabAscii romOrigin 0x18f5 2
+          , GrabAscii 0x18c9 2
+          , GrabAscii 0x18cb 2
+          , GrabAscii 0x18cd 2
+          , GrabAscii 0x18cf 2
+          , GrabAscii 0x18d1 2
+          , GrabAscii 0x18d3 2
+          , GrabAscii 0x18d5 2
+          , GrabAscii 0x18d7 2
+          , GrabAscii 0x18d9 2
+          , GrabAscii 0x18db 2
+          , GrabAscii 0x18dd 2
+          , GrabAscii 0x18df 2
+          , GrabAscii 0x18e1 2
+          , GrabAscii 0x18e3 2
+          , GrabAscii 0x18e5 2
+          , GrabAscii 0x18e7 2
+          , GrabAscii 0x18e9 2
+          , GrabAscii 0x18eb 2
+          , GrabAscii 0x18ed 2
+          , GrabAscii 0x18ef 2
+          , GrabAscii 0x18f1 2
+          , GrabAscii 0x18f3 2
+          , GrabAscii 0x18f5 2
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "BASIC reserved data table."
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , GrabBytes romOrigin 0x18f7 39
-          , GrabAscii romOrigin 0x191e 5
-          , GrabBytes romOrigin 0x1923 1
-          , GrabAscii romOrigin 0x1924 4
-          , GrabBytes romOrigin 0x1928 1
-          , GrabAscii romOrigin 0x1929 5
-          , GrabBytes romOrigin 0x192e 2
-          , GrabAscii romOrigin 0x1930 5
-          , GrabBytes romOrigin 0x1935 1
-          , nextSeg 0x1936 0x1c96
+          , GrabBytes 0x18f7 39
+          , GrabAscii 0x191e 5
+          , GrabBytes 0x1923 1
+          , GrabAscii 0x1924 4
+          , GrabBytes 0x1928 1
+          , GrabAscii 0x1929 5
+          , GrabBytes 0x192e 2
+          , GrabAscii 0x1930 5
+          , GrabBytes 0x1935 1
+          , nextSeg 0x1936 0x1c95
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , Comment "Compare A against character following the RST 08 instruction."
+          , Comment "Compare (HL) against character following the RST 08 instruction."
+          , Comment BC.empty
           , Comment "Return address is pointed to by SP, which is transferred into HL"
           , Comment "The return address is incremented so that the RET returns to the"
           , Comment "instruction following the character."
           , Comment BC.empty
-          , Comment "It's a neat hack."
+          , Comment "A is not preserved. (HL) is the character pointed to by the HL"
+          , Comment "register."
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , nextSeg 0x1c96 0x25d9
+          , nextSeg 0x1c96 0x25d8
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Test the numberic type flag (NTF)"
           , Comment "Z: String"
@@ -453,4 +436,4 @@ actions = [ SetOrigin romOrigin
           , nextSeg 0x25d9 0x2fff
           ]
   where
-    nextSeg sAddr eAddr = DoDisasm romOrigin sAddr (fromIntegral (eAddr - sAddr) :: Z80disp)
+    nextSeg sAddr eAddr = DoDisasm sAddr (fromIntegral (eAddr - sAddr) :: Z80disp)

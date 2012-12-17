@@ -8,7 +8,7 @@ import System.Environment
 import Control.Lens
 -- import Control.DeepSeq
 import qualified Data.Map as Map
-import qualified Data.ByteString.Lazy.Char8 as BS
+import qualified Data.ByteString.Lazy.Char8 as BC
 import Data.Sequence (Seq, (|>), (><))
 import qualified Data.Sequence as Seq
 import Data.Vector.Unboxed (Vector, (!))
@@ -17,7 +17,6 @@ import qualified Data.Foldable as Foldable
 import Data.Bits
 import Data.Char
 
--- import Language.Haskell.Pretty
 -- import Debug.Trace
 
 import Reader
@@ -35,14 +34,14 @@ trs80Rom :: String
 trs80Rom imgName = readRawWord8Vector imgName
                    >>= (\img -> let dis = collectRom (romMemory img) initialDisassembly actions
                                 in  checkAddrContinuity dis
-                                    >> outputDisassembly stdout dis
+                                    >> z80AnalyticDisassemblyOutput stdout dis
                        )
   where
     -- Initial disassembly state: known symbols and disassembly address range predicate
     initialDisassembly = symbolTab .~ knownSymbols $ addrInDisasmRange .~ trs80RomRange $ mkInitialDisassembly
     lastAddr = 0x2fff
     -- ROM range for 'addrInDisasmRange' predicate
-    trs80RomRange addr = addr >= romOrigin && addr <= lastAddr
+    trs80RomRange addr = addr >= 0x0000 && addr <= lastAddr
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -61,18 +60,18 @@ doAction :: Z80memory (Vector Z80word)
 
 doAction mem dstate guide
   {-  | trace ("disasm: guide = " ++ (show guide)) False = undefined -}
-  | (SetOrigin origin)                <- guide = disasmSeq %~ (|> DisasmPseudo (DisOrigin origin)) $ dstate
-  | (Equate label addr)               <- guide = 
-    (symbolTab %~ (Map.insert addr label)) . (disasmSeq %~ (|> DisasmPseudo (AddrEquate label addr))) $ dstate
-  | (Comment comment)                 <- guide = disasmSeq %~ (|> DisasmPseudo (LineComment comment)) $ dstate
-  | (DoDisasm origin sAddr nBytes)    <- guide = disassemble dstate mem (PC $ origin + sAddr)
-                                                                        (PC $ origin + sAddr + fromIntegral nBytes)
-  | (GrabBytes origin sAddr nBytes)   <- guide = z80disbytes dstate mem (PC $ origin + sAddr) nBytes
-  | (GrabAsciiZ origin sAddr)         <- guide = z80disasciiz dstate mem (PC $ origin + sAddr)
-  | (GrabAscii origin sAddr nBytes)   <- guide = z80disascii dstate mem (PC $ origin + sAddr) nBytes
-  | (HighBitTable origin addr nBytes) <- guide = highbitCharTable mem (origin + addr) nBytes dstate
-  | (JumpTable origin addr nBytes)    <- guide = jumpTable mem (origin + addr) nBytes dstate
-  | otherwise                                  = dstate
+  | (SetOrigin origin)         <- guide = disasmSeq %~ (|> (DisOrigin origin)) $ dstate
+  | (SymEquate label addr)     <- guide = 
+    (symbolTab %~ (Map.insert addr label)) . (disasmSeq %~ (|> (Equate label addr))) $ dstate
+  | (Comment comment)          <- guide = disasmSeq %~ (|> (LineComment comment)) $ dstate
+  | (DoDisasm sAddr nBytes)    <- guide = disassemble dstate mem (PC $ sAddr) (PC $ sAddr + fromIntegral nBytes)
+                                                      trs80RomPostProcessor
+  | (GrabBytes sAddr nBytes)   <- guide = z80disbytes dstate mem (PC $ sAddr) nBytes
+  | (GrabAsciiZ sAddr)         <- guide = z80disasciiz dstate mem (PC $ sAddr)
+  | (GrabAscii sAddr nBytes)   <- guide = z80disascii dstate mem (PC $ sAddr) nBytes
+  | (HighBitTable addr nBytes) <- guide = highbitCharTable mem addr nBytes dstate
+  | (JumpTable addr nBytes)    <- guide = jumpTable mem addr nBytes dstate
+  | otherwise                           = dstate
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -98,13 +97,13 @@ highbitCharTable mem sAddr nBytes z80dstate =
       grabString memidx memidx' =
         let theChar = memBlock ! memidx
             theChar' = fromIntegral theChar :: Int
-            firstByte = BS.concat [ "'"
-                                  , BS.singleton (chr (theChar' .&. 0x7f))
+            firstByte = BC.concat [ "'"
+                                  , BC.singleton (chr (theChar' .&. 0x7f))
                                   , "' .|. 80H"
                                   ]
-            firstBytePseudo = DisasmPseudo $ ByteExpression (fromIntegral (sAddr' + memidx)) firstByte theChar
-            theString = DisasmPseudo $ Ascii (fromIntegral $ sAddr' + memidx + 1)
-                                             (DVU.slice (memidx + 1) (memidx' - memidx - 1) memBlock)
+            firstBytePseudo = ExtPseudo (ByteExpression (fromIntegral (sAddr' + memidx)) firstByte theChar)
+            theString = Ascii (fromIntegral $ sAddr' + memidx + 1)
+                              (DVU.slice (memidx + 1) (memidx' - memidx - 1) memBlock)
         in  if (memidx + 1) /= memidx' then
               Seq.singleton firstBytePseudo |> theString
             else
@@ -128,7 +127,7 @@ jumpTable mem sAddr nBytes dstate =
         | addr == endAddr - 2 = operAddrPseudo $ _2 ^$ (z80DisGetAddr mem (PC addr))
         | otherwise           = z80disbytes z80dstate mem (PC addr) (fromIntegral $ endAddr - addr)
         where
-          operAddrPseudo theAddr = disasmSeq %~ (|> DisasmPseudo (operAddr theAddr)) $ z80dstate
+          operAddrPseudo theAddr = disasmSeq %~ (|> (operAddr theAddr)) $ z80dstate
           operAddr theAddr = 
             let symTab = view symbolTab z80dstate
                 oper   = if Map.member theAddr symTab then
@@ -136,8 +135,28 @@ jumpTable mem sAddr nBytes dstate =
                          else
                            AbsAddr theAddr
                 bytes  = (mem ^. mfetchN) addr 2
-            in  AddrWord addr oper bytes
+            in  Addr addr oper bytes
   in  generateAddr sAddr dstate
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Post-processing for RST 8 "macros" in the TRS-80 ROM. RST 08 is always followed
+-- by a character; (HL) is compared to this following character and flags set.
+trs80RomPostProcessor :: Z80DisasmElt
+                      -> Z80memory (Vector Z80word)
+                      -> Z80PC
+                      -> Z80disassembly
+                      -> (Z80PC, Z80disassembly)
+trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) mem pc dstate =
+  let sAddr  = getPCvalue pc
+      byte   = (mem ^. mfetch) sAddr
+      -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
+      pseudo = if byte >= 0x20 && byte <= 0x7f then
+                 Ascii
+               else
+                 ByteRange
+  in  (pcInc pc, (disasmSeq %~ (\s -> s |> ins |> (pseudo sAddr (DVU.singleton byte))) $ dstate))
+-- Otherwise, just append the instruction onto the disassembly sequence.
+trs80RomPostProcessor elt mem pc dstate = z80DefaultPostProcessor elt mem pc dstate
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Primitive memory system for the raw image ROMs.
@@ -166,7 +185,7 @@ checkAddrContinuity dis =
       checkSeq   = Seq.zipWith (\a1 a2 -> a1 == a2) nextAddrs' nextAddrs
 
       formatDiscontinuity (expected, got) = 
-        BS.hPutStrLn stderr $ BS.concat [ "  expected "
+        BC.hPutStrLn stderr $ BC.concat [ "  expected "
                                         , as0xHex expected
                                         , ", got "
                                         , as0xHex got
@@ -175,8 +194,7 @@ checkAddrContinuity dis =
         return ()
       else
         hPutStrLn stderr "Discontinuities = "
-        >> (traverse formatDiscontinuity $ Seq.filter (\(a, b) -> a /= b) $ (Seq.zip nextAddrs' nextAddrs))
-        >> return ()
+        >> (Foldable.traverse_ formatDiscontinuity $ Seq.filter (\(a, b) -> a /= b) $ (Seq.zip nextAddrs' nextAddrs))
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
