@@ -6,9 +6,13 @@ module Main where
 import System.IO (stdout, stderr, hPutStrLn)
 import System.Environment
 import Control.Lens
--- import Control.DeepSeq
+import Data.Digest.Pure.MD5
+import Data.Binary
+
 import qualified Data.Map as Map
-import qualified Data.ByteString.Lazy.Char8 as BC
+import qualified Data.ByteString.Lazy as BCL
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import Data.Sequence (Seq, (|>), (><))
 import qualified Data.Sequence as Seq
 import Data.Vector.Unboxed (Vector, (!))
@@ -32,24 +36,54 @@ import KnownSymbols
 trs80Rom :: String 
          -> IO ()
 trs80Rom imgName = readRawWord8Vector imgName
-                   >>= (\img -> let dis = collectRom (romMemory img) initialDisassembly actions
+                   >>= (\img -> let dis = collectRom (romMemory img) (initialDisassembly img) actions
                                 in  checkAddrContinuity dis
                                     >> z80AnalyticDisassemblyOutput stdout dis
                        )
   where
     -- Initial disassembly state: known symbols and disassembly address range predicate
-    initialDisassembly = symbolTab .~ knownSymbols $ addrInDisasmRange .~ trs80RomRange $ mkInitialDisassembly
-    lastAddr = 0x2fff
+    initialDisassembly img = disasmSeq %~ (\s -> s |> (LineComment commentBreak)
+                                                   |> (LineComment (T.append "ROM MD5 checksum: " (romMD5Hex img)))
+                                                   |> (LineComment ((identifyROM . romMD5) img))
+                                                   |> (LineComment commentBreak)
+                                                   |> (LineComment T.empty)) $
+                               symbolTab .~ knownSymbols $
+                               addrInDisasmRange .~ trs80RomRange $
+                               mkInitialDisassembly
+    commentBreak           = "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
+    romMD5 img             = (encode . md5 . BCL.pack . DVU.toList) img
+    romMD5Hex img          = BCL.foldl (\a x -> T.append a (asHex x)) T.empty (romMD5 img)
+    lastAddr               = 0x2fff
     -- ROM range for 'addrInDisasmRange' predicate
-    trs80RomRange addr = addr >= 0x0000 && addr <= lastAddr
+    trs80RomRange addr     = addr >= 0x0000 && addr <= lastAddr
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Identify a ROM from its MD5 signature.
+identifyROM :: BCL.ByteString
+            -> T.Text
+identifyROM md5sig = case Map.lookup md5sig romSigs of
+                       Nothing      -> "Unknown ROM signature"
+                       Just romName -> romName
 
-collectRom :: Z80memory (Vector Z80word)
-           -> Z80disassembly
-           -> [Guidance]
-           -> Z80disassembly
-collectRom img dstate theActions = Foldable.foldl' (doAction img) dstate theActions
+romSigs :: Map.Map BCL.ByteString T.Text
+romSigs = Map.fromList [ ( BCL.pack [ 0xca, 0x74, 0x82, 0x2e, 0xbc, 0x28, 0x03, 0xc6, 0x63, 0x5a, 0x55, 0x11
+                                    , 0x6e, 0xcd, 0x95, 0x39 ]
+                         , "Model I v1.2-3a" )
+                       , ( BCL.pack [ 0x6f, 0x0a, 0xc8, 0x17, 0x9f, 0xa0, 0x1c, 0xc4, 0x47, 0x20, 0xda, 0x31
+                                   , 0x9c, 0xe1, 0x2a, 0x92 ]
+                         , "Model I v1.3-1" )
+                       ]
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Collect the TRS-80 ROM (oh, this could sooo be generalized!) by left folding the disassembler guidance
+-- and collecing the disassembler state, symbol table and disassembled instruction sequence.
+collectRom :: Z80memory (Vector Z80word)                -- ^ The system's memory
+           -> Z80disassembly                            -- ^ Initial disassembler state. This is pre-populated with known
+                                                        -- symbols in the symbol table.
+           -> [Guidance]                                -- ^ Disassembler guidance
+           -> Z80disassembly                            -- ^ Resulting disassembler state, symbol table and disassembly
+                                                        -- sequence.
+collectRom img = Foldable.foldl' (doAction img)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -97,10 +131,10 @@ highbitCharTable mem sAddr nBytes z80dstate =
       grabString memidx memidx' =
         let theChar = memBlock ! memidx
             theChar' = fromIntegral theChar :: Int
-            firstByte = BC.concat [ "'"
-                                  , BC.singleton (chr (theChar' .&. 0x7f))
-                                  , "' .|. 80H"
-                                  ]
+            firstByte = T.concat [ "'"
+                                 , T.singleton (chr (theChar' .&. 0x7f))
+                                 , "' .|. 80H"
+                                 ]
             firstBytePseudo = ExtPseudo (ByteExpression (fromIntegral (sAddr' + memidx)) firstByte theChar)
             theString = Ascii (fromIntegral $ sAddr' + memidx + 1)
                               (DVU.slice (memidx + 1) (memidx' - memidx - 1) memBlock)
@@ -185,7 +219,7 @@ checkAddrContinuity dis =
       checkSeq   = Seq.zipWith (\a1 a2 -> a1 == a2) nextAddrs' nextAddrs
 
       formatDiscontinuity (expected, got) = 
-        BC.hPutStrLn stderr $ BC.concat [ "  expected "
+        TIO.hPutStrLn stderr $ T.concat [ "  expected "
                                         , as0xHex expected
                                         , ", got "
                                         , as0xHex got

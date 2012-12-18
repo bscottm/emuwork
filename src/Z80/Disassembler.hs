@@ -37,8 +37,7 @@ import qualified Data.Map as Map
 import Data.Sequence (Seq, (|>))
 import qualified Data.Sequence as Seq
 import qualified Data.Vector.Unboxed as DVU
-import Data.ByteString.Lazy.Char8 (ByteString)
-import qualified Data.ByteString.Lazy.Char8 as BC
+import qualified Data.Text as T
 import Data.Word
 import Data.Bits
 
@@ -53,7 +52,7 @@ type Z80DisasmElt = DisElement Z80instruction Z80addr Z80word Z80PseudoOps
 data Z80PseudoOps where
   -- Byte from an arbitrary expression
   ByteExpression :: Z80addr
-                 -> ByteString
+                 -> T.Text
                  -> Word8
                  -> Z80PseudoOps
 
@@ -85,7 +84,7 @@ data Z80disassembly =
   , _addrInDisasmRange :: Z80addr               -- The address to test
                        -> Bool                  -- 'True' if in disassembler's range, 'False' otherwise.
     -- | The symbol table mapping between addresses and symbol names in 'disasmSeq'
-  , _symbolTab :: Map Z80addr  ByteString
+  , _symbolTab :: Map Z80addr  T.Text
     -- | The sequence of tuples, each of which is an address, words corresponding to the disassembled instruction, and the
     -- disassembled instruction.
   , _disasmSeq :: Seq Z80DisasmElt
@@ -584,7 +583,7 @@ displacementInstruction mem pc dstate ins =
       isInSymtab   = Map.member destAddr symTab
       nextIns      = pcInc pc'
   in  if (addrInRangeF destAddr) && not isInSymtab then
-        let label   = BC.cons 'L' (BC.pack . show $ dstate ^. labelNum)
+        let label   = T.cons 'L' (T.pack . show $ dstate ^. labelNum)
         in Decoded (ins . SymAddr $ label) nextIns ((symbolTab %~ (Map.insert destAddr label)) . (labelNum +~ 1) $ dstate)
       else if isInSymtab then
              Decoded ((ins . SymAddr) $ symTab Map.! destAddr) nextIns dstate
@@ -597,7 +596,7 @@ symAbsAddress :: Z80memory memSys               -- ^ Z80 "memory"
               -> Z80PC                          -- ^ Program counter, from which the address will be fetched
               -> Z80disassembly                 -- ^ Current disassembly state
               -> Bool                           -- ^ 'True': generate a label for the address, if one doesn't already exist
-              -> ByteString                     -- ^ Label prefix, if one is generated
+              -> T.Text                         -- ^ Label prefix, if one is generated
               -> ((SymAbsAddr Z80addr) -> Z80instruction)
               -> DecodeResult
 symAbsAddress mem pc dstate makeLabel prefix ins =
@@ -608,7 +607,7 @@ symAbsAddress mem pc dstate makeLabel prefix ins =
       defaultTuple       = Decoded (ins . AbsAddr $ destAddr) addrpc dstate
   in  if (addrInRangeF destAddr) && not isInSymtab then
         if makeLabel then
-          let label   = BC.append prefix (BC.pack . show $ dstate ^. labelNum)
+          let label   = T.append prefix (T.pack . show $ dstate ^. labelNum)
           in  Decoded ((ins . SymAddr) label) addrpc ((symbolTab %~ (Map.insert destAddr label)) . (labelNum +~ 1) $ dstate)
         else
           defaultTuple

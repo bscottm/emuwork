@@ -19,6 +19,7 @@ library
                         deepseq,
                         containers >= 0.4,
                         bytestring >= 0.9,
+                        text >= 0.11,
                         vector >= 0.10,
                         lens,
                         transformers
@@ -72,9 +73,12 @@ executable trs80l2rom
   Build-Depends:        base >= 4,
                         containers >= 0.4,
                         bytestring >= 0.9,
+                        text >= 0.11,
+                        binary >= 0.5,
                         lens,
                         vector >= 0.10,
                         deepseq,
+                        pureMD5,
                         emuwork
   ghc-options:          -Wall -O2
   other-modules:        Guidance,

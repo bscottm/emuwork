@@ -1,7 +1,6 @@
 module Guidance where
 
-import Data.ByteString.Lazy.Char8 (ByteString)
-import qualified Data.ByteString.Lazy.Char8 as BC
+import qualified Data.Text as T
 
 import Z80
 
@@ -11,10 +10,10 @@ import Z80
 data Guidance where
   SetOrigin      :: Z80addr                     -- Assembly origin address
                  -> Guidance
-  SymEquate      :: ByteString                  -- Symbolic name
+  SymEquate      :: T.Text                      -- Symbolic name
                  -> Z80addr                     -- Address to associate with the symbolic name
                  -> Guidance
-  Comment        :: ByteString                  -- Comment to output
+  Comment        :: T.Text                      -- Comment to output
                  -> Guidance
   DoDisasm       :: Z80addr                     -- Start of disassembly
                  -> Z80disp                     -- Number of bytes to disassemble
@@ -158,33 +157,33 @@ actions = [ SetOrigin 0x0000
           , Comment "which is the device's output function. 0x3dd is also pushed onto"
           , Comment "the stack so that when the output function returns, registers are"
           , Comment "restored."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "Stack look like:"
           , Comment "BC"
           , Comment "HL"
           , Comment "IX"
           , Comment "DE"
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "On entry, A has the character to be output. When control is transferred"
           , Comment "to the DCB's function, C has the character to be output."
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , Comment BC.empty
+          , Comment T.empty
           , Comment " _______________________________________ "
           , Comment "| | | | | | | | |      |         |      |"
           , Comment "|    T Y P E    |VECTOR| SYSDATA | NAME |"
           , Comment "|_|_|_|_|_|_|_|_|______|_________|______|"
           , Comment " 7 6 5 4 3 2 1 0 15   0 23      0 15   0 "
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "     The DCB follows a strict format that defines the utilization  of all four"
           , Comment "fields.  The  programmer  need  be  concerned only  with the TYPE  and  VECTOR"
           , Comment "fields.  The  system requires sole use of the SYSDATA field. It also maintains"
           , Comment "the NAME field thus usually necessitating no programmer intervention. The  DCB"
           , Comment "format must be followed in all Device Control Blocks established by  the user."
           , Comment "The following information provides specifications for each field of the DCB."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "TYPE Field - <Byte 0>"
           , Comment "---------------------"
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "        Bit 7  => This bit specifies that the Control Block is actually a"
           , Comment "                  File Control Block (FCB) with the file in an OPEN"
           , Comment "                  condition. Since there is a great deal of similarity"
@@ -192,12 +191,12 @@ actions = [ SetOrigin 0x0000
           , Comment "                  files, tracing a path through a device chain may reveal"
           , Comment "                  a \"device\" with this bit set, indicating a routing to a"
           , Comment "                  file."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "        Bit 6  => This bit specifies that the DCB is associated with a"
           , Comment "                  FILTER module. The VECTOR field then contains the entry"
           , Comment "                  point of the filter. A filter initializer must set this"
           , Comment "                  bit when the module is assigned to the DCB."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "        Bit 5  => This bit specifies that the DCB (say device AA) is linked"
           , Comment "                  to another device associated with a DCB (say device BB)."
           , Comment "                  The VECTOR field of AA will point to a dummy LINK DCB (say"
@@ -207,34 +206,34 @@ actions = [ SetOrigin 0x0000
           , Comment "                  while the SYSDATA field will contain a pointer to the BB"
           , Comment "                  DCB. A picture is said to be worth a thousand words. The"
           , Comment "                  device chain linkage will be illustrated later."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "        Bit 4  => This bit specifies that the device defined by the DCB is"
           , Comment "                  routed to another character-oriented device or file. The"
           , Comment "                  VECTOR field will either point to a DCB if the route"
           , Comment "                  destination is a device or it will contain a pointer to"
           , Comment "                  the file's FCB field contained in the route module"
           , Comment "                  established by the system's ROUTE library command."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "        Bit 3  => This bit specifies that the device defined by the DCB is"
           , Comment "                  a NIL device. Any output directed to the device will be"
           , Comment "                  discarded. Any input request will be satisfied with a"
           , Comment "                  ZERO return condition."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "        Bit 2  => This bit specifies that the device defined by the DCB is"
           , Comment "                  capable of handling requests generated by the @CTL Super-"
           , Comment "                  Visor Call."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "        Bit 1  => This bit specifies that the device defined by the DCB is"
           , Comment "                  capable of handling output requests which come from the"
           , Comment "                  @PUT SuperVisor Call."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "        Bit 0  => This bit specifies that the device defined by the DCB is"
           , Comment "                  capable of handling requests for input which come from"
           , Comment "                  the @GET SuperVisor Call."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "VECTOR Field - <Bytes 1 - 2>"
           , Comment "----------------------------"
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "     This  field initially will contain the address of the driver routine that"
           , Comment "supports  the device  hardware  associated  with  the  DCB.  In  the  case  of"
           , Comment "programmer-installed  drivers, the  driver initialization  code must  load the"
@@ -244,16 +243,16 @@ actions = [ SetOrigin 0x0000
           , Comment "or  the  driver/module  initialization code  to  point to  the  module's entry"
           , Comment "point, the VECTOR  field is then maintained by the system  to effect  routing,"
           , Comment "linking, and filtering."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "SYSDATA Field - <Bytes 3-5>"
           , Comment "---------------------------"
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "     These three bytes are used by the system for routing and  linking and are"
           , Comment "unavailable for any other purpose."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "NAME Field - <Bytes 6 - 7>"
           , Comment "--------------------------"
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "     Byte 6 of this  field contains the first character  and byte 7 the second"
           , Comment "character of the device specification name.  The system uses  the device  name"
           , Comment "field as a reference in searching the  Device Control Block tables. When a DCB"
@@ -262,21 +261,21 @@ actions = [ SetOrigin 0x0000
           , Comment "in  the  command  invocation. Programs requesting a spare DCB  via  the @GTDCB"
           , Comment " SuperVisor Call  (and  a binary ZERO name), are  responsible  for loading this"
           , Comment " name field."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "      If the device has been routed  to a file and a search of the device chain"
           , Comment " shows a  TYPE byte with bit-7 set,  then  the respective control  block  is an"
           , Comment " FCB.  In this case, byte 6  of the field will contain the  DRIVE number of the"
           , Comment " drive containing the file and  byte  7 will contain  the  Directory Entry Code"
           , Comment " (DEC) of the file."
-          , Comment BC.empty
-          , Comment BC.empty
+          , Comment T.empty
+          , Comment T.empty
           , nextSeg 0x03c2 0x03e2
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Read the keyboard's memory locations, determining if a key has"
           , Comment "been pressed. The scan starts as KBDLINE0, with the C register"
           , Comment "multiplied by 2 (3801, 3802, 3804, ...) via a rotate left until"
           , Comment "location 3880 is reached."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "Address    |0 0x01|1 0x02|2 0x04|3 0x08|4 0x10|5 0x20|6 0x40|7 0x80|"
           , Comment "-----------+------+------+------+------+------+------+------+-------"
           , Comment "3B01       |A     |B     |C     |D     |E     |F     |G     |      |"
@@ -288,12 +287,12 @@ actions = [ SetOrigin 0x0000
           , Comment "3B40       |ENTER |CLR   |UP-ARW|DN-ARW|L-ARW |R-ARW |SPACE |      |"
           , Comment "3B80       |RTSHFT|LTSHFT|      |      |      |      |      |      |"
           , Comment "-----------+------+------+------+------+------+------+------+-------"
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , nextSeg 0x03e3 0x0457
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "DO (display output) DCB function"
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "C has the character to be output on entry."
           , Comment "(IX + 3), (IX + 4): Current memory location in VIDRAM where the"
           , Comment "character is output (DCB SYSINFO bytes 1 and 2)."
@@ -417,11 +416,11 @@ actions = [ SetOrigin 0x0000
           , nextSeg 0x1936 0x1c95
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Compare (HL) against character following the RST 08 instruction."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "Return address is pointed to by SP, which is transferred into HL"
           , Comment "The return address is incremented so that the RET returns to the"
           , Comment "instruction following the character."
-          , Comment BC.empty
+          , Comment T.empty
           , Comment "A is not preserved. (HL) is the character pointed to by the HL"
           , Comment "register."
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="

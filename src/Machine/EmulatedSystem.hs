@@ -3,7 +3,7 @@ module Machine.EmulatedSystem where
 
 import Control.Lens
 import Data.Vector.Unboxed (Vector, Unbox)
-import qualified Data.ByteString.Lazy.Char8 as BC
+import qualified Data.Text as T
 
 import Machine.Utils
 
@@ -44,7 +44,7 @@ instance Eq (ProgramCounter addrType) where
 
 -- | Make program counters show-able as something coherent.
 instance (ShowHex addrType) => Show (ProgramCounter addrType) where
-  show (PC pc) = "PC " ++ (BC.unpack . as0xHex $ pc)
+  show (PC pc) = "PC " ++ (T.unpack . as0xHex $ pc)
 
 -- | Relative program counter data; 'dispType' should be a signed type of the same size as 'ProgramCounter's 'addrType'
 data RelativePC dispType where

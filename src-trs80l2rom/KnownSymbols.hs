@@ -2,11 +2,11 @@ module KnownSymbols where
 
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.ByteString.Lazy.Char8 (ByteString)
+import qualified Data.Text as T
 
 import Z80
 
-knownSymbols :: Map Z80addr ByteString
+knownSymbols :: Map Z80addr T.Text
 knownSymbols   = Map.fromList [ (0x0000, "RST00")
                               , (0x0008, "RST08")
                               , (0x0010, "RST10")

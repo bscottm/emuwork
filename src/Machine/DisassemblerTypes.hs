@@ -16,7 +16,7 @@ module Machine.DisassemblerTypes
 import Data.Word
 import Data.Vector.Unboxed (Vector, Unbox)
 import qualified Data.Vector.Unboxed as DVU
-import Data.ByteString.Lazy.Char8 (ByteString)
+import qualified Data.Text as T
 
 import Machine.Utils
 import Machine.EmulatedSystem
@@ -28,7 +28,7 @@ data DisElement insnType addrType wordType extPseudoType where
   DisasmInsn     :: addrType                    -- Instruction address
                  -> Vector wordType             -- Vector of words corresponding to the instruction
                  -> insnType                    -- The instruction
-                 -> ByteString                  -- Optional comment
+                 -> T.Text                      -- Optional comment
                  -> DisElement insnType addrType wordType extPseudoType
   -- Disassembly origin
   DisOrigin      :: addrType
@@ -52,11 +52,11 @@ data DisElement insnType addrType wordType extPseudoType where
                  -> DisElement insnType addrType wordType extPseudoType
   -- Address equation: associates a symbol with an address of something, which is also added to the
   -- disassembler's symbol table
-  Equate         :: ByteString
+  Equate         :: T.Text
                  -> addrType
                  -> DisElement insnType addrType wordType extPseudoType
   -- Comment, printed as a line, as opposed to after an mnemonic and operands
-  LineComment    :: ByteString
+  LineComment    :: T.Text
                  -> DisElement insnType addrType wordType extPseudoType
   -- Extensions to the "standard" disassembler pseudo instructions
   ExtPseudo      :: extPseudoType
@@ -67,7 +67,7 @@ data DisElement insnType addrType wordType extPseudoType where
 data SymAbsAddr addrType where
   AbsAddr :: addrType
           -> SymAbsAddr addrType
-  SymAddr :: ByteString
+  SymAddr :: T.Text
           -> SymAbsAddr addrType
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
