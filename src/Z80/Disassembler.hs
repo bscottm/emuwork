@@ -60,19 +60,19 @@ data Z80PseudoOps where
 isZ80AddrIns :: Z80DisasmElt
              -> Bool
 isZ80AddrIns (ExtPseudo (ByteExpression _ _ _)) = True
-isZ80AddrIns op                                 = disEltHasAddr op
+isZ80AddrIns elt                                = disEltHasAddr elt
 
 -- | Extract address component from a Z80 disassembler element
 z80InsAddr :: Z80DisasmElt
            -> Z80addr
 z80InsAddr (ExtPseudo (ByteExpression addr _ _)) = addr
-z80InsAddr op                                    = disEltGetAddr op
+z80InsAddr elt                                   = disEltGetAddr elt
 
 -- | Get the instruction or pseudo operation's length
 z80InsLength :: Z80DisasmElt
              -> Int
 z80InsLength (ExtPseudo (ByteExpression _ _ _)) = 1
-z80InsLength op                                 = disEltGetLength op
+z80InsLength elt                                = disEltGetLength elt
 
 -- | Disassembler state, which indexes the 'Disassembly' type family.
 data Z80disassembly =
