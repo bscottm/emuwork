@@ -273,7 +273,7 @@ oneOperand :: DisOperandFormat operand =>
               T.Text
            -> operand
            -> (T.Text, T.Text)
-oneOperand mne op = (mne, formatOperand op)
+oneOperand mne opnd = (mne, formatOperand opnd)
 
 -- | Disassembly output with a two operand instruction
 twoOperands :: (DisOperandFormat operand1, DisOperandFormat operand2) =>
@@ -366,8 +366,8 @@ instance DisOperandFormat OperALU where
   formatOperand (ALUHLindirect) = "(HL)"
 
 instance DisOperandFormat OperExtendedALU where
-  formatOperand (ALU8 op)  = formatOperand op
-  formatOperand (ALU16 rp) = T.append "HL, " (formatOperand rp)
+  formatOperand (ALU8 opnd) = formatOperand opnd
+  formatOperand (ALU16 rp)  = T.append "HL, " (formatOperand rp)
 
 instance DisOperandFormat RegPairSP where
   formatOperand (RPair16 r) = formatOperand r

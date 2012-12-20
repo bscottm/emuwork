@@ -199,14 +199,14 @@ instance Show Z80instruction where
   show (JP addr) = "JP(" ++ (show addr) ++ ")"
   show (JPCC cc addr) = "JPCC(" ++ (show cc) ++ "," ++ (show addr) ++ ")"
 
-  show (ADD op) = "ADD(" ++ (show op) ++ ")"
-  show (ADC op) = "ADC(" ++ (show op) ++ ")"
-  show (SUB op) = "SUB(" ++ (show op) ++ ")"
-  show (SBC op) = "SBC(" ++ (show op) ++ ")"
-  show (AND op) = "AND(" ++ (show op) ++ ")"
-  show (XOR op) = "XOR(" ++ (show op) ++ ")"
-  show (OR op) = "OR(" ++ (show op) ++ ")"
-  show (CP op) = "CP(" ++ (show op) ++ ")"
+  show (ADD opnd) = "ADD(" ++ (show opnd) ++ ")"
+  show (ADC opnd) = "ADC(" ++ (show opnd) ++ ")"
+  show (SUB opnd) = "SUB(" ++ (show opnd) ++ ")"
+  show (SBC opnd) = "SBC(" ++ (show opnd) ++ ")"
+  show (AND opnd) = "AND(" ++ (show opnd) ++ ")"
+  show (XOR opnd) = "XOR(" ++ (show opnd) ++ ")"
+  show (OR opnd) = "OR(" ++ (show opnd) ++ ")"
+  show (CP opnd) = "CP(" ++ (show opnd) ++ ")"
 
   show (INC reg) = "INC(" ++ (show reg) ++ ")"
   show (DEC reg) = "DEC(" ++ (show reg) ++ ")"
@@ -333,7 +333,7 @@ data OperExtendedALU where
         -> OperExtendedALU
 
 instance Show OperExtendedALU where
-  show (ALU8 op)  = show op
+  show (ALU8 opnd)  = show opnd
   show (ALU16 rp) = "HL," ++ (show rp)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
