@@ -131,10 +131,17 @@ disasm dstate theMem thePC lastpc postProc
   | otherwise = dstate
   where
     mkDisasmInst (PC oldpc) (PC newpc) ins =
-      let opcodes      = let oldpc' = (fromIntegral oldpc) :: Int
-                             newpc' = (fromIntegral newpc) :: Int
-                         in  (theMem ^. mfetchN) oldpc (newpc' - oldpc')
-      in  DisasmInsn oldpc opcodes ins ""
+      let opcodes = let oldpc' = (fromIntegral oldpc) :: Int
+                        newpc' = (fromIntegral newpc) :: Int
+                    in  (theMem ^. mfetchN) oldpc (newpc' - oldpc')
+          cmnt    = case ins of
+                      LD16 _rp (AbsAddr addr) ->
+                        if (dstate ^. addrInDisasmRange) addr then
+                          "INTREF"
+                        else
+                          T.empty
+                      _otherwise    -> T.empty
+      in  DisasmInsn oldpc opcodes ins cmnt
     -- Deal with an index register prefix
     indexedPrefix xForms = let pc'                         = pcInc thePC
                                newOpc                      = (theMem ^. mfetch) $ getPCvalue pc'
@@ -217,13 +224,19 @@ group0decode opc mem pc dstate xForm
                        0          -> defResult (STA BCIndirect)
                        1          -> defResult (STA DEIndirect)
                        2          -> symAbsAddress mem nextIns dstate False "" STHL
-                       3          -> symAbsAddress mem nextIns dstate False "" (STA . Imm16Indirect)
+                       3          -> let prefix
+                                           | dstate ^. addrInDisasmRange $ (getPCvalue pc) = "INT"
+                                           | otherwise                                     = "EXT"
+                                     in  symAbsAddress mem nextIns dstate True prefix (STA . Imm16Indirect)
                        _otherwise -> undefined
   | z == 2, q == 1 = case p of
                        0          -> defResult (LDA BCIndirect)
                        1          -> defResult (LDA DEIndirect)
                        2          -> symAbsAddress mem nextIns dstate False "" LDHL
-                       3          -> symAbsAddress mem nextIns dstate False "" (LDA . Imm16Indirect)
+                       3          -> let prefix
+                                           | dstate ^. addrInDisasmRange $ (getPCvalue pc) = "INT"
+                                           | otherwise                                     = "EXT"
+                                     in  symAbsAddress mem nextIns dstate True prefix (LDA . Imm16Indirect)
                        _otherwise -> undefined
   | z == 3 = case q of
                0                  -> defResult (INC16 (pairSP reg16XFormF p))
@@ -598,6 +611,7 @@ symAbsAddress :: Z80memory memSys               -- ^ Z80 "memory"
               -> Bool                           -- ^ 'True': generate a label for the address, if one doesn't already exist
               -> T.Text                         -- ^ Label prefix, if one is generated
               -> ((SymAbsAddr Z80addr) -> Z80instruction)
+                                                -- ^ Instruction constructor section
               -> DecodeResult
 symAbsAddress mem pc dstate makeLabel prefix ins =
   let (addrpc, destAddr) = z80DisGetAddr mem pc

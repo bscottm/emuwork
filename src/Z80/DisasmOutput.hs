@@ -82,7 +82,11 @@ formatIns :: Z80instruction             -- ^ Instruction to format
           -> Z80disassembly             -- ^ Disassembler state
           -> T.Text                     -- ^ Formatted result
 formatIns ins cmnt dstate = let (mnemonic, opers) = formatInstruction dstate ins
-                            in  T.append (padTo lenInstruction $ T.append (padTo lenMnemonic mnemonic) opers) cmnt
+                                cmnt'             = if (not . T.null) cmnt then
+                                                      T.append "; " cmnt
+                                                    else
+                                                      T.empty
+                            in  T.append (padTo lenInstruction $ T.append (padTo lenMnemonic mnemonic) opers) cmnt'
 
 -- | Output a formatted address in uppercase hex
 upperHex :: ShowHex operand => 
