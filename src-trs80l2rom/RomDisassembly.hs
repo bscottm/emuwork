@@ -5,7 +5,10 @@ module Main where
 
 import System.IO (stdout, stderr, hPutStrLn)
 import System.Environment
+import System.Console.GetOpt
+import System.Exit
 import Control.Lens
+import Control.Monad
 import Data.Digest.Pure.MD5
 import Data.Binary
 
@@ -33,13 +36,19 @@ import KnownSymbols
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Disassemble the TRS-80 ROM (with annotations, known symbols, ...)
-trs80Rom :: String 
+trs80Rom :: (FilePath -> IO (Vector Word8))
+         -> String 
          -> IO ()
-trs80Rom imgName = readRawWord8Vector imgName
-                   >>= (\img -> let dis = collectRom (romMemory img) (initialDisassembly img) actions
-                                in  checkAddrContinuity dis
-                                    >> z80AnalyticDisassemblyOutput stdout dis
-                       )
+trs80Rom imgReader imgName =
+  imgReader imgName
+  >>= (\img -> let dis = collectRom (romMemory img) (initialDisassembly img) actions
+               in  if (not . DVU.null) img then
+                     do
+                       checkAddrContinuity dis
+                       >> z80AnalyticDisassemblyOutput stdout dis
+                   else
+                     return ()
+      )
   where
     -- Initial disassembly state: known symbols and disassembly address range predicate
     initialDisassembly img = disasmSeq %~ (\s -> s |> (LineComment commentBreak)
@@ -232,10 +241,49 @@ checkAddrContinuity dis =
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
+data UtilCommand =
+  UtilCommand
+  { imageReader :: FilePath -> IO (Vector Word8)
+  }
+
+mkUtilCommand :: UtilCommand
+mkUtilCommand = UtilCommand
+                { imageReader = readRawWord8Vector
+                }
+
+utilOptions :: [OptDescr (UtilCommand -> IO UtilCommand)]
+utilOptions =
+ [ Option [] ["format"] (ReqArg setImageReader "<Rom image format>") "ROM image reader ('ihex', 'intelhex' or 'raw')"
+ ]
+ where
+  setImageReader fmt flags =
+    case fmt of
+      "ihex"     -> return $ flags { imageReader = readIntelHexVector }
+      "intelhex" -> return $ flags { imageReader = readIntelHexVector }
+      "raw"      -> return $ flags { imageReader = readRawWord8Vector }
+      unknown    -> hPutStrLn stderr ("Unknown reader format: '" ++ (show unknown) ++ "'")
+                    >> hPutStrLn stderr "Valid formats are 'ihex', 'intelhex' or 'raw'"
+                    >> showUsage
+                    >> return flags
+
+showUsage :: IO ()
+showUsage = do
+  prog <- getProgName
+  hPutStrLn stderr ("Usage: " ++ prog ++ " <--format=(ihex|intelhex|raw)> image")
+  exitFailure
+
 main :: IO ()
-main = getArgs
-       >>= (\args -> if length args == 1 then
-                       let (imgName : _) = args
-                       in  trs80Rom imgName
-                     else
-                       hPutStrLn stderr "Need only the ROM image name and only the ROM image name")
+main =
+    getArgs
+    >>= return . getOpt RequireOrder utilOptions
+    >>= (\(optsActions, rest, errs) ->
+          (unless (null errs) $ do
+             mapM_ (hPutStrLn stderr) errs
+             >> showUsage
+             >> exitFailure)
+          >> Foldable.foldl' (>>=) (return mkUtilCommand) optsActions
+          >>= (\options ->
+                if length rest == 1 then
+                  trs80Rom (imageReader options) (head rest)
+                else
+                  showUsage))

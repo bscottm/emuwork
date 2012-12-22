@@ -14,6 +14,7 @@ library
   hs-source-dirs:       src
   build-depends:      
                         base >= 4,
+                        primitive,
                         filepath,
                         directory,
                         deepseq,
@@ -22,7 +23,8 @@ library
                         text >= 0.11,
                         vector >= 0.10,
                         lens,
-                        transformers
+                        transformers,
+                        parsec >= 3
   ghc-options:          -Wall -O2
   default-extensions:   GADTs,
                         MultiParamTypeClasses,
@@ -41,6 +43,7 @@ library
                         Machine.Utils,
                         Reader.RawFormat,
                         Reader.IntelHex,
+                        Reader.ErrorHandling,
                         Z80.InstructionSet,
                         Z80.Processor,
                         Z80.CmdDispatch,
