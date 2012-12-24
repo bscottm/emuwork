@@ -8,6 +8,15 @@ module Machine.DisassemblerTypes
   , DisElementPostProc
 
     -- * Functions
+  , mkDisasmInsn
+  , mkDisOrigin
+  , mkByteRange
+  , mkAddr
+  , mkAsciiZ
+  , mkAscii
+  , mkEquate
+  , mkLineComment
+  , mkExtPseudo
   , disEltHasAddr
   , disEltGetAddr
   , disEltGetLength
@@ -66,6 +75,60 @@ data DisElement insnType addrType wordType extPseudoType where
   -- Extensions to the "standard" disassembler pseudo instructions
   ExtPseudo   :: extPseudoType
               -> DisElement insnType addrType wordType extPseudoType
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+-- | Make a new 'Disasm'. The optional address label is set to empty.
+mkDisasmInsn  :: addrType                       -- ^ Instruction address
+              -> Vector wordType                -- ^ Vector of words corresponding to the instruction, e.g. opcodes
+              -> insnType                       -- ^ The instruction
+              -> T.Text                         -- ^ Optional comment
+              -> DisElement insnType addrType wordType extPseudoType
+mkDisasmInsn addr opBytes insn cmnt = DisasmInsn addr opBytes T.empty insn cmnt
+
+mkDisOrigin   :: addrType
+              -> DisElement insnType addrType wordType extPseudoType
+mkDisOrigin addr = DisOrigin addr
+
+-- | Make a new 'ByteRange'. The optional address label is set to empty.
+mkByteRange   :: addrType                       -- ^ Start address
+              -> Vector Word8                   -- ^ Bytes
+              -> DisElement insnType addrType wordType extPseudoType
+mkByteRange addr bytes = ByteRange addr T.empty bytes
+
+-- | Make a new 'Addr'. The optional address label is set to empty.
+mkAddr        :: addrType                       -- Adress of where this address is stored
+              -> SymAbsAddr addrType            -- The address to be annotated
+              -> Vector Word8                   -- The actual address bytes
+              -> DisElement insnType addrType wordType extPseudoType
+mkAddr addr theAddr bytes = Addr addr T.empty theAddr bytes
+
+-- | Make a new 'AsciiZ'. The optional address label is set to empty.
+mkAsciiZ      :: addrType                       -- Start of string
+              -> Vector Word8                   -- The string, not including the zero terminator
+              -> DisElement insnType addrType wordType extPseudoType
+mkAsciiZ addr str = AsciiZ addr T.empty str
+
+-- | Make a new 'Ascii'. The optional address label is set to empty.
+mkAscii       :: addrType
+              -> Vector Word8
+              -> DisElement insnType addrType wordType extPseudoType
+mkAscii addr str = Ascii addr T.empty str
+
+-- | Make a new 'Equate' for the disassembler's symbl table.
+mkEquate      :: T.Text
+              -> addrType
+              -> DisElement insnType addrType wordType extPseudoType
+mkEquate = Equate
+
+-- | Make a new 'LineComment'
+mkLineComment :: T.Text
+              -> DisElement insnType addrType wordType extPseudoType
+mkLineComment = LineComment
+
+-- | Make a new 'ExtPseudo'
+mkExtPseudo   :: extPseudoType
+              -> DisElement insnType addrType wordType extPseudoType
+mkExtPseudo = ExtPseudo
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | A (symbolic|absolute) address

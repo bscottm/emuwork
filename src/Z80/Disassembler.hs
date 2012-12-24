@@ -143,7 +143,7 @@ disasm dstate theMem thePC lastpc postProc
                         else
                           T.empty
                       _otherwise    -> T.empty
-      in  DisasmInsn oldpc opcodes T.empty ins cmnt
+      in  mkDisasmInsn oldpc opcodes ins cmnt
     -- Probe the symbol table for 'destAddr', add a new symbol for this address if needed
     collectSymtab destAddr prefix =
       let symTab       = dstate ^. symbolTab
@@ -163,7 +163,7 @@ z80disbytes :: Z80disassembly                   -- ^ Current disassembly state
             -> Z80disp                          -- ^ Number of bytes to extract
             -> Z80disassembly                   -- ^ Resulting diassembly state
 z80disbytes dstate mem (PC sAddr) nBytes =
-  disasmSeq %~ (|> (ByteRange sAddr T.empty $ (mem ^. mfetchN) sAddr (fromIntegral nBytes))) $ dstate
+  disasmSeq %~ (|> (mkByteRange sAddr $ (mem ^. mfetchN) sAddr (fromIntegral nBytes))) $ dstate
 
 -- | Grab (what is presumably) an ASCII string sequence, terminating at the first 0 encountered. This is somewhat inefficient
 -- because multiple 'Vector' slices get created.
@@ -174,7 +174,7 @@ z80disasciiz :: Z80disassembly                  -- ^ Current disassembly state
 z80disasciiz dstate mem (PC sAddr) =
   let sRange       = (mem ^. maxmem) - sAddr
       toSearch     = (mem ^. mfetchN) sAddr (fromIntegral sRange)
-      foundStr idx = AsciiZ sAddr T.empty (DVU.slice 0 (idx + 1) toSearch)
+      foundStr idx = mkAsciiZ sAddr (DVU.slice 0 (idx + 1) toSearch)
   in  case DVU.elemIndex 0 toSearch of
         Nothing  -> dstate                      -- Not found?
         Just idx -> disasmSeq %~ (|> foundStr idx) $ dstate
@@ -186,7 +186,7 @@ z80disascii :: Z80disassembly                   -- ^ Current disassembly state
             -> Z80disp                          -- ^ Number of bytes to extract
             -> Z80disassembly                   -- ^ Resulting diassembly state
 z80disascii dstate mem (PC sAddr) nBytes =
-  disasmSeq %~ (|> (Ascii sAddr T.empty $ (mem ^. mfetchN) sAddr (fromIntegral nBytes))) $ dstate
+  disasmSeq %~ (|> (mkAscii sAddr $ (mem ^. mfetchN) sAddr (fromIntegral nBytes))) $ dstate
 
 -- | Z80 default instruction post processor. This merely appends the decoded instruction onto the disassembly sequence.
 z80DefaultPostProcessor :: Z80DisasmElt

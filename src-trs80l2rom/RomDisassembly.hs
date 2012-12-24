@@ -149,9 +149,8 @@ highbitCharTable mem sAddr nBytes z80dstate =
                                  , "' .|. 80H"
                                  ]
             firstBytePseudo = ExtPseudo (ByteExpression (fromIntegral (sAddr' + memidx)) firstByte theChar)
-            theString = Ascii (fromIntegral $ sAddr' + memidx + 1)
-                              T.empty
-                              (DVU.slice (memidx + 1) (memidx' - memidx - 1) memBlock)
+            theString = mkAscii (fromIntegral $ sAddr' + memidx + 1)
+                                (DVU.slice (memidx + 1) (memidx' - memidx - 1) memBlock)
         in  if (memidx + 1) /= memidx' then
               Seq.singleton firstBytePseudo |> theString
             else
@@ -177,7 +176,7 @@ jumpTable mem sAddr nBytes dstate =
         | otherwise           = z80disbytes z80dstate mem (PC addr) (fromIntegral $ endAddr - addr)
         where
           operAddrPseudo theAddr = disasmSeq %~ (|> (operAddr theAddr)) $ z80dstate
-          operAddr       theAddr = Addr addr T.empty (AbsAddr theAddr) ((mem ^. mfetchN) addr 2)
+          operAddr       theAddr = mkAddr addr (AbsAddr theAddr) ((mem ^. mfetchN) addr 2)
   in  generateAddr sAddr dstate
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -193,10 +192,10 @@ trs80RomPostProcessor ins@(DisasmInsn _ _ _ (RST 8) _) mem pc dstate =
       byte   = (mem ^. mfetch) sAddr
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
       pseudo = if byte >= 0x20 && byte <= 0x7f then
-                 Ascii
+                 mkAscii
                else
-                 ByteRange
-  in  (pcInc pc, (disasmSeq %~ (\s -> s |> ins |> (pseudo sAddr T.empty (DVU.singleton byte))) $ dstate))
+                 mkByteRange
+  in  (pcInc pc, (disasmSeq %~ (\s -> s |> ins |> (pseudo sAddr (DVU.singleton byte))) $ dstate))
 -- Otherwise, just append the instruction onto the disassembly sequence.
 trs80RomPostProcessor elt mem pc dstate = z80DefaultPostProcessor elt mem pc dstate
 
