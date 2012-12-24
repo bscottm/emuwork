@@ -31,6 +31,7 @@ import qualified Data.Vector.Unboxed as DVU
 import Machine
 import Reader
 import Z80.Processor
+import Z80.InstructionSet
 import Z80.Disassembler
 import Z80.DisasmOutput
 
@@ -44,7 +45,7 @@ data Z80Command = NoCommand
                   , nBytesToDis :: Maybe Z80disp
                   }
 
-z80CommandDispatch :: EmulatedProcessor Z80state
+z80CommandDispatch :: EmulatedProcessor Z80state Z80addr Z80instruction
                    -> [String]
                    -> IO ()
 z80CommandDispatch _z80state options =
@@ -189,6 +190,6 @@ instance NFData Z80Command where
                                            rnf nBytes
 
 -- | Command line dispatch instance for the Z80
-instance EmuCommandLineDispatch Z80state where
+instance EmuCommandLineDispatch Z80state Z80addr Z80instruction where
   -- | The Z80 command line interface dispatch function
   cmdDispatch = z80CommandDispatch

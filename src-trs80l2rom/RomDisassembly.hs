@@ -150,6 +150,7 @@ highbitCharTable mem sAddr nBytes z80dstate =
                                  ]
             firstBytePseudo = ExtPseudo (ByteExpression (fromIntegral (sAddr' + memidx)) firstByte theChar)
             theString = Ascii (fromIntegral $ sAddr' + memidx + 1)
+                              T.empty
                               (DVU.slice (memidx + 1) (memidx' - memidx - 1) memBlock)
         in  if (memidx + 1) /= memidx' then
               Seq.singleton firstBytePseudo |> theString
@@ -169,20 +170,14 @@ jumpTable :: Z80memory (Vector Z80word) -- ^ Vector of bytes from which to extra
 jumpTable mem sAddr nBytes dstate =
   let endAddr = sAddr + (fromIntegral nBytes)
       generateAddr addr z80dstate
-        | addr < endAddr - 2  = let (newAddr, operand) = z80DisGetAddr mem (PC addr)
+        | addr < endAddr - 2  = let DecodedAddr newAddr operand = z80getAddr mem (PC addr)
                                 in  generateAddr (getPCvalue newAddr) (operAddrPseudo operand)
-        | addr == endAddr - 2 = operAddrPseudo $ _2 ^$ (z80DisGetAddr mem (PC addr))
+        | addr == endAddr - 2 = let DecodedAddr _newAddr operand = z80getAddr mem (PC addr)
+                                in  operAddrPseudo operand
         | otherwise           = z80disbytes z80dstate mem (PC addr) (fromIntegral $ endAddr - addr)
         where
           operAddrPseudo theAddr = disasmSeq %~ (|> (operAddr theAddr)) $ z80dstate
-          operAddr theAddr = 
-            let symTab = view symbolTab z80dstate
-                oper   = if Map.member theAddr symTab then
-                           SymAddr $ symTab Map.! theAddr
-                         else
-                           AbsAddr theAddr
-                bytes  = (mem ^. mfetchN) addr 2
-            in  Addr addr oper bytes
+          operAddr       theAddr = Addr addr T.empty (AbsAddr theAddr) ((mem ^. mfetchN) addr 2)
   in  generateAddr sAddr dstate
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -193,7 +188,7 @@ trs80RomPostProcessor :: Z80DisasmElt
                       -> Z80PC
                       -> Z80disassembly
                       -> (Z80PC, Z80disassembly)
-trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) mem pc dstate =
+trs80RomPostProcessor ins@(DisasmInsn _ _ _ (RST 8) _) mem pc dstate =
   let sAddr  = getPCvalue pc
       byte   = (mem ^. mfetch) sAddr
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
@@ -201,7 +196,7 @@ trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) mem pc dstate =
                  Ascii
                else
                  ByteRange
-  in  (pcInc pc, (disasmSeq %~ (\s -> s |> ins |> (pseudo sAddr (DVU.singleton byte))) $ dstate))
+  in  (pcInc pc, (disasmSeq %~ (\s -> s |> ins |> (pseudo sAddr T.empty (DVU.singleton byte))) $ dstate))
 -- Otherwise, just append the instruction onto the disassembly sequence.
 trs80RomPostProcessor elt mem pc dstate = z80DefaultPostProcessor elt mem pc dstate
 

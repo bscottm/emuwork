@@ -24,22 +24,67 @@ import Z80.InstructionSet
 import Z80.Processor
 import Z80.Disassembler
 
--- | Convert the disassembly sequence into a sequence of formatted byte strings
+-- | Format the "analytic" version of the disassembled Z80 sequence as a 'Text'
+-- sequence. This outputs the address, opcode bytes, the opcodes as ASCII,
+-- followed by the standard \'label: instruction ; comment\' output.
 z80AnalyticDisassembly :: Z80disassembly
                        -> Seq T.Text
 z80AnalyticDisassembly dstate =
   -- Append the symbol table to the formatted instruction sequence
   -- Unfortunately (maybe not...?) the foldl results in the concatenation of many singletons.
-  dstate ^. symbolTab ^& formatSymTab $ dstate ^. disasmSeq ^& Foldable.foldl formatElem Seq.empty 
+  dstate ^. symbolTab ^& formatSymTab $ formattedDisSeq dstate
   where
-    formatElem accSeq (DisasmInsn addr bytes ins cmnt) = accSeq >< formatLinePrefix bytes addr (formatIns ins cmnt dstate) dstate
-    formatElem accSeq pseudo                           = accSeq >< formatPseudo pseudo dstate
+    formattedDisSeq z80dstate = (fixupSymbols z80dstate) ^. disasmSeq ^& Foldable.foldl formatElem Seq.empty
+    formatElem accSeq (DisasmInsn addr bytes addrLabel ins cmnt) =
+      accSeq >< formatLinePrefix bytes addr addrLabel (formatIns ins cmnt dstate)
+    formatElem accSeq pseudo                                     =
+      accSeq >< formatPseudo pseudo
 
 -- | Generate the "analytic" version of the output (opcodes, ASCII representation) and output to an 'IO' handle.
 z80AnalyticDisassemblyOutput :: Handle
                              -> Z80disassembly
                              -> IO ()
 z80AnalyticDisassemblyOutput hOut dstate = Foldable.traverse_ (TIO.hPutStrLn hOut) $ z80AnalyticDisassembly dstate
+
+-- | Pass over the disassembly sequence, translating absolute addresses into symbolic addresses.
+fixupSymbols :: Z80disassembly
+             -> Z80disassembly
+fixupSymbols z80dstate = disasmSeq %~ (fmap (xlatSymbol (z80dstate ^. symbolTab))) $ z80dstate
+  where
+    xlatSymbol symtab (DisasmInsn addr opcodes _addrLabel insn cmnt) =
+      DisasmInsn addr opcodes (xlatAddrLabel symtab addr) (xlatInsnAddr symtab insn) cmnt
+    xlatSymbol symtab (ByteRange addr _addrLabel bytes)              = ByteRange addr (xlatAddrLabel symtab addr) bytes
+    xlatSymbol symtab (Addr addr _addrLabel theAddr bytes)           = Addr addr (xlatAddrLabel symtab addr) theAddr bytes
+    xlatSymbol symtab (AsciiZ addr _addrLabel asciiz)                = AsciiZ addr (xlatAddrLabel symtab addr) asciiz
+    xlatSymbol symtab (Ascii addr _addrLabel ascii)                  = Ascii addr (xlatAddrLabel symtab addr) ascii
+    xlatSymbol _symtab elt                                           = elt
+
+    -- Translate addresses into labels
+    xlatAddrLabel symtab addr =
+      case addr `Map.lookup` symtab of
+        Just sym   -> sym
+        Nothing    -> T.empty
+
+    xlatInsnAddr symtab insn = 
+      let symName addr
+            | (AbsAddr absAddr) <- addr =
+                case absAddr `Map.lookup` symtab of
+                  Just sym -> SymAddr sym
+                  Nothing  -> addr
+            | otherwise                  = addr
+      in  case insn of
+            STHL addr            -> STHL (symName addr)
+            LDHL addr            -> LDHL (symName addr)
+            LD16Indirect rp addr -> LD16Indirect rp (symName addr)
+            ST16Indirect addr rp -> ST16Indirect (symName addr) rp
+            DJNZ addr            -> DJNZ (symName addr)
+            JR addr              -> JR (symName addr)
+            JRCC cc addr         -> JRCC cc (symName addr)
+            JP addr              -> JP (symName addr)
+            JPCC cc addr         -> JPCC cc (symName addr)
+            CALL addr            -> CALL (symName addr)
+            CALLCC cc addr       -> CALLCC cc (symName addr)
+            _otherwise           -> insn
 
 -- | Format the accumulated symbol table as a sequence of 'T.Text's, in columnar format
 formatSymTab :: Map Z80addr T.Text
@@ -103,13 +148,14 @@ oldStyleHex x = T.snoc (upperHex x) 'H'
 -- | Format the beginning of the line (address, bytes, label, etc.)
 formatLinePrefix :: Vector Z80word              -- ^ Opcode vector
                  -> Z80addr                     -- ^ Address of this output line
+                 -> T.Text                      -- ^ Address label
                  -> T.Text                      -- ^ Output to emit (formatted instruction, ...)
-                 -> Z80disassembly              -- ^ Disassembler state
                  -> Seq T.Text                  -- ^ Resulting 'T.Text' output sequence
-formatLinePrefix bytes addr outString dstate =
-  let label               = case Map.lookup addr (dstate ^. symbolTab) of
-                              Nothing  -> T.empty
-                              Just lab -> T.snoc lab ':'
+formatLinePrefix bytes addr addrLabel outString =
+  let label               = if (not . T.null) addrLabel then
+                              addrLabel `T.snoc` ':'
+                            else
+                              addrLabel
       bytesToChars vec    = padTo lenAsChars $ DVU.foldl (\s x -> T.append s (mkPrintable x)) T.empty vec
       mkPrintable x       = if x > 0x20 && x < 0x7f then (T.singleton . chr . fromIntegral) x; else " "
       linePrefix          = T.concat [ upperHex addr
@@ -309,7 +355,7 @@ accumLoadStore operand isStore =
 
 -- | Output a 16-bit register indirect load/store
 indirect16LoadStore :: RegPairSP
-                    -> Z80addr
+                    -> SymAbsAddr Z80addr
                     -> Bool
                     -> T.Text
 indirect16LoadStore rp addr loadStore =
@@ -423,78 +469,78 @@ instance DisOperandFormat (SymAbsAddr Z80addr) where
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 formatPseudo :: Z80DisasmElt
-             -> Z80disassembly
              -> Seq T.Text
 
-formatPseudo (ByteRange sAddr bytes) dstate = 
-  let outF vec =  T.concat [ padTo lenMnemonic "DB"
-                            , T.intercalate ", " [ oldStyleHex x | x <- DVU.toList vec ]
-                            ]
-  in  fmtByteGroup dstate bytes sAddr 0 outF
+formatPseudo (ByteRange sAddr addrLabel bytes) = 
+  let initSlice     = DVU.slice 0 (if DVU.length bytes <= 8; then DVU.length bytes; else 8) bytes
+      mkBytes vec   =  T.concat [ padTo lenMnemonic "DB"
+                                , T.intercalate ", " [ oldStyleHex x | x <- DVU.toList vec ]
+                                ]
+  in  formatLinePrefix initSlice sAddr addrLabel (mkBytes initSlice)
+      >< fmtByteGroup bytes (sAddr + 8) 8 mkBytes
 
-formatPseudo (ExtPseudo (ByteExpression addr expr word)) dstate = 
+formatPseudo (ExtPseudo (ByteExpression addr expr word)) = 
   let outF _vec = T.concat [ padTo lenMnemonic "DB"
                               , if (not . T.null) expr then
                                   expr
                                 else
                                   upperHex word
                             ]
-  in  fmtByteGroup dstate (DVU.singleton word) addr 0 outF
+  in  fmtByteGroup (DVU.singleton word) addr 0 outF
 
-formatPseudo (Addr sAddr addr bytes) dstate =
-  formatLinePrefix bytes sAddr (T.append (padTo lenMnemonic "DA") (formatOperand addr)) dstate
+formatPseudo (Addr sAddr sAddrLabel addr bytes) =
+  formatLinePrefix bytes sAddr sAddrLabel (T.append (padTo lenMnemonic "DA") (formatOperand addr))
 
-formatPseudo (AsciiZ sAddr str) dstate =
+formatPseudo (AsciiZ sAddr addrLabel str) =
   let initSlice     = DVU.slice 0 (if DVU.length str <= 8; then DVU.length str; else 8) str
       nonNullSlice  = DVU.slice 0 (DVU.length str - 1) str
       mkString      = T.cons '\'' (T.snoc (T.pack [ (chr . fromIntegral) x | x <- DVU.toList nonNullSlice ]) '\'')
       outF _vec     = T.empty
-  in  formatLinePrefix initSlice sAddr (T.append (padTo lenMnemonic "DZ") mkString) dstate
-      >< fmtByteGroup dstate str (sAddr + 8) 8 outF
+  in  formatLinePrefix initSlice sAddr addrLabel (T.append (padTo lenMnemonic "DZ") mkString)
+      >< fmtByteGroup str (sAddr + 8) 8 outF
 
-formatPseudo (Ascii sAddr str) dstate =
+formatPseudo (Ascii sAddr addrLabel str) =
   let initSlice     = DVU.slice 0 (if DVU.length str <= 8; then DVU.length str; else 8) str
       mkString      = T.cons '\'' (T.snoc (T.pack [ (chr . fromIntegral) x | x <- DVU.toList str ]) '\'')
       outF _vec     = T.empty
-  in  formatLinePrefix initSlice sAddr (T.append (padTo lenMnemonic "DS") mkString) dstate
-      >< fmtByteGroup dstate str (sAddr + 8) 8 outF
+  in  formatLinePrefix initSlice sAddr addrLabel (T.append (padTo lenMnemonic "DS") mkString)
+      >< fmtByteGroup str (sAddr + 8) 8 outF
 
-formatPseudo (DisOrigin origin) _dstate   = Seq.singleton $ T.concat [ T.replicate (lenOutputPrefix + lenSymLabel) textSpace
+formatPseudo (DisOrigin origin) = Seq.singleton $ T.concat [ T.replicate (lenOutputPrefix + lenSymLabel) textSpace
                                                                       , padTo lenMnemonic "ORG"
                                                                       , asHex origin
                                                                       ]
 
-formatPseudo (Equate label addr) _dstate = Seq.singleton $ T.concat [ T.replicate lenOutputPrefix textSpace
+formatPseudo (Equate label addr) = Seq.singleton $ T.concat [ T.replicate lenOutputPrefix textSpace
                                                                          , padTo lenSymLabel label
                                                                          , padTo lenMnemonic "="
                                                                          , upperHex addr
                                                                          ]
 
-formatPseudo (LineComment comment) _dstate = Seq.singleton $ T.concat [ T.replicate lenOutputPrefix textSpace
+formatPseudo (LineComment comment) = Seq.singleton $ T.concat [ T.replicate lenOutputPrefix textSpace
                                                                        , "; "
                                                                        , comment
                                                                        ]
 
-formatPseudo _unknownPseudo _dstate        = Seq.singleton $ "[!!Unknown pseudo instruction]"
+formatPseudo _unknownPseudo = Seq.singleton $ "[!!Unknown pseudo instruction]"
 
 -- | Format groups of bytes by groups of 8
-fmtByteGroup :: Z80disassembly
-             -> Vector Z80word
+fmtByteGroup :: Vector Z80word
              -> Z80addr
              -> Int
              -> (Vector Z80word -> T.Text)
              -> Seq T.Text
-fmtByteGroup dstate bytes addr idx outF
+fmtByteGroup bytes addr idx outF
   | idx >= DVU.length bytes     = Seq.empty
   | idx + 8 >= DVU.length bytes =
     -- dump remaining bytes
     let outString = outF (DVU.slice idx (DVU.length bytes - idx) bytes)
-    in  formatLinePrefix (DVU.slice idx (DVU.length bytes - idx) bytes) addr outString dstate
+    in  formatLinePrefix (DVU.slice idx (DVU.length bytes - idx) bytes) addr T.empty outString
   | otherwise =
     -- dump a group of 8 bytes
     let outString = outF (DVU.slice idx 8 bytes)
-    in  (formatLinePrefix (DVU.slice idx 8 bytes) addr outString dstate)
-        >< fmtByteGroup dstate bytes (addr + 8) (idx + 8) outF
+    in  (formatLinePrefix (DVU.slice idx 8 bytes) addr T.empty outString)
+        >< fmtByteGroup bytes (addr + 8) (idx + 8) outF
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 

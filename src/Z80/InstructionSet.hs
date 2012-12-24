@@ -71,9 +71,9 @@ data Z80instruction where
        -> Z80instruction
   -- 16-bit indirect loads and stores, e.g. LD BC, (4000H) [load BC from the contents of 0x4000]
   LD16Indirect :: RegPairSP
-               -> Z80addr
+               -> SymAbsAddr Z80addr
                -> Z80instruction
-  ST16Indirect :: Z80addr
+  ST16Indirect :: SymAbsAddr Z80addr
                -> RegPairSP
                -> Z80instruction
   -- Increment/decrement registers
@@ -172,8 +172,8 @@ instance Show Z80instruction where
 
   show (LDHL addr) = "LDHL(" ++ (show addr) ++ ")"
   show (STHL addr) = "STHL(" ++ (show addr) ++ ")"
-  show (LD16Indirect rp addr) = "LD16Indirect(" ++ (show rp) ++ "," ++ (as0xHexS addr) ++ ")"
-  show (ST16Indirect addr rp) = "LD16Indirect(" ++ (as0xHexS addr) ++ "," ++ (show rp) ++ ")"
+  show (LD16Indirect rp addr) = "LD16Indirect(" ++ (show rp) ++ "," ++ (show addr) ++ ")"
+  show (ST16Indirect addr rp) = "LD16Indirect(" ++ (show addr) ++ "," ++ (show rp) ++ ")"
 
   show HALT = "HALT"
   show NOP = "NOP"

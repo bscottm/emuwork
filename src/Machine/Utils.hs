@@ -91,13 +91,29 @@ textZero = T.singleton '0'
 -- and signed types. GHC makes no formal guarantees on sign extension when using 'fromIntegral'. Minimum implementation
 -- is 'signExtend64', which can be truncated down to 'Int32'.
 class SignExtend wordType where
-  signExtend :: wordType
-             -> Int32
+  -- | Sign extend arbitrary word type to 'Int32'
+  signExtend   :: wordType
+               -> Int32
+  -- | Sign extend arbitrary word type to 'Int64'
   signExtend64 :: wordType
-                -> Int64
+               -> Int64
 
-  -- Default implementation is to truncate the 64-bit sign extension
+  -- | Default implementation is to truncate the 64-bit sign extension
   signExtend = fromIntegral . signExtend64
+
+instance SignExtend Word8 where
+  signExtend64 x = let x' = fromIntegral x :: Int64
+                   in  if x' <= 0x7f then
+                         x'
+                       else
+                         x' .|. (complement 0xff)
+
+instance SignExtend Int8 where
+  signExtend64 x = let x' = fromIntegral x :: Int64
+                   in  if x <= 0x7f then
+                         x'
+                       else
+                         x' .|. (complement 0xff)
 
 instance SignExtend Word16 where
   signExtend64 x = let x' = fromIntegral x :: Int64

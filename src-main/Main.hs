@@ -113,10 +113,10 @@ dumpEmulators = do
     indent = "   "
     indentLen = length indent
 
-    initialString :: (Machine.EmulatedProcessor procInternals) -> String
+    initialString :: (Machine.EmulatedProcessor procInternals addrType instructionSet) -> String
     initialString emu = prefix ++ (emu ^. Machine.procPrettyName) ++ " ("
 
-    prettyEmu :: (Machine.EmulatedProcessor procInternals) -> IO ()
+    prettyEmu :: (Machine.EmulatedProcessor procInternals addrType instructionSet) -> IO ()
     prettyEmu emu = do
       hPutStr stderr (initialString emu)
       prettyEmuNames (emu ^. Machine.procAliases) (length (initialString emu))
