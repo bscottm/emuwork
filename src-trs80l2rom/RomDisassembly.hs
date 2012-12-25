@@ -35,13 +35,23 @@ import KnownSymbols
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
+trs80system :: Vector Z80word
+            -> Z80system (Vector Z80word)
+trs80system romImage = EmulatedSystem
+                       { _processor = z80processor
+                       , _memory    = romMemory romImage
+                       , _idecode   = z80insnDecode
+                       }
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
 -- | Disassemble the TRS-80 ROM (with annotations, known symbols, ...)
 trs80Rom :: (FilePath -> IO (Vector Word8))
          -> String 
          -> IO ()
 trs80Rom imgReader imgName =
   imgReader imgName
-  >>= (\img -> let dis = collectRom (romMemory img) (initialDisassembly img) actions
+  >>= (\img -> let dis = collectRom (trs80system img) (initialDisassembly img) actions
                in  if (not . DVU.null) img then
                      do
                        checkAddrContinuity dis
@@ -51,11 +61,11 @@ trs80Rom imgReader imgName =
       )
   where
     -- Initial disassembly state: known symbols and disassembly address range predicate
-    initialDisassembly img = disasmSeq %~ (\s -> s |> (LineComment commentBreak)
-                                                   |> (LineComment (T.append "ROM MD5 checksum: " (romMD5Hex img)))
-                                                   |> (LineComment ((identifyROM . romMD5) img))
-                                                   |> (LineComment commentBreak)
-                                                   |> (LineComment T.empty)) $
+    initialDisassembly img = disasmSeq %~ (\s -> s |> (mkLineComment commentBreak)
+                                                   |> (mkLineComment (T.append "ROM MD5 checksum: " (romMD5Hex img)))
+                                                   |> (mkLineComment ((identifyROM . romMD5) img))
+                                                   |> (mkLineComment commentBreak)
+                                                   |> (mkLineComment T.empty)) $
                                symbolTab .~ knownSymbols $
                                addrInDisasmRange .~ trs80RomRange $
                                mkInitialDisassembly
@@ -70,7 +80,7 @@ trs80Rom imgReader imgName =
 -- | Identify a ROM from its MD5 signature.
 identifyROM :: BCL.ByteString
             -> T.Text
-identifyROM md5sig = case Map.lookup md5sig romSigs of
+identifyROM md5sig = case md5sig `Map.lookup` romSigs of
                        Nothing      -> "Unknown ROM signature"
                        Just romName -> romName
 
@@ -90,28 +100,28 @@ romSigs = Map.fromList [ ( BCL.pack [ 0xca, 0x74, 0x82, 0x2e, 0xbc, 0x28, 0x03, 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Collect the TRS-80 ROM (oh, this could sooo be generalized!) by left folding the disassembler guidance
 -- and collecing the disassembler state, symbol table and disassembled instruction sequence.
-collectRom :: Z80memory (Vector Z80word)                -- ^ The system's memory
+collectRom :: Z80system (Vector Z80word)                -- ^ The TRS-80 pseudo-system
            -> Z80disassembly                            -- ^ Initial disassembler state. This is pre-populated with known
                                                         -- symbols in the symbol table.
            -> [Guidance]                                -- ^ Disassembler guidance
            -> Z80disassembly                            -- ^ Resulting disassembler state, symbol table and disassembly
                                                         -- sequence.
-collectRom img = Foldable.foldl' (doAction img)
+collectRom sys = Foldable.foldl' (doAction sys)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-doAction :: Z80memory (Vector Z80word)
+doAction :: Z80system (Vector Z80word)
          -> Z80disassembly
          -> Guidance
          -> Z80disassembly
 
-doAction mem dstate guide
+doAction sys dstate guide
   {-  | trace ("disasm: guide = " ++ (show guide)) False = undefined -}
-  | (SetOrigin origin)         <- guide = disasmSeq %~ (|> (DisOrigin origin)) $ dstate
+  | (SetOrigin origin)         <- guide = disasmSeq %~ (|> (mkDisOrigin origin)) $ dstate
   | (SymEquate label addr)     <- guide = 
-    (symbolTab %~ (Map.insert addr label)) . (disasmSeq %~ (|> (Equate label addr))) $ dstate
-  | (Comment comment)          <- guide = disasmSeq %~ (|> (LineComment comment)) $ dstate
-  | (DoDisasm sAddr nBytes)    <- guide = disassemble dstate mem (PC $ sAddr) (PC $ sAddr + fromIntegral nBytes)
+    (symbolTab %~ (Map.insert addr label)) . (disasmSeq %~ (|> (mkEquate label addr))) $ dstate
+  | (Comment comment)          <- guide = disasmSeq %~ (|> (mkLineComment comment)) $ dstate
+  | (DoDisasm sAddr nBytes)    <- guide = disassemble dstate sys (PC $ sAddr) (PC $ sAddr + fromIntegral nBytes)
                                                       trs80RomPostProcessor
   | (GrabBytes sAddr nBytes)   <- guide = z80disbytes dstate mem (PC $ sAddr) nBytes
   | (GrabAsciiZ sAddr)         <- guide = z80disasciiz dstate mem (PC $ sAddr)
@@ -119,6 +129,8 @@ doAction mem dstate guide
   | (HighBitTable addr nBytes) <- guide = highbitCharTable mem addr nBytes dstate
   | (JumpTable addr nBytes)    <- guide = jumpTable mem addr nBytes dstate
   | otherwise                           = dstate
+  where
+    mem = sys ^. memory
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 

@@ -47,7 +47,6 @@ library
                         Z80.InstructionSet,
                         Z80.InsnDecode,
                         Z80.Processor,
-                        Z80.CmdDispatch,
                         Z80.Disassembler,
                         Z80.DisasmOutput
 

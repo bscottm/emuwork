@@ -92,9 +92,12 @@ data (Unbox wordType) => MemorySystem addrType wordType memInternals =
     -- actual implementation depends on the system implemented.
     _memInternals :: memInternals
     -- | Fetch a word from memory.
-  , _mfetch       :: (addrType -> wordType)
+  , _mfetch       :: addrType
+                  -> wordType
     -- | Fetch a block of words from memory.
-  , _mfetchN      :: (addrType -> Int -> Vector wordType)
+  , _mfetchN      :: addrType
+                  -> Int
+                  -> Vector wordType
     -- | Query the highest address in the memory system (for unboxed vectors, this should be a synonym with
     -- 'Data.Vector.Unboxed.length')
   , _maxmem       :: addrType

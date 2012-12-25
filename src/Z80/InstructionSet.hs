@@ -1,7 +1,9 @@
 -- | The Haskell representation of the Z80 instruction set
 module Z80.InstructionSet
   ( -- * Types
-    Z80instruction(..)
+    Z80emulation
+  , Z80system
+  , Z80instruction(..)
   , Z80condC(..)
   , Z80reg8(..)
   , Z80reg16(..)
@@ -31,6 +33,13 @@ import Control.Lens
 
 import Machine
 import Z80.Processor
+
+-- | Shorthand for the Z80\'s 'EmulatedProcessor' type. This is defined here because 'Z80instruction' is required
+-- and would otherwise form a module import cycle.
+type Z80emulation = EmulatedProcessor Z80state Z80addr Z80instruction
+
+-- | Shorthand for a Z80 emulated system. All Z80 systems share this characteristic type.
+type Z80system memSys = EmulatedSystem Z80state memSys Z80addr Z80word Z80instruction
 
 -- | The Z80 instruction set
 data Z80instruction where

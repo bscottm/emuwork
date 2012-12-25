@@ -32,8 +32,10 @@ doDispatch :: String                            -- ^ The requested emulator's na
 doDispatch emuName emuOpts
   | nullproc <- Machine.nullProcessor, Machine.procIdentify (Machine.processor ^$ nullproc) emuName =
     Machine.cmdDispatch (Machine.processor ^$ nullproc) emuOpts
+{-
   | z80proc  <- Z80.z80processor, Machine.procIdentify z80proc emuName =
     Machine.cmdDispatch z80proc emuOpts
+-}
   | otherwise =
     hPutStrLn stderr ("Unsupported or unknown processor emulator: '" ++ (show emuName) ++ "'")
     >> dumpEmulators

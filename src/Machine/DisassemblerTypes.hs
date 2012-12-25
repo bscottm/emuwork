@@ -87,7 +87,7 @@ mkDisasmInsn addr opBytes insn cmnt = DisasmInsn addr opBytes T.empty insn cmnt
 
 mkDisOrigin   :: addrType
               -> DisElement insnType addrType wordType extPseudoType
-mkDisOrigin addr = DisOrigin addr
+mkDisOrigin = DisOrigin
 
 -- | Make a new 'ByteRange'. The optional address label is set to empty.
 mkByteRange   :: addrType                       -- ^ Start address
@@ -152,19 +152,20 @@ type DisElementPostProc disasmState insnType memSys addrType wordType extPseudoT
 -- | The 'Disassembler' type class and generic interface to disassemblers.
 class Disassembler disasmState insnType addrType wordType extPseudoType where
   -- | The main disassembler function
-  disassemble :: disasmState -- ^ The incoming disassembly state. This data type should collect
-                             -- the disassembled instruction, associated pseudo-operations.
-              -> MemorySystem addrType wordType memSys -- ^ Memory system from which instructions are disassembled
-              -> ProgramCounter addrType -- ^ Starting address to disassemble
-              -> ProgramCounter addrType -- ^ Last address to disassemble
+  disassemble :: disasmState                            -- ^ The incoming disassembly state. This data type should collect
+                                                        -- the disassembled instruction, associated pseudo-operations.
+              -> EmulatedSystem procInternals memSys addrType wordType insnType
+                                                        -- ^ Emulated system that contains the memory system and
+                                                        -- instruction decoder
+              -> ProgramCounter addrType                -- ^ Starting address to disassemble
+              -> ProgramCounter addrType                -- ^ Last address to disassemble
               -> DisElementPostProc disasmState insnType memSys addrType wordType extPseudoType
                                                         -- ^ Post-processing function that is be applied after disasembling
                                                         -- an instruction. This is useful for situations such as the TRS-80
                                                         -- BASIC ROM, where the \'RST 08\' instruction is always followed by
-                                                        -- a byte and two should be emitted together. If no post-processing
-                                                        -- is needed, simply pass 'nullPostProcessor' and ignore the parameter
+                                                        -- a byte and two should be emitted together.
                                                         -- in the actual disassembler.
-              -> disasmState            -- ^ The resulting disassembly sequence
+              -> disasmState                            -- ^ The resulting disassembly sequence
 
 -- | The null/empty pseudo operation. This is primarily useful for testing or in cases where the disassembled output is simply
 -- binary.
