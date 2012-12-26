@@ -56,19 +56,19 @@ group0decode opc mem pc xForm
                2                  -> displacementInstruction mem pc DJNZ
                3                  -> displacementInstruction mem pc JR
                _otherwise         -> displacementInstruction mem pc $ JRCC (condC (y - 4))
-  | z == 1, q == 0 = mkAbsAddrIns (LD16 (pairSP reg16XFormF p)) mem pc
+  | z == 1, q == 0 = mkAbsAddrIns (LD . (RPair16ImmLoad (pairSP reg16XFormF p))) mem pc
   | z == 1, q == 1 = defResult ((ADD . ALU16) $ pairSP reg16XFormF p)
   | z == 2, q == 0 = case p of
-                       0          -> defResult (STA BCIndirect)
-                       1          -> defResult (STA DEIndirect)
-                       2          -> mkAbsAddrIns STHL mem pc
-                       3          -> mkAbsAddrIns (STA . Imm16Indirect) mem pc
+                       0          -> defResult (LD BCIndirectStore)
+                       1          -> defResult (LD DEIndirectStore)
+                       2          -> mkAbsAddrIns (LD . HLIndirectStore) mem pc
+                       3          -> mkAbsAddrIns (LD . Imm16IndirectStore) mem pc
                        _otherwise -> undefined
   | z == 2, q == 1 = case p of
-                       0          -> defResult (LDA BCIndirect)
-                       1          -> defResult (LDA DEIndirect)
-                       2          -> mkAbsAddrIns LDHL mem pc
-                       3          -> mkAbsAddrIns (LDA . Imm16Indirect) mem pc
+                       0          -> defResult (LD AccBCIndirect)
+                       1          -> defResult (LD AccDEIndirect)
+                       2          -> mkAbsAddrIns (LD . HLIndirectLoad) mem pc
+                       3          -> mkAbsAddrIns (LD . AccImm16Indirect) mem pc
                        _otherwise -> undefined
   | z == 3 = case q of
                0                  -> defResult (INC16 (pairSP reg16XFormF p))
@@ -81,7 +81,7 @@ group0decode opc mem pc xForm
   | z == 6 = let (newpc, theReg)   = reg8 reg8XFormF mem pc y
                  newpc'            = pcInc newpc
                  immval            = getOpcode newpc' mem
-             in  DecodedInsn (pcInc newpc') (LD8 (Reg8Imm theReg immval))
+             in  DecodedInsn (pcInc newpc') (LD (Reg8Imm theReg immval))
   | z == 7 = defResult (accumOps IntMap.! (fromIntegral y))
   | otherwise = defResult (Z80undef [opc])
   where
@@ -117,7 +117,7 @@ group1decode opc mem pc xform
   | otherwise       = let reg8XFormF         = xform ^. reg8XForm
                           (newpc, dstReg)  = reg8 reg8XFormF mem pc y
                           (newpc', srcReg) = reg8 reg8XFormF mem newpc z
-                      in  DecodedInsn (pcInc newpc') (LD8 (Reg8Reg8 dstReg srcReg))
+                      in  DecodedInsn (pcInc newpc') (LD (Reg8Reg8 dstReg srcReg))
   where
     z = (opc .&. 7)
     y = (shiftR opc 3) .&. 7
@@ -260,22 +260,18 @@ edPrefixDecode opc mem pc
   | x == 1, z == 2, q == 0 = defResult ((SBC . ALU16) $ pairSP nullReg16XFormF p)
   | x == 1, z == 2, q == 1 = defResult ((ADC . ALU16) $ pairSP nullReg16XFormF p)
   | x == 1, z == 2         = invalid
-  | x == 1, z == 3, q == 0 = let rp               = pairSP nullReg16XFormF p
-                                 newpc            = pcInc pc
-                                 DecodedAddr newpc' addr = z80getAddr mem newpc
-                             in DecodedInsn newpc' (ST16Indirect (AbsAddr addr) rp)
-  | x == 1, z == 3, q == 1 = let rp               = pairSP nullReg16XFormF p
-                             in mkAbsAddrIns (LD16Indirect rp) mem (pcInc pc) 
+  | x == 1, z == 3, q == 0 = mkAbsAddrIns (LD . (RPIndirectStore (pairSP nullReg16XFormF p))) mem (pcInc pc)
+  | x == 1, z == 3, q == 1 = mkAbsAddrIns (LD . (RPIndirectLoad (pairSP nullReg16XFormF p))) mem (pcInc pc) 
   | x == 1, z == 3         = invalid
   | x == 1, z == 4         = defResult NEG
   | x == 1, z == 5, y == 1 = defResult RETI
   | x == 1, z == 5, y /= 1 = defResult RETN
   | x == 1, z == 6         = defResult (IM (interruptMode IntMap.! (fromIntegral y)))
   | x == 1, z == 7         = case y of
-                               0          -> defResult (STA IReg)
-                               1          -> defResult (STA RReg)
-                               2          -> defResult (LDA IReg)
-                               3          -> defResult (LDA RReg)
+                               0          -> defResult (LD IRegAcc)
+                               1          -> defResult (LD RRegAcc)
+                               2          -> defResult (LD AccIReg)
+                               3          -> defResult (LD AccRReg)
                                4          -> defResult RLD
                                5          -> defResult RRD
                                6          -> invalid

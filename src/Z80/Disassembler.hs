@@ -116,23 +116,24 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
         let DecodedInsn newpc insn = iDecode pc theMem
             -- Identify symbols where absolute addresses are found and build up a symbol table for a later
             -- symbol translation pass:
-            dstate'                = case insn of
-                                       (LD16 _rp (AbsAddr addr))         -> collectSymtab curDState addr "M"
-                                       (STHL (AbsAddr addr))             -> collectSymtab curDState addr "M"
-                                       (LDHL (AbsAddr addr))             -> collectSymtab curDState addr "M"
-                                       (LD16Indirect _rp (AbsAddr addr)) -> collectSymtab curDState addr "M"
-                                       (ST16Indirect (AbsAddr addr) _rp) -> collectSymtab curDState addr "M"
-                                       (DJNZ (AbsAddr addr))             -> collectSymtab curDState addr "L"
-                                       (JR (AbsAddr addr))               -> collectSymtab curDState addr "L"
-                                       (JRCC _cc (AbsAddr addr))         -> collectSymtab curDState addr "L"
-                                       (JP (AbsAddr addr))               -> collectSymtab curDState addr "L"
-                                       (JPCC _cc (AbsAddr addr))         -> collectSymtab curDState addr "L"
-                                       (CALL (AbsAddr addr))             -> collectSymtab curDState addr "SUB"
-                                       (CALLCC _cc (AbsAddr addr))       -> collectSymtab curDState addr "SUB"
-                                       _otherwise                        -> curDState
+            curDState'             =
+              case insn of
+                LD (RPair16ImmLoad _rp (AbsAddr addr))  -> collectSymtab curDState addr "M"
+                LD (HLIndirectStore (AbsAddr addr))     -> collectSymtab curDState addr "M"
+                LD (HLIndirectLoad  (AbsAddr addr))     -> collectSymtab curDState addr "M"
+                LD (RPIndirectLoad _rp (AbsAddr addr))  -> collectSymtab curDState addr "M"
+                LD (RPIndirectStore _rp (AbsAddr addr)) -> collectSymtab curDState addr "M"
+                DJNZ (AbsAddr addr)                     -> collectSymtab curDState addr "L"
+                JR (AbsAddr addr)                       -> collectSymtab curDState addr "L"
+                JRCC _cc (AbsAddr addr)                 -> collectSymtab curDState addr "L"
+                JP (AbsAddr addr)                       -> collectSymtab curDState addr "L"
+                JPCC _cc (AbsAddr addr)                 -> collectSymtab curDState addr "L"
+                CALL (AbsAddr addr)                     -> collectSymtab curDState addr "SUB"
+                CALLCC _cc (AbsAddr addr)               -> collectSymtab curDState addr "SUB"
+                _otherwise                              -> curDState
             disasmElt              = mkDisasmInst pc newpc insn
-            (newpc', dstate'')     = postProc disasmElt theMem newpc dstate'
-        in  disasm' newpc' dstate''
+            (newpc', curDState'')  = postProc disasmElt theMem newpc curDState'
+        in  disasm' newpc' curDState''
       | otherwise = curDState
 
     mkDisasmInst (PC oldpc) (PC newpc) ins =
@@ -140,8 +141,8 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
                         newpc' = (fromIntegral newpc) :: Int
                     in  (theMem ^. mfetchN) oldpc (newpc' - oldpc')
           cmnt
-            | LD16 _rp (AbsAddr addr) <- ins, addrInDisasmF addr = "INTREF"
-            | otherwise                                           = T.empty
+            | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- ins, addrInDisasmF addr = "INTREF"
+            | otherwise                                                         = T.empty
       in  mkDisasmInsn oldpc opcodes ins cmnt
     -- Probe the symbol table for 'destAddr', add a new symbol for this address, if in the range of the disassembled
     -- memory
@@ -149,7 +150,7 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
       let symTab       = curDState ^. symbolTab
           addrInRangeF = curDState ^. addrInDisasmRange
           isInSymtab   = destAddr `Map.member` symTab
-          label        = T.append prefix (T.pack . show $ dstate ^. labelNum)
+          label        = T.append prefix (curDState ^. labelNum & (T.pack . show))
       in  if (addrInRangeF destAddr) && not isInSymtab then
             (symbolTab %~ (Map.insert destAddr label)) . (labelNum +~ 1) $ curDState
           else

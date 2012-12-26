@@ -73,18 +73,18 @@ fixupSymbols z80dstate = disasmSeq %~ (fmap (xlatSymbol (z80dstate ^. symbolTab)
                   Nothing  -> addr
             | otherwise                  = addr
       in  case insn of
-            STHL addr            -> STHL (symName addr)
-            LDHL addr            -> LDHL (symName addr)
-            LD16Indirect rp addr -> LD16Indirect rp (symName addr)
-            ST16Indirect addr rp -> ST16Indirect (symName addr) rp
-            DJNZ addr            -> DJNZ (symName addr)
-            JR addr              -> JR (symName addr)
-            JRCC cc addr         -> JRCC cc (symName addr)
-            JP addr              -> JP (symName addr)
-            JPCC cc addr         -> JPCC cc (symName addr)
-            CALL addr            -> CALL (symName addr)
-            CALLCC cc addr       -> CALLCC cc (symName addr)
-            _otherwise           -> insn
+            LD (HLIndirectStore addr)    -> LD (HLIndirectStore (symName addr))
+            LD (HLIndirectLoad addr)     -> LD (HLIndirectLoad (symName addr))
+            LD (RPIndirectLoad rp addr)  -> LD (RPIndirectLoad rp (symName addr))
+            LD (RPIndirectStore rp addr) -> LD (RPIndirectStore rp (symName addr))
+            DJNZ addr                    -> DJNZ (symName addr)
+            JR addr                      -> JR (symName addr)
+            JRCC cc addr                 -> JRCC cc (symName addr)
+            JP addr                      -> JP (symName addr)
+            JPCC cc addr                 -> JPCC cc (symName addr)
+            CALL addr                    -> CALL (symName addr)
+            CALLCC cc addr               -> CALLCC cc (symName addr)
+            _otherwise                   -> insn
 
 -- | Format the accumulated symbol table as a sequence of 'T.Text's, in columnar format
 formatSymTab :: Map Z80addr T.Text
@@ -224,14 +224,7 @@ formatInstruction :: Z80disassembly             -- ^ Disassembly state, used to 
                   -> (T.Text, T.Text)           -- ^ '(mnemonic, operands)' result tuple
 
 formatInstruction _dstate (Z80undef _)            = zeroOperands "???"
-formatInstruction _dstate (LD8 x)                 = oneOperand "LD" x
-formatInstruction _dstate (LDA x)                 = ("LD", (accumLoadStore x False))
-formatInstruction _dstate (STA x)                 = ("LD", (accumLoadStore x True))
-formatInstruction _dstate (LD16 r imm)            = twoOperands "LD" r imm
-formatInstruction _dstate (STHL addr)             = ("LD", T.append "(" (T.append (formatOperand addr) "), HL"))
-formatInstruction _dstate (LDHL addr)             = ("LD", T.append "HL, (" (T.append (formatOperand addr) ")"))
-formatInstruction _dstate (LD16Indirect rp addr)  = ("LD", indirect16LoadStore rp addr False)
-formatInstruction _dstate (ST16Indirect addr rp)  = ("LD", indirect16LoadStore rp addr True)
+formatInstruction _dstate (LD x)                  = oneOperand "LD" x
 formatInstruction _dstate (INC r)                 = oneOperand "INC" r
 formatInstruction _dstate (DEC r)                 = oneOperand "DEC" r
 formatInstruction _dstate (INC16 r)               = oneOperand "INC" r
@@ -337,43 +330,6 @@ twoOperands mne op1 op2 = (mne, T.concat [ formatOperand op1
                                           ]
                           )
 
--- | Output an accumulator load or store
-accumLoadStore :: AccumLoadStore                -- ^ Operand to output
-               -> Bool                          -- ^ True = store, False = load
-               -> T.Text
-accumLoadStore operand isStore =
-  let arg1 = case operand of
-               BCIndirect           -> "(BC)"
-               DEIndirect           -> "(DE)"
-               (Imm16Indirect addr) -> T.cons '(' $ T.snoc (formatOperand addr) ')'
-               IReg                 -> "I"
-               RReg                 -> "R"
-  in  if isStore then
-        T.append arg1 ", A"
-      else
-        T.append "A, " arg1
-
--- | Output a 16-bit register indirect load/store
-indirect16LoadStore :: RegPairSP
-                    -> SymAbsAddr Z80addr
-                    -> Bool
-                    -> T.Text
-indirect16LoadStore rp addr loadStore =
-  let rp'   = formatOperand rp
-      addr' = formatOperand addr
-  in  if loadStore then
-        T.concat [ "("
-                  , addr'
-                  , "), "
-                  , rp'
-                  ]
-      else
-        T.concat [ rp'
-                  , ", ("
-                  , addr'
-                  , ")"
-                  ]
-
 -- | Output an I/O port operand
 ioPortOperand :: OperIO         -- ^ Operand
               -> Bool           -- ^ 'True' means an IN instruction, 'False' means an OUT instruction
@@ -403,16 +359,45 @@ instance DisOperandFormat Z80word where
 instance DisOperandFormat Z80addr where
   formatOperand = oldStyleHex
 
-instance DisOperandFormat OperLD8 where
-  formatOperand (Reg8Reg8 r r') = T.append (formatOperand r) (T.append ", " (formatOperand r'))
-  formatOperand (Reg8Imm r imm) = T.append (formatOperand r) (T.append ", " (formatOperand imm))
-  formatOperand (HLIndLoad r)   = T.append (formatOperand r) ", (HL)"
-  formatOperand (IXIndLoad r disp) = T.append (formatOperand r) (T.append ", (IX" (T.append (showDisp disp) ")"))
-  formatOperand (IYIndLoad r disp) = T.append (formatOperand r) (T.append ", (IY" (T.append (showDisp disp) ")"))
+instance DisOperandFormat OperLD where
+  formatOperand (Reg8Reg8 r r')           = T.append (formatOperand r) (T.append ", " (formatOperand r'))
+  formatOperand (Reg8Imm r imm)           = T.append (formatOperand r) (T.append ", " (formatOperand imm))
+  formatOperand (HLIndLoad r)             = T.append (formatOperand r) ", (HL)"
+  formatOperand (IXIndLoad r disp)        = T.append (formatOperand r) (T.append ", (IX" (T.append (showDisp disp) ")"))
+  formatOperand (IYIndLoad r disp)        = T.append (formatOperand r) (T.append ", (IY" (T.append (showDisp disp) ")"))
+  formatOperand AccBCIndirect             = "A, (BC)"
+  formatOperand AccDEIndirect             = "A, (DE)"
+  formatOperand (AccImm16Indirect addr)   = T.append "A, " (formatOperand addr)
+  formatOperand AccIReg                   = "A, I"
+  formatOperand AccRReg                   = "A, R"
+  formatOperand BCIndirectStore           = "(BC), A"
+  formatOperand DEIndirectStore           = "(DE), A"
+  formatOperand (Imm16IndirectStore addr) = T.append (formatOperand addr) ", A"
+  formatOperand IRegAcc                   = "I, A"
+  formatOperand RRegAcc                   = "R, A"
+  formatOperand (RPair16ImmLoad rp imm)   = T.append (T.append (formatOperand rp) ", ") (formatOperand imm)
+  formatOperand (HLIndirectStore addr)    = T.concat [ "("
+                                                     , (formatOperand addr)
+                                                     , "), HL"
+                                                     ]
+  formatOperand (HLIndirectLoad  addr)    = T.concat [ "HL, ("
+                                                     , (formatOperand addr)
+                                                     , ")"
+                                                     ]
+  formatOperand (RPIndirectLoad rp addr)  = T.concat [ formatOperand rp
+                                                     , ", ("
+                                                     , formatOperand addr
+                                                     , ")"
+                                                     ]
+  formatOperand (RPIndirectStore rp addr) = T.concat [ "("
+                                                     , formatOperand addr
+                                                     , "), "
+                                                     , formatOperand rp
+                                                     ]
 
 instance DisOperandFormat OperALU where
-  formatOperand (ALUimm imm) = formatOperand imm
-  formatOperand (ALUreg8 r) = formatOperand r
+  formatOperand (ALUimm imm)    = formatOperand imm
+  formatOperand (ALUreg8 r)     = formatOperand r
   formatOperand (ALUHLindirect) = "(HL)"
 
 instance DisOperandFormat OperExtendedALU where
