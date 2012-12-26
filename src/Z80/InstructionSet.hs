@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveDataTypeable #-}
+
 -- | The Haskell representation of the Z80 instruction set
 module Z80.InstructionSet
   ( -- * Types
@@ -29,6 +31,8 @@ module Z80.InstructionSet
   ) where
 
 import Control.Lens
+import Data.Typeable
+import Data.Data
 
 import Machine
 import Z80.Processor
@@ -134,7 +138,7 @@ data Z80instruction where
   -- Increment, Increment-Repeat instructions
   LDI, CPI, INI, OUTI, LDD, CPD, IND, OUTD, LDIR, CPIR, INIR, OTIR, LDDR, CPDR, INDR, OTDR :: Z80instruction
 
-  deriving (Show)
+  deriving (Show, Typeable, Data)
         
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -184,7 +188,7 @@ data OperLD where
   RPIndirectStore    :: RegPairSP
                      -> SymAbsAddr Z80addr
                      -> OperLD
-  deriving (Show)
+  deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -195,7 +199,7 @@ data OperALU where
   ALUreg8       :: Z80reg8
                 -> OperALU
   ALUHLindirect :: OperALU
-  deriving (Show)
+  deriving (Show, Typeable, Data)
 
 -- | ALU operations that can also extend to use HL and register pair
 data OperExtendedALU where
@@ -203,7 +207,7 @@ data OperExtendedALU where
         -> OperExtendedALU
   ALU16 :: RegPairSP
         -> OperExtendedALU
-  deriving (Show)
+  deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -213,7 +217,7 @@ data OperIO where
   CIndIO  :: Z80reg8
           -> OperIO
   CIndIO0 :: OperIO
-  deriving (Show)
+  deriving (Show, Typeable, Data)
 
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -227,7 +231,7 @@ data Z80condC where
   PE  :: Z80condC
   POS :: Z80condC
   MI  :: Z80condC
-  deriving (Show)
+  deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -245,7 +249,7 @@ data Z80reg8 where
              -> Z80reg8
   IYindirect :: Z80disp                         -- IY + displacement
              -> Z80reg8
-  deriving (Show)
+  deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -255,7 +259,7 @@ data Z80reg16 where
   HL :: Z80reg16
   IX :: Z80reg16
   IY :: Z80reg16
-  deriving (Show)
+  deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Register pair that includes SP (instead of AF)
@@ -263,7 +267,7 @@ data RegPairSP where
   RPair16 :: Z80reg16
           -> RegPairSP
   SP      :: RegPairSP
-  deriving (Show)
+  deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Register pair that includes AF (instead of SP)
@@ -271,7 +275,7 @@ data RegPairAF where
   RPair16' :: Z80reg16
            -> RegPairAF
   AF       :: RegPairAF
-  deriving (Show)
+  deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Exchange instruction arguments
@@ -280,7 +284,7 @@ data Z80ExchangeOper where
   DEHL   :: Z80ExchangeOper     -- DE with HL
   SPHL   :: Z80ExchangeOper     -- SP with HL
   Primes :: Z80ExchangeOper     -- EXX (regular <-> primes)
-  deriving (Show)
+  deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Index register transform functions:

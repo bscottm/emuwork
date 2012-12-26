@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveDataTypeable #-}
+
 -- | The Z80 disassembler module
 module Z80.Disassembler
   ( -- * Types
@@ -22,6 +24,7 @@ module Z80.Disassembler
   , disasmSeq
   ) where
 
+import Data.Data
 import Control.Lens
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -45,6 +48,7 @@ data Z80PseudoOps where
                  -> T.Text
                  -> Word8
                  -> Z80PseudoOps
+  deriving (Typeable, Data)
 
 -- | Z80 instruction or pseudo operation contains an address?
 isZ80AddrIns :: Z80DisasmElt
@@ -115,7 +119,7 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
       | pc <= lastpc =
         let DecodedInsn newpc insn = iDecode pc theMem
             -- Identify symbols where absolute addresses are found and build up a symbol table for a later
-            -- symbol translation pass:
+            -- symbol translation pass (this could be replaced SYB?):
             curDState'             =
               case insn of
                 LD (RPair16ImmLoad _rp (AbsAddr addr))  -> collectSymtab curDState addr "M"

@@ -24,6 +24,7 @@ library
                         vector >= 0.10,
                         lens,
                         transformers,
+                        syb,
                         parsec >= 3
   ghc-options:          -Wall -O2
   default-extensions:   GADTs,

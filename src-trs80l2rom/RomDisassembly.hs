@@ -199,7 +199,7 @@ trs80RomPostProcessor :: Z80DisasmElt
                       -> Z80PC
                       -> Z80disassembly
                       -> (Z80PC, Z80disassembly)
-trs80RomPostProcessor ins@(DisasmInsn _ _ _ (RST 8) _) mem pc dstate =
+trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) mem pc dstate =
   let sAddr  = getPCvalue pc
       byte   = (mem ^. mfetch) sAddr
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
