@@ -119,7 +119,7 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
       | pc <= lastpc =
         let DecodedInsn newpc insn = iDecode pc theMem
             -- Identify symbols where absolute addresses are found and build up a symbol table for a later
-            -- symbol translation pass (this could be replaced SYB?):
+            -- symbol translation pass:
             curDState'             =
               case insn of
                 LD (RPair16ImmLoad _rp (AbsAddr addr))  -> collectSymtab curDState addr "M"
@@ -135,8 +135,7 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
                 CALL (AbsAddr addr)                     -> collectSymtab curDState addr "SUB"
                 CALLCC _cc (AbsAddr addr)               -> collectSymtab curDState addr "SUB"
                 _otherwise                              -> curDState
-            disasmElt              = mkDisasmInst pc newpc insn
-            (newpc', curDState'')  = postProc disasmElt theMem newpc curDState'
+            (newpc', curDState'')  = postProc (mkDisasmInst pc newpc insn) theMem newpc curDState'
         in  disasm' newpc' curDState''
       | otherwise = curDState
 

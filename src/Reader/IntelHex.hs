@@ -17,8 +17,9 @@ import Control.Monad.Primitive (PrimMonad(..))
 import Control.Monad.ST
 import qualified Data.Foldable as Foldable
 import Text.Parsec
-import Text.Parsec.ByteString
-import qualified Data.ByteString as BL
+import Text.Parsec.Text
+import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import Data.Vector.Unboxed (Vector)
 import Data.Sequence (Seq)
 import qualified Data.Sequence as Seq
@@ -31,17 +32,17 @@ readIntelHexVector :: FilePath
                    -> IO (Vector Word8)
 readIntelHexVector path =
   if (not . null) path then
-    (BL.readFile path
+    (TIO.readFile path
      >>= (\hexStr -> intelHexReader path hexStr)) `catches` [ Handler (genericIOErrors "readIntelHexVector")
-                                                         -- Add more handlers here, as needed
-                                                       ]
+                                                            -- Add more handlers here, as needed
+                                                            ]
   else
     hPutStrLn stderr "readIntelHexVector: Empty file name"
     >> invalidVector
 
 -- | 'Parser' driver for reading the Intel hex-format byte string.
 intelHexReader :: FilePath
-               -> BL.ByteString
+               -> T.Text
                -> IO (Vector Word8)
 intelHexReader path input =
   case parse intelHexParser path input of
@@ -95,7 +96,6 @@ instance Ord IHexLine where
   compare (IHexType1 {})   (IHexType1{})    = EQ
   compare (IHexType1 {})   _right           = GT
   compare _left            (IHexType1 {})   = LT
-                                                   
 
 -- | Type '0' end of file data record
 type0eof :: IHexLine
