@@ -1,6 +1,9 @@
+{-# LANGUAGE DeriveDataTypeable #-}
+
 -- | General data structures and type classes for emulated processors.
 module Machine.EmulatedSystem where
 
+import Data.Data
 import Control.Lens
 import Data.Vector.Unboxed (Vector, Unbox)
 import qualified Data.Text as T
@@ -136,6 +139,23 @@ data EmulatedSystem procInternals memInternals addrType wordType instructionSet 
   }
 
 makeLenses ''EmulatedSystem
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+-- | A (symbolic|absolute) address
+data SymAbsAddr addrType where
+  AbsAddr :: addrType
+          -> SymAbsAddr addrType
+  SymAddr :: T.Text
+          -> SymAbsAddr addrType
+  deriving (Typeable, Data)
+
+instance (ShowHex addrType) =>
+         Show (SymAbsAddr addrType) where
+  show (AbsAddr addr)  = as0xHexS addr
+  show (SymAddr label) = show label
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Emulator command line interface type class. This separates out the handling from the 'EmulatedProcessor'
 -- processor internals, reducing the amount of polymorphic magic.

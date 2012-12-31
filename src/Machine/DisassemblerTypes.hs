@@ -5,7 +5,6 @@ module Machine.DisassemblerTypes
   ( -- * Types
     Disassembler(..)
   , DisElement(..)
-  , SymAbsAddr(..)
   , DisEltAddress(..)
   , NullPseudoOp(..)
   , DisElementPostProc
@@ -35,7 +34,6 @@ import Data.Vector.Unboxed (Vector, Unbox)
 import qualified Data.Vector.Unboxed as DVU
 import qualified Data.Text as T
 
-import Machine.Utils
 import Machine.EmulatedSystem
 
 -- | 'DisasmElement' is a dissassembly element: a disassembled instruction (with corresponding address and instruction
@@ -137,14 +135,6 @@ mkExtPseudo = ExtPseudo
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
--- | A (symbolic|absolute) address
-data SymAbsAddr addrType where
-  AbsAddr :: addrType
-          -> SymAbsAddr addrType
-  SymAddr :: T.Text
-          -> SymAbsAddr addrType
-  deriving (Typeable, Data)
-
 -- | Disassembly element's address, with optional label
 data DisEltAddress addrType where
   Plain   :: addrType
@@ -242,10 +232,3 @@ disEltGetLength (Addr _ _ _)             = 2
 disEltGetLength (AsciiZ _ bytes)         = DVU.length bytes
 disEltGetLength (Ascii _ bytes)          = DVU.length bytes
 disEltGetLength _                        = 0
-
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
-instance (ShowHex addrType) =>
-         Show (SymAbsAddr addrType) where
-  show (AbsAddr addr)  = as0xHexS addr
-  show (SymAddr label) = show label

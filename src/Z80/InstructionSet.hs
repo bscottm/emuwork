@@ -28,11 +28,20 @@ module Z80.InstructionSet
   -- * Lens functions
   , reg8XForm
   , reg16XForm
+
+  -- * Other utilities
+  , reg8Names
+  , reg16Names
+  , idxRegNames
+  , specialRegNames
   ) where
 
 import Control.Lens
 import Data.Typeable
 import Data.Data
+import Data.Map (Map)
+import qualified Data.Map as Map
+import qualified Data.Text as T
 
 import Machine
 import Z80.Processor
@@ -285,6 +294,35 @@ data Z80ExchangeOper where
   SPHL   :: Z80ExchangeOper     -- SP with HL
   Primes :: Z80ExchangeOper     -- EXX (regular <-> primes)
   deriving (Show, Typeable, Data)
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- Register names
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+reg8Names :: Map T.Text Z80reg8
+reg8Names = Map.fromList [ ("a", A)
+                         , ("b", B)
+                         , ("c", C)
+                         , ("d", D)
+                         , ("e", E)
+                         , ("h", H)
+                         , ("l", L)
+                         , ("(hl)", HLindirect)
+                         ]
+
+reg16Names :: [T.Text]
+reg16Names = [ "bc"
+             , "de"
+             , "hl"
+             ]
+
+idxRegNames :: [T.Text]
+idxRegNames = [ "ix"
+              , "iy"
+              ]
+
+specialRegNames :: [T.Text]
+specialRegNames = [ "sp", "af", "i", "r" ]
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Index register transform functions:

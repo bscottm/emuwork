@@ -1,7 +1,3 @@
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE FlexibleContexts #-}
-
 -- | Misosys EDAS assembler parser. There are two basic interfaces: 'edasParseOneLine' and 'edasParseSequence'. 'edasParseOneLine'
 -- is intended to be used as a combinator, e.g., with parsing the analytic disassembly output.
 module Z80.MisosysEDAS
@@ -13,21 +9,101 @@ module Z80.MisosysEDAS
 import Debug.Trace
 
 import Control.Exception hiding (try)
+import Control.Lens
 import Text.Parsec
-import Text.Parsec.Text
--- import Text.Parsec.Char
 import Text.Parsec.Pos
 import Data.Text.Read
 import Data.Int
+import Data.Word
+import Data.Functor.Identity
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Char as C
+import Data.Map (Map, (!))
+import qualified Data.Map as Map
 
+import Machine.EmulatedSystem
 import Z80.InstructionSet
+
+-- | Synonym for an assembler label
+type EDASLabel = T.Text
+
+-- | An assembler comment, preserving its column position in the input
+data Comment = Comment Int T.Text
+  deriving (Show)
+
+-- | Assembler operation: a Z80 instruction or EDAS pseudo operation
+data AsmOp where
+  Insn   :: (AsmEvalCtx -> Z80instruction)      -- An instruction constructor, may involve an expression
+                                                -- and an evaluation context
+         -> AsmOp
+  Pseudo :: EDASPseudo                  -- A pseudo operation, e.g., equate, db, ds, etc.
+         -> AsmOp
+  deriving (Show)
+
+instance Show (AsmEvalCtx -> Z80instruction) where
+  show _ctxInsn = "<asm eval>"
+
+-- | EDAS' pseudo operations
+data EDASPseudo where
+  NullPseudo :: EDASPseudo
+  Equate :: EDASExpr
+         -> EDASPseudo
+  Origin :: EDASExpr
+         -> EDASPseudo
+  deriving (Show)
+
+-- | Expressions
+data EDASExpr where
+  NullExpr :: EDASExpr          -- Null/no expression
+  Const :: Int16                -- 16-bit integer constant
+        -> EDASExpr
+  Var   :: T.Text               -- Variable/symbolic label
+        -> EDASExpr
+  Add   :: EDASExpr
+        -> EDASExpr
+        -> EDASExpr
+  Sub   :: EDASExpr
+        -> EDASExpr
+        -> EDASExpr
+  Mul   :: EDASExpr
+        -> EDASExpr
+        -> EDASExpr
+  Div   :: EDASExpr
+        -> EDASExpr
+        -> EDASExpr
+  Mod   :: EDASExpr
+        -> EDASExpr
+        -> EDASExpr
+  Shift :: EDASExpr
+        -> EDASExpr
+        -> EDASExpr
+  deriving (Show)
+
+-- | Assembler evaluation context
+data AsmEvalCtx where
+  AsmEvalCtx :: { _symbolTab :: Map T.Text AsmSymbolVal
+                } -> AsmEvalCtx
+
+-- | Assembler symbol values
+data AsmSymbolVal = AsmSymbolVal EDASExpr (Maybe Int16)
+
+-- | Data type constructors for EDAS data elements
+data AsmStmt where
+  -- Assembler statement
+  AsmStmt :: { _symLabel :: Maybe EDASLabel
+             , _asmOp    :: Maybe AsmOp
+             , _comment  :: Maybe Comment
+             , _stmtAddr :: Word16                      -- Statement address, i.e., current program counter
+             } -> AsmStmt
+  deriving (Show)
+
+-- Emit TH lens hair:
+makeLenses ''AsmStmt
 
 -- | Parse an EDAS source file
 edasParseFile :: FilePath
-              -> IO (Either T.Text [EDAS a])
+              -> IO (Either T.Text [AsmStmt])
 edasParseFile path =
   if (not . null) path then
     (TIO.readFile path
@@ -39,112 +115,40 @@ edasParseFile path =
 
 -- | Parse a single line of EDAS assembly
 edasParseOneLine :: FilePath
-              -> T.Text
-              -> Either T.Text (EDAS a)
+                 -> T.Text
+                 -> Either T.Text AsmStmt
 edasParseOneLine path inp =
-  case parse parseEDAS path inp of
+  case runParser asmStatement mkEmptyAsmStmt path inp of
     Left errmsg      -> Left $ ((T.pack . show) errmsg)
-    (Right result)   -> Right result
+    Right result     -> Right result
 
 -- | Parse multiple lines of EDAS assembly
 edasParseSequence :: FilePath
                   -> T.Text
-                  -> Either T.Text [(EDAS a)]
+                  -> Either T.Text [AsmStmt]
 edasParseSequence path inp =
-  let manyEDASlines = do { result <- many parseEDAS
+  let manyEDASlines = do { result <- many asmStatement
                          ; return result
                          }
-  in  case parse manyEDASlines path inp of
-        Left errmsg      -> Left $ ((T.pack . show) errmsg)
-        (Right result)   -> Right result
-
--- | Synonym for an assembler label
-type EDASLabel = T.Text
-
--- | An assembler comment, preserving its column position in the input
-data Comment = Comment Int T.Text
-  deriving (Show)
-
--- | Assembler operation: a Z80 instruction or EDAS pseudo operation
-data AsmOp a where
-  Insn   :: Z80instruction              -- An instruction
-         -> AsmOp a
-  Pseudo :: EDASPseudo a                -- A pseudo operation, e.g., equate
-         -> AsmOp a
-  deriving (Show)
-
--- | EDAS' pseudo operations
-data EDASPseudo a where
-  NullPseudo :: EDASPseudo a
-  Equate :: EDASExpr a
-         -> EDASPseudo a
-  Origin :: EDASExpr a
-         -> EDASPseudo a
-  deriving (Show)
-
--- | Expressions
-data EDASExpr a where
-  Const :: Int16                -- 16-bit integer constant
-        -> EDASExpr a
-  Var   :: T.Text               -- Variable/symbolic label
-        -> EDASExpr a
-  Add   :: EDASExpr a
-        -> EDASExpr a
-        -> EDASExpr a
-  Sub   :: EDASExpr a
-        -> EDASExpr a
-        -> EDASExpr a
-  Mul   :: EDASExpr a
-        -> EDASExpr a
-        -> EDASExpr a
-  Div   :: EDASExpr a
-        -> EDASExpr a
-        -> EDASExpr a
-  Mod   :: EDASExpr a
-        -> EDASExpr a
-        -> EDASExpr a
-  Shift :: EDASExpr a
-        -> EDASExpr a
-        -> EDASExpr a
-
-instance Show (EDASExpr a) where
-  show (Const x)   = "Const(" ++ (show x) ++ ")"
-  show (Var v)     = "Var(" ++ (show v) ++ ")"
-  show (Add x y)   = "Add(" ++ (show x) ++ "," ++ (show y) ++ ")"
-  show (Sub x y)   = "Sub(" ++ (show x) ++ "," ++ (show y) ++ ")"
-  show (Mul x y)   = "Mul(" ++ (show x) ++ "," ++ (show y) ++ ")"
-  show (Div x y)   = "Div(" ++ (show x) ++ "," ++ (show y) ++ ")"
-  show (Mod x y)   = "Mod(" ++ (show x) ++ "," ++ (show y) ++ ")"
-  show (Shift x y) = "Shift(" ++ (show x) ++ "," ++ (show y) ++ ")"
-
--- | Data type constructors for EDAS data elements
-data EDAS a where
-  NoResult  :: EDAS a
-  -- Assembler statement
-  AsmStmt :: { _symLabel :: Maybe EDASLabel
-             , _asmOp    :: Maybe (AsmOp a)
-             , _comment  :: Maybe Comment
-             } -> EDAS a
-  deriving (Show)
+  in  case runParser manyEDASlines mkEmptyAsmStmt path inp of
+        Left errmsg  -> Left $ ((T.pack . show) errmsg)
+        Right result -> Right result
 
 -- | Make an empty assembler statement
-mkAsmStmt :: EDAS a
-mkAsmStmt = AsmStmt { _symLabel = Nothing
-                    , _asmOp    = Nothing
-                    , _comment  = Nothing
-                    }
-
--- | The EDAS parser for each line of input.
-parseEDAS :: Parser (EDAS a)
-parseEDAS = asmStatement
+mkEmptyAsmStmt :: AsmStmt
+mkEmptyAsmStmt = AsmStmt { _symLabel = Nothing
+                         , _asmOp    = Nothing
+                         , _comment  = Nothing
+                         , _stmtAddr = 0
+                         }
 
 -- Skip over whitespace. NB that the newline is important, so 'spaces' is not used here since it will skip over the
 -- newline.
-whiteSpace :: Parser ()
+whiteSpace :: ParsecT T.Text AsmStmt Identity ()
 whiteSpace = skipMany (oneOf [' ', '\t', '\f', '\v'])
 
 -- | Parse a comment, preserving its position in the input.
-asmComment :: Parser Comment
+asmComment :: ParsecT T.Text AsmStmt Identity Comment
 asmComment =
   getPosition
   >>= (\curpos ->
@@ -155,82 +159,135 @@ asmComment =
                )
       )
 
--- | Parse an assembler statement, which has the form "label: op operands ; comment"
-asmStatement :: Parser (EDAS a)
+-- | Parse an assembler statement, which has the form "label: op operands ; comment". All of the parts of the statement are
+-- optional.
+asmStatement :: ParsecT T.Text AsmStmt Identity AsmStmt
 asmStatement =
   let updateStmtLab stmtLab asmStmt = asmStmt { _symLabel = stmtLab }
       updateAsmOp   asmOp   asmStmt = asmStmt { _asmOp    = asmOp   }
       updateComment cmnt    asmStmt = asmStmt { _comment  = cmnt    }
 
-      parseAsmOp                    = do { asmOp <- ( insnStmt
-                                                      <|> pseudoOpStmt 
-                                                    ) <?> "valid Z80 instruction or pseudo-operation"
-                                         ; optional whiteSpace
-                                         ; return asmOp
+      collectLabel                  = do { stmtLab <- readLabel
+                                         ; modifyState (updateStmtLab (Just stmtLab))
+                                         ; return ()
                                          }
-      insnStmt                      = do { _ <- char ':' <?> "':' expected after label"
-                                         ; optional whiteSpace
-                                         ; asmOpcode     <?> "Z80 instruction"
-                                         }
-      pseudoOpStmt                  = do { optional whiteSpace
-                                         ; asmPseudo     <?> "pseudo-operation"
-                                         }
-      parseComment                  = do { _ <- newline
-                                         ; return $ Nothing 
+                                      <|> do { whiteSpace
+                                             ; modifyState (updateStmtLab Nothing)
+                                             ; return ()
+                                             }
+      collectInsnOrPseudo           = getState
+                                      >>= (\theLabel ->
+                                             case theLabel ^. symLabel of
+                                                Just _label ->
+                                                  -- ':' after a symbol might have an instruction following it.
+                                                  do { _ <- char ':'
+                                                     ; optional whiteSpace
+                                                     ; optionMaybe asmOpcode        <?> "Z80 instruction"
+                                                     }
+                                                      -- Otherwise, we should expect an instruction or pseudo-op
+                                                  <|> do { whiteSpace
+                                                         ; maybeAsmOrPseudo         <?> "Z80 instruction or pseudo-operation"
+                                                         }
+                                                Nothing     ->
+                                                  -- No label: expect an instruction or pseudo-op
+                                                  maybeAsmOrPseudo
+                                          )
+                                      >>= (modifyState . updateAsmOp)
+      collectComment                = do { _ <- newline
+                                         ; modifyState (updateComment Nothing )
+                                         ; return ()
                                          }
                                       <|> do { cmnt <- asmComment
-                                             ; return $ Just cmnt
+                                             ; modifyState (updateComment (Just cmnt))
+                                             ; return ()
                                              }
-  in  do { stmtLab <- optionMaybe readLabel
-         ; asmOp   <- optionMaybe parseAsmOp
-         ; cmnt    <- parseComment
-         ; return (((updateStmtLab stmtLab) . (updateAsmOp asmOp) . (updateComment cmnt)) mkAsmStmt)
+
+      maybeAsmOrPseudo              = optionMaybe ( asmOpcode
+                                                      <|> asmPseudo
+                                                  )
+
+  in  do { setState mkEmptyAsmStmt
+         ; collectLabel
+         ; collectInsnOrPseudo
+         ; collectComment
+         ; ustate <- getState
+         ; trace ("asmStmt: " ++ (show ustate)) $ (return ustate)
          }
 
 -- | Parse a Z80 assembler opcode
-asmOpcode :: Parser (AsmOp a)
+asmOpcode :: ParsecT T.Text AsmStmt Identity AsmOp
 asmOpcode = 
-  do { stringIC "ld"
-     ; return $ (Insn $ Z80undef [])
+  do { _ <- stringIC "ld"
+     ; _ <- whiteSpace
+     -- Need to handle operands involving the accumulator separately from other 8-bit registers
+     ; reg8immLoads
      }
+  <|> do { _ <- stringIC "call"
+         ; _ <- whiteSpace
+         ; calldest <- asmExpr
+         ; return $ Insn (\ctx -> (CALL . AbsAddr) $ evalAsmExprToWord16 ctx calldest)
+         }
+  <|> do { _ <- stringIC "ret"
+         ; noArgs RET
+         }
+  <|> do { _ <- stringIC "nop"
+         ; noArgs NOP
+         }
+  where
+    returnInsn = return . Insn
+    noArgs z80insn = returnInsn (\_ctx -> z80insn)
+
+    -- Parse accumulator loads.
+    reg8immLoads = do { dstReg <- choice (map (stringIC . T.unpack) (Map.keys reg8Names))
+                      ; optional whiteSpace
+                      ; _ <- char ','
+                      ; optional whiteSpace
+                      ; expr <- asmExpr
+                      ; returnInsn (\ctx -> LD (Reg8Imm (reg8Names ! (T.toLower . T.pack) dstReg) (evalAsmExprToWord8 ctx expr)))
+                      }
 
 -- | Parse EDAS pseudo operations, such as "EQU", "DEFS", etc.
-asmPseudo :: Parser (AsmOp a)
+asmPseudo :: ParsecT T.Text AsmStmt Identity AsmOp
 asmPseudo =
   (\pseudoOp -> return $ Pseudo pseudoOp)
   =<< ( pseudoWithExpr "equ" Equate
         <|> pseudoWithExpr "org" Origin
       )
   where
-    pseudoWithExpr str pseudo = do { stringIC str
-                                   ; optional whiteSpace
+    pseudoWithExpr str pseudo = do { _ <- stringIC str
+                                   ; whiteSpace
                                    ; expr <- asmExpr
                                    ; return $ pseudo expr
                                    }
 
 -- | Assembler expression parsing
-asmExpr :: Parser (EDASExpr a)
+asmExpr :: ParsecT T.Text AsmStmt Identity EDASExpr
 asmExpr =
-  constExpr
-    <|> varExpr
-    <|> binOp '+' Add
-    <|> binOp '-' Sub
-    <|> binOp '*' Mul
-    <|> binOp '/' Div
-    <|> binOpSI ".mod." Mod
-    <|> binOp '<' Shift
+  do { prim <- primExpr
+     ; optional whiteSpace
+     ; result <- option prim ( binOp prim '+' Add
+                                 <|> binOp prim '-' Sub
+                             )
+     ; return result
+     }
   where
+    -- Primary expression
+    primExpr = constExpr
+                 <|> varExpr
+
     -- constant expression: Optional sign, digits and base
     constExpr = do { sign <- option '+' (char '+' <|> char '-')
-                   ; x    <- many hexDigit
+                   ; x    <- digit
+                   ; y    <- many hexDigit
                    ; base <- option 'd' (charIC 'd' <|> charIC 'h' <|> charIC 'q' <|> charIC 'o' <|> charIC 'b')
-                   ; if validConst base x then
-                       convertConst base (T.pack (sign:x))
+                   ; let base' = C.toLower base
+                   ; let theConst = x : y
+                   ; if validConst base' theConst then
+                       convertConst base' (T.pack (sign : theConst))
                      else
                        fail "Invalid constant"
                    }
-    varExpr    = (\varName -> return $ Var varName)
-                 =<< readLabel
+    varExpr    = (\varName -> return $ Var varName) =<< readLabel
 
     validConst 'd' x      = and . (map C.isDigit) $ x
     validConst 'o' x      = and . (map C.isOctDigit) $ x
@@ -270,41 +327,20 @@ asmExpr =
                                                                                  ]
                                                                       )
 
-    binOp c op = do { left  <- asmExpr
-                    ; optional whiteSpace
-                    ; _     <- char c
-                    ; optional whiteSpace
-                    ; right <- asmExpr
-                    ; return $ op left right
-                    }
+    binOp leftExpr c op = do { _     <- char c
+                             ; optional whiteSpace
+                             ; rightExpr <- asmExpr
+                             ; return $ op leftExpr rightExpr
+                             }
 
-    binOpSI str op = do { left  <- asmExpr
-                        ; optional whiteSpace
-                        ; _     <- stringIC str
-                        ; optional whiteSpace
-                        ; right <- asmExpr
-                        ; return $ op left right
-                        }
-
--- | Parse a case-insensitive string
-stringIC :: forall s (m :: * -> *). Stream s m Char =>
-            String
-         -> ParsecT s () m ()
-stringIC [] = return ()
-stringIC (c:cs) = charIC c >> stringIC cs
-
--- | Parse a case-insensitive character
-charIC :: forall s (m:: * -> *). Stream s m Char =>
-          Char
-       -> ParsecT s () m Char
-charIC c =
-  let showC x           = [ '\'', x, '\'' ]
-      testC x           = if C.toLower x == c then Just x else Nothing
-      nextPos pos x _xs = updatePosChar pos x
-  in  tokenPrim showC nextPos testC
+    binOpSI leftExpr str op = do { _  <- stringIC str
+                                 ; optional whiteSpace
+                                 ; rightExpr <- asmExpr
+                                 ; return $ op leftExpr rightExpr
+                                 }
 
 -- | Parse a EDAS label
-readLabel :: Parser EDASLabel
+readLabel :: ParsecT T.Text AsmStmt Identity EDASLabel
 readLabel =
   let commonSpecial = char '$'
                <|> char '_'
@@ -315,31 +351,59 @@ readLabel =
       followChar = alphaNum
                 <|> commonSpecial
                 <|> char '?'
-      validLabel lab = (T.toUpper lab) `notElem` [ "A", "B", "C", "D", "E", "H", "L"
-                                                 , "I", "R", "IX", "IY", "SP", "AF"
-                                                 , "BC", "DE", "HL", "C", "NC", "Z"
-                                                 , "NZ", "M", "P", "PE", "PO", "ON", "OFF"
+      validLabel lab = (T.toUpper lab) `notElem` [ "A", "B", "C", "D", "E", "H", "L" , "I", "R"
+                                                 , "IX", "IY", "SP", "AF"
+                                                 , "BC", "DE", "HL"
+                                                 , "C", "NC", "Z", "NZ", "M", "P", "PE", "PO"
+                                                 , "ON", "OFF"
                                                  ]
-  in  try $
-        do
-          c <- leadChar
-          lab <- many followChar
-          let asmLabel = T.cons c (T.pack lab)
-          if validLabel asmLabel then
-            if T.length asmLabel <= 15 then
-              return asmLabel
-            else
-              fail "Labels should be 15 characters or less."
-          else
-            fail ("Label is a reserved name: " ++ (T.unpack asmLabel))
+  in  do { c <- leadChar
+         ; lab <- many followChar
+         ; let asmLabel = T.cons c (T.pack lab)
+         ; if validLabel asmLabel then
+             if T.length asmLabel <= 15 then
+               return asmLabel
+             else
+               fail "Labels should be 15 characters or less."
+           else
+             fail ("Label is a reserved name: " ++ (T.unpack asmLabel))
+         }
+
+-- | Parse a case-insensitive string
+stringIC :: String
+         -> ParsecT T.Text AsmStmt Identity String
+stringIC icStr = walkIC icStr
+  where
+    walkIC [] = return icStr
+    walkIC (c:cs) = charIC c >> walkIC cs
+
+-- | Parse a case-insensitive character
+charIC :: Char
+       -> ParsecT T.Text AsmStmt Identity Char
+charIC c =
+  let showC x           = [ '\'', x, '\'' ]
+      testC x           = if C.toLower x == c then Just x else Nothing
+      nextPos pos x _xs = updatePosChar pos x
+  in  tokenPrim showC nextPos testC
 
 -- | Generic I/O exception handler. This outputs a message to 'stderr' of the form
 --
 -- @whence: exception@
 genericIOErrors :: T.Text                       -- ^ An indication of where the error ocurred
                 -> IOError                      -- ^ The IO exception
-                -> IO (Either T.Text [EDAS a])  -- ^ Result is always 'invalidVector'
+                -> IO (Either T.Text [AsmStmt]) -- ^ Result is always 'invalidVector'
 genericIOErrors whence exc = return $ Left $ T.concat [ whence
                                                       , ": "
                                                       , ((T.pack . show) exc)
                                                       ]
+
+-- | Evaluate an assembler expression to produce a Word16 result, within the current assembler evaluation context
+evalAsmExprToWord16 :: AsmEvalCtx
+                    -> EDASExpr
+                    -> Word16
+evalAsmExprToWord16 = undefined
+
+evalAsmExprToWord8 :: AsmEvalCtx
+                   -> EDASExpr
+                   -> Word8
+evalAsmExprToWord8 = undefined
