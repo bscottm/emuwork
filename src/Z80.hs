@@ -6,7 +6,6 @@ module Z80
        , module Z80.Disassembler
        , module Z80.DisasmOutput
        , module Z80.ParseAnalytic
-       , module Z80.MisosysEDAS
        , z80processor
        ) where
 
@@ -17,7 +16,6 @@ import Z80.InstructionSet
 import Z80.Disassembler
 import Z80.DisasmOutput
 import Z80.ParseAnalytic
-import Z80.MisosysEDAS
 
 import Z80.InsnDecode
 

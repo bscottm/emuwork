@@ -30,16 +30,19 @@ module Z80.InstructionSet
   , reg16XForm
 
   -- * Other utilities
-  , reg8Names
-  , reg16Names
-  , idxRegNames
+  , reg8NameMap
+  , reg8NameToReg
+  , reg16NameMap
+  , reg16NameToReg
+  , idxRegNameMap
+  , idxRegNameToReg
   , specialRegNames
   ) where
 
 import Control.Lens
 import Data.Typeable
 import Data.Data
-import Data.Map (Map)
+import Data.Map (Map, (!))
 import qualified Data.Map as Map
 import qualified Data.Text as T
 
@@ -159,14 +162,6 @@ data OperLD where
   Reg8Imm            :: Z80reg8
                      -> Z80word
                      -> OperLD
-  HLIndLoad          :: Z80reg8
-                     -> OperLD
-  IXIndLoad          :: Z80reg8
-                     -> Z80disp
-                     -> OperLD
-  IYIndLoad          :: Z80reg8
-                     -> Z80disp
-                     -> OperLD
   -- Load accumulator
   AccBCIndirect      :: OperLD
   AccDEIndirect      :: OperLD
@@ -244,7 +239,7 @@ data Z80condC where
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
--- | Z80 8-bit registers
+-- | Z80 8-bit registers, as operands. This also includes '(HL)' and the indexed+displacement for symmetry.
 data Z80reg8 where
   A          :: Z80reg8                         -- Index 7
   B          :: Z80reg8                         -- Index 0
@@ -299,27 +294,40 @@ data Z80ExchangeOper where
 -- Register names
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-reg8Names :: Map T.Text Z80reg8
-reg8Names = Map.fromList [ ("a", A)
-                         , ("b", B)
-                         , ("c", C)
-                         , ("d", D)
-                         , ("e", E)
-                         , ("h", H)
-                         , ("l", L)
-                         , ("(hl)", HLindirect)
-                         ]
+-- | Utility mapping from lower case register names to 'Z80reg8' data constructors
+reg8NameMap :: Map T.Text Z80reg8
+reg8NameMap = Map.fromList [ ("a", A)
+                           , ("b", B)
+                           , ("c", C)
+                           , ("d", D)
+                           , ("e", E)
+                           , ("h", H)
+                           , ("l", L)
+                           ]
 
-reg16Names :: [T.Text]
-reg16Names = [ "bc"
-             , "de"
-             , "hl"
-             ]
+-- | Convert 8-bit register name to 'Z80reg8' data constructor. This will call 'error' if the lookup fails.
+reg8NameToReg :: T.Text
+              -> Z80reg8
+reg8NameToReg reg = reg8NameMap ! reg
 
-idxRegNames :: [T.Text]
-idxRegNames = [ "ix"
-              , "iy"
-              ]
+reg16NameMap :: Map T.Text Z80reg16
+reg16NameMap = Map.fromList [ ("bc", BC)
+                            , ("de", DE)
+                            , ("hl", HL)
+                            ]
+-- | Convert regular 16-bit register name to 'Z80reg16' data constructor. This will call 'error' if the lookup fails.
+reg16NameToReg :: T.Text
+               -> Z80reg16
+reg16NameToReg reg = reg16NameMap ! reg
+
+idxRegNameMap :: Map T.Text Z80reg16
+idxRegNameMap = Map.fromList [ ("ix", IX)
+                             , ("iy", IY)
+                             ]
+-- | Convert index register name to 'Z80reg16' data constructor. This will call 'error' if the lookup fails.
+idxRegNameToReg :: T.Text
+                -> Z80reg16
+idxRegNameToReg reg = idxRegNameMap ! reg
 
 specialRegNames :: [T.Text]
 specialRegNames = [ "sp", "af", "i", "r" ]

@@ -31,12 +31,13 @@ z80insnDecode pc mem =
                                    -- Deal with "weird" IX/IY bit operation layout
                                    0xcb       -> error "Z80 IX/IY bit instructions not decoded yet."
                                    _otherwise -> decodeF newOpc mem pc' xForms
-      decodeF = case (opc `shiftR` 6) .&. 3 of
-                  0          -> group0decode
-                  1          -> group1decode
-                  2          -> group2decode
-                  3          -> group3decode
-                  _otherwise -> undefined
+      -- N.B. The opcode 'x' is passed through to the decoding function
+      decodeF x = case (x `shiftR` 6) .&. 3 of
+                    0          -> group0decode x
+                    1          -> group1decode x
+                    2          -> group2decode x
+                    3          -> group3decode x
+                    _otherwise -> undefined
   in  case opc of
           0xdd       -> indexedPrefix z80ixTransform
           0xfd       -> indexedPrefix z80iyTransform

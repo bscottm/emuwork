@@ -341,9 +341,6 @@ instance DisOperandFormat Z80addr where
 instance DisOperandFormat OperLD where
   formatOperand (Reg8Reg8 r r')           = T.append (formatOperand r) (T.append ", " (formatOperand r'))
   formatOperand (Reg8Imm r imm)           = T.append (formatOperand r) (T.append ", " (formatOperand imm))
-  formatOperand (HLIndLoad r)             = T.append (formatOperand r) ", (HL)"
-  formatOperand (IXIndLoad r disp)        = T.append (formatOperand r) (T.append ", (IX" (T.append (showDisp disp) ")"))
-  formatOperand (IYIndLoad r disp)        = T.append (formatOperand r) (T.append ", (IY" (T.append (showDisp disp) ")"))
   formatOperand AccBCIndirect             = "A, (BC)"
   formatOperand AccDEIndirect             = "A, (DE)"
   formatOperand (AccImm16Indirect addr)   = T.append "A, " (formatOperand addr)
