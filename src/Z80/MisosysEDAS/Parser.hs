@@ -9,7 +9,7 @@ module Z80.MisosysEDAS.Parser
 -- import Debug.Trace
 
 import Control.Exception hiding (try)
-import Control.Lens hiding (value, walk)
+import Control.Lens hiding (value, walk, op)
 import Control.Monad
 import Text.Parsec
 import Text.Parsec.Pos
@@ -258,7 +258,7 @@ asmOpcode =
                                _otherwise  -> fail "index register displacement"
                             }
 
--- | Parse EDAS pseudo operations, such as "EQU", "DEFS", etc.
+-- | Parse EDAS pseudo operations, such as "EQU", "DEFS", "ORG", etc.
 asmPseudo :: EDASParser AsmOp
 asmPseudo =
   (\pseudoOp -> return $ Pseudo pseudoOp)
@@ -271,7 +271,10 @@ asmPseudo =
                                    ; liftM pseudo asmExpr
                                    }
 
--- | Assembler expression parsing
+-- | Assembler expression parsing. The expression must minimally have a primary expression (constant, variable name or unary
+-- operator [".not.", ".high." or ".low."]) and may be optionally followed by binary operator expressions.
+--
+-- EDAS did not have a concept of operator precedence or parenthesized expressions, which is mimicked here as well.
 asmExpr :: EDASParser EDASExpr
 asmExpr =
   do { leftExpr <- primExpr
@@ -281,37 +284,39 @@ asmExpr =
     -- Primary expressions: constants, variables/symbols/labels, unary operators
     primExpr = constExpr False
                  <|> liftM Var readLabel
-                 <|> do { _ <- stringIC ".not."
-                        ; liftM OnesCpl primExpr
-                        }
-                 <|> do { _ <- stringIC ".high."
-                        ; liftM HighByte primExpr
-                        }
-                 <|> do { _ <- stringIC ".low."
-                        ; liftM LowByte primExpr
-                        }
+                 <|> ( unaryOp "not" OnesCpl
+                       <|> unaryOp "high" HighByte
+                       <|> unaryOp "low" LowByte
+                     )
+
+    unaryOp opName opCtor = try ( do { _ <- between (char '.') (char '.') (stringIC opName)
+                                     ; optional whiteSpace
+                                     ; liftM opCtor primExpr
+                                     }
+                                )
+
     binOps leftExpr = do { optional whiteSpace
                          ; binOp leftExpr '+' Add
                              <|> binOp leftExpr '-' Sub
                              <|> binOp leftExpr '*' Mul
                              <|> binOp leftExpr '/' Div
-                             <|> binOpSI leftExpr ".mod." Mod
                              <|> binOp leftExpr '<' Shift
-                             <|> binOpSI leftExpr ".and." LogAnd
                              <|> binOp leftExpr '&' LogAnd
-                             <|> binOpSI leftExpr ".or." LogOr
                              <|> binOp leftExpr '!' LogOr
-                             <|> binOpSI leftExpr ".xor." LogXor
-                             <|> binOpSI leftExpr ".eq." LogEQ
-                             <|> binOpSI leftExpr ".ge." LogGE
-                             <|> binOpSI leftExpr ".gt." LogGT
-                             <|> binOpSI leftExpr ".le." LogLE
-                             <|> binOpSI leftExpr ".lt." LogLT
-                             <|> binOpSI leftExpr ".shl." ShiftL
-                             <|> binOpSI leftExpr ".shr." ShiftR
+                             <|> try ( binOpSI leftExpr ".and." LogAnd )
+                             <|> try ( binOpSI leftExpr ".or." LogOr )
+                             <|> try ( binOpSI leftExpr ".mod." Mod )
+                             <|> try ( binOpSI leftExpr ".xor." LogXor )
+                             <|> try ( binOpSI leftExpr ".eq." LogEQ )
+                             <|> try ( binOpSI leftExpr ".ge." LogGE )
+                             <|> try ( binOpSI leftExpr ".gt." LogGT )
+                             <|> try ( binOpSI leftExpr ".le." LogLE )
+                             <|> try ( binOpSI leftExpr ".lt." LogLT )
+                             <|> try ( binOpSI leftExpr ".shl." ShiftL )
+                             <|> try ( binOpSI leftExpr ".shr." ShiftR )
                          }
 
-    binOp leftExpr c op = do { _     <- char c
+    binOp leftExpr c op = do { _ <- char c
                              ; optional whiteSpace
                              ; rightExpr <- primExpr
                              ; let term = leftExpr `op` rightExpr
@@ -326,8 +331,8 @@ asmExpr =
                                  }
 
 -- Constant expression: Optional sign, digits and base
-constExpr :: Bool                               -- ^ Sign requred, 'True' when parsing IX, IY displacements
-          -> EDASParser EDASExpr
+constExpr :: Bool                               -- ^ Sign required, 'True' when parsing IX, IY displacements
+          -> EDASParser EDASExpr                -- ^ Result is an 'EDASExpr'
 constExpr signRequired = do { sign <- if signRequired then
                                         signChars
                                       else
