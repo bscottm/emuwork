@@ -32,8 +32,10 @@ doDispatch :: String                            -- ^ The requested emulator's na
 doDispatch emuName emuOpts
   | nullproc <- Machine.nullProcessor, Machine.procIdentify (Machine.processor ^$ nullproc) emuName =
     Machine.cmdDispatch (Machine.processor ^$ nullproc) emuOpts
+{-
   | z80proc  <- Z80.z80processor, Machine.procIdentify z80proc emuName =
     Machine.cmdDispatch z80proc emuOpts
+-}
   | otherwise =
     hPutStrLn stderr ("Unsupported or unknown processor emulator: '" ++ (show emuName) ++ "'")
     >> dumpEmulators
@@ -113,10 +115,10 @@ dumpEmulators = do
     indent = "   "
     indentLen = length indent
 
-    initialString :: (Machine.EmulatedProcessor procInternals) -> String
+    initialString :: (Machine.EmulatedProcessor procInternals addrType instructionSet) -> String
     initialString emu = prefix ++ (emu ^. Machine.procPrettyName) ++ " ("
 
-    prettyEmu :: (Machine.EmulatedProcessor procInternals) -> IO ()
+    prettyEmu :: (Machine.EmulatedProcessor procInternals addrType instructionSet) -> IO ()
     prettyEmu emu = do
       hPutStr stderr (initialString emu)
       prettyEmuNames (emu ^. Machine.procAliases) (length (initialString emu))

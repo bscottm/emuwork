@@ -14,7 +14,7 @@ instance GenericPC NullProcState where
   pcDec pc = pc
   pcDisplace _ pc = pc
 
-nullProcessor :: EmulatedSystem NullProcState NullProcState Word32 Word32
+nullProcessor :: EmulatedSystem NullProcState NullProcState Word32 Word32 NullProcState
 nullProcessor = EmulatedSystem
                 { _processor = EmulatedProcessor
                                { _procPrettyName = "Null (dummy) processor"
@@ -27,8 +27,9 @@ nullProcessor = EmulatedSystem
                                , _mfetchN      = (\_addr _nBytes -> DVU.empty)
                                , _maxmem       = 0 :: Word32
                                }
+                , _idecode   = (\pc _mem -> DecodedInsn pc NullProcState)
                 }
 
 -- | 'EmuCommandLineDispatch' type family instance for the null processor
-instance EmuCommandLineDispatch NullProcState where
+instance EmuCommandLineDispatch NullProcState Word32 NullProcState where
   cmdDispatch _state options = putStrLn $ "Null processor dispatch invoked, args = " ++ (show options)

@@ -1,22 +1,14 @@
+{-# LANGUAGE DeriveDataTypeable #-}
+
 -- | General data structures and type classes for emulated processors.
 module Machine.EmulatedSystem where
 
+import Data.Data
 import Control.Lens
 import Data.Vector.Unboxed (Vector, Unbox)
 import qualified Data.Text as T
 
 import Machine.Utils
-
--- | 'EmulatedProcessor' encapsulates general information about an emulated machine.
-data EmulatedProcessor procInternals =
-  EmulatedProcessor
-  { _procPrettyName :: String                    -- ^ Pretty name for the emulated processor
-  , _procAliases    :: [String]                  -- ^ Other names by which this processor is known
-  , _internals      :: procInternals             -- ^ Processor-specific internal data.
-  }
-
--- Emit Template Haskell hair for the lenses
-makeLenses ''EmulatedProcessor
 
 -- | Generic program counter
 data ProgramCounter addrType where
@@ -38,7 +30,7 @@ instance (Integral addrType) => Num (ProgramCounter addrType) where
 instance Ord (ProgramCounter addrType) where
   compare (PC a) (PC b) = compare a b
 
--- | Provide equality for program counters
+-- | Provide equality comparisons for program counters
 instance Eq (ProgramCounter addrType) where
   (PC a) == (PC b) = a == b
 
@@ -81,6 +73,17 @@ class GenericPC pcThing where
              -> pcThing
              -> pcThing
 
+-- | 'EmulatedProcessor' encapsulates general information about an emulated machine.
+data EmulatedProcessor procInternals addrType instructionSet =
+  EmulatedProcessor
+  { _procPrettyName :: String                   -- ^ Pretty name for the emulated processor
+  , _procAliases    :: [String]                 -- ^ Other names by which this processor is known
+  , _internals      :: procInternals            -- ^ Processor-specific internal data.
+  }
+
+-- Emit Template Haskell hair for the lenses
+makeLenses ''EmulatedProcessor
+
 -- | Memory system interface type.
 --
 -- The record type implementation is much more flexible than using type classes, since it cuts down on
@@ -92,9 +95,12 @@ data (Unbox wordType) => MemorySystem addrType wordType memInternals =
     -- actual implementation depends on the system implemented.
     _memInternals :: memInternals
     -- | Fetch a word from memory.
-  , _mfetch       :: (addrType -> wordType)
+  , _mfetch       :: addrType
+                  -> wordType
     -- | Fetch a block of words from memory.
-  , _mfetchN      :: (addrType -> Int -> Vector wordType)
+  , _mfetchN      :: addrType
+                  -> Int
+                  -> Vector wordType
     -- | Query the highest address in the memory system (for unboxed vectors, this should be a synonym with
     -- 'Data.Vector.Unboxed.length')
   , _maxmem       :: addrType
@@ -102,27 +108,67 @@ data (Unbox wordType) => MemorySystem addrType wordType memInternals =
 
 makeLenses ''MemorySystem
 
+-- | Generic representation of instruction decoder outputs
+data DecodedInsn instructionSet addrType where
+  -- A decoded instruction
+  DecodedInsn :: ProgramCounter addrType
+              -> instructionSet
+              -> DecodedInsn instructionSet addrType
+  -- An address fetched from memory, independent of endian-ness
+  DecodedAddr :: ProgramCounter addrType
+              -> addrType
+              -> DecodedInsn instructionSet addrType
+
+-- | Instruction decoder function signature shorthand
+type InsnDecodeF instructionSet addrType wordType memInternals =
+  (    ProgramCounter addrType                          --  Current program counter
+    -> MemorySystem addrType wordType memInternals      --  Memory system from which words are fetched
+    -> DecodedInsn instructionSet addrType              --  Decoder result
+  )
+
 -- | 'EmulatedSystem' encapsulates the various parts required to emulate a system (processor, memory, ...)
-data EmulatedSystem procInternals memInternals addrType wordType =
+data EmulatedSystem procInternals memInternals addrType wordType instructionSet =
   EmulatedSystem
-  { _processor :: EmulatedProcessor procInternals
+  { _processor :: EmulatedProcessor procInternals addrType instructionSet
+                                                -- ^ System processor
   , _memory    :: MemorySystem addrType wordType memInternals
+                                                -- ^ System memory
+  , _idecode   :: InsnDecodeF instructionSet addrType wordType memInternals
+                                                -- ^ Instruction decoding function. Used to disassemble instructions as well
+                                                -- as execute them.
   }
 
 makeLenses ''EmulatedSystem
 
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+-- | A (symbolic|absolute) address
+data SymAbsAddr addrType where
+  AbsAddr :: addrType
+          -> SymAbsAddr addrType
+  SymAddr :: T.Text
+          -> SymAbsAddr addrType
+  deriving (Typeable, Data)
+
+instance (ShowHex addrType) =>
+         Show (SymAbsAddr addrType) where
+  show (AbsAddr addr)  = as0xHexS addr
+  show (SymAddr label) = show label
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
 -- | Emulator command line interface type class. This separates out the handling from the 'EmulatedProcessor'
 -- processor internals, reducing the amount of polymorphic magic.
-class EmuCommandLineDispatch procInternals where
-  cmdDispatch    :: EmulatedProcessor procInternals
+class EmuCommandLineDispatch procInternals addrType instructionSet where
+  cmdDispatch    :: EmulatedProcessor procInternals addrType instructionSet
                  -> [String]
                  -> IO ()
 
 -- !! FIXME !! this should really identify a system, not a processor.
 -- | Identify this emulated processor by matching the requsted processor name to the processor's name and aliases
-procIdentify :: EmulatedProcessor procInternals         -- ^ The emulated system
-             -> String                                  -- ^ The emulator name
-             -> Bool                                    -- ^ 'True' if matched.
+procIdentify :: EmulatedProcessor procInternals addrType instructionSet         -- ^ The emulated system
+             -> String                                                          -- ^ The emulator name
+             -> Bool                                                            -- ^ 'True' if matched.
 procIdentify theProc name = theProc ^.  procAliases ^& (name `elem`)
 
 -- | Get a program counter's actual (internal) value
