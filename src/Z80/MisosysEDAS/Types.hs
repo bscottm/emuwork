@@ -4,9 +4,11 @@ module Z80.MisosysEDAS.Types where
 import Control.Lens
 import Data.Word
 import Data.Int
+import Text.Parsec.Pos
 import qualified Data.Text as T
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Vector.Unboxed (Vector)
 
 import Z80.Processor
 import Z80.InstructionSet
@@ -30,7 +32,7 @@ data AsmOp where
   deriving (Show)
 
 instance Show (AsmEvalCtx -> Either T.Text Z80instruction) where
-  show _ctxInsn = "<asm eval>"
+  show _ctxInsn = "<asm insn eval>"
 
 -- | EDAS\' pseudo operations
 data EDASPseudo where
@@ -44,7 +46,8 @@ data EDASPseudo where
 data EDASExpr where
   Const    :: Int16             -- 16-bit integer constant
            -> EDASExpr
-  Var      :: T.Text            -- Variable/symbolic label
+  Var      :: SourcePos         -- Variable/symbolic label
+           -> T.Text
            -> EDASExpr
   Add      :: EDASExpr          -- 16-bit addition
            -> EDASExpr
@@ -105,15 +108,12 @@ data EDASExpr where
            -> EDASExpr
   deriving (Show)
 
--- | Assembler symbol values
--- data AsmSymbolVal = AsmSymbolVal (Maybe EDASExpr) (Maybe Int16)
-
--- | Assembler evaluation context, when evaluating expressions. This consists of the current assembler symbol table, i.e.,
--- equates and values encountered so far as well as resolved labels.
+-- | Assembler evaluation context, when evaluating expressions.
 data AsmEvalCtx where
-  AsmEvalCtx :: { _symbolTab :: Map T.Text Word16
-                , _asmPC     :: Z80addr
-                } -> AsmEvalCtx
+  AsmEvalCtx ::
+    { _symbolTab :: Map T.Text Word16
+    , _asmPC     :: Z80addr
+    } -> AsmEvalCtx
 
 makeLenses ''AsmEvalCtx
 
@@ -138,12 +138,15 @@ existsAsmSymbol ctx sym = ctx ^. symbolTab & (Map.member (T.toLower sym))
 
 -- | Data type constructors for EDAS data elements
 data AsmStmt where
-  -- Assembler statement
+  -- Basic parsed assembler statement
   AsmStmt :: { _symLabel :: Maybe EDASLabel
              , _asmOp    :: Maybe AsmOp
              , _comment  :: Maybe Comment
              , _stmtAddr :: Word16                      -- Statement address, i.e., current program counter
+             , _bytes    :: Vector Z80word              -- The bytes corresponding to this statement
              } -> AsmStmt
+  -- TODO: something here for macro definition
+  -- TODO: something here for macro expansion
   deriving (Show)
 
 -- Emit TH lens hair:

@@ -19,6 +19,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Char as C
 import qualified Data.Map as Map
+import qualified Data.Vector.Unboxed as DVU
 
 import Machine.EmulatedSystem
 import Z80.InstructionSet
@@ -62,6 +63,7 @@ mkEmptyAsmStmt = AsmStmt { _symLabel = Nothing
                          , _asmOp    = Nothing
                          , _comment  = Nothing
                          , _stmtAddr = 0
+                         , _bytes    = DVU.empty
                          }
 
 -- Skip over whitespace. NB that the newline is important, so 'spaces' is not used here since it will skip over the
@@ -283,12 +285,15 @@ asmExpr =
   where
     -- Primary expressions: constants, variables/symbols/labels, unary operators
     primExpr = constExpr False
-                 <|> liftM Var readLabel
+                 <|> do { srcpos <- getPosition
+                        ; liftM (Var srcpos) readLabel
+                        }
                  <|> ( unaryOp "not" OnesCpl
                        <|> unaryOp "high" HighByte
                        <|> unaryOp "low" LowByte
                      )
 
+    -- Thankfully, EDAS makes parsing unary operations easy by putting them between '.'s:
     unaryOp opName opCtor = try ( do { _ <- between (char '.') (char '.') (stringIC opName)
                                      ; optional whiteSpace
                                      ; liftM opCtor primExpr

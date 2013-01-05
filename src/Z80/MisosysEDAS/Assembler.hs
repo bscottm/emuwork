@@ -8,7 +8,7 @@ module Z80.MisosysEDAS.Assembler
   , evalAsmExprToWord8
   ) where
 
-import Debug.Trace
+-- import Debug.Trace
 
 import Control.Lens hiding (value, op)
 import Control.Monad
@@ -16,6 +16,7 @@ import Data.Word
 import Data.Int
 import Data.List
 import Data.Bits
+import Text.Parsec.Pos
 import qualified Data.Map as Map
 import qualified Data.Text as T
 
@@ -62,14 +63,14 @@ evalPseudo :: AsmEvalCtx
 evalPseudo ctx stmt pseudo =
     case pseudo of
       Equate expr -> (evalEquate (stmt ^. symLabel) expr ctx, stmt)
-      Origin org  -> undefined
+      Origin org  -> (liftM (\o -> asmPC .~ o $ ctx) (evalAsmExpr ctx org), stmt)
 
 -- | Evaluate a symbol equate
 evalEquate :: Maybe EDASLabel
            -> EDASExpr
            -> AsmEvalCtx
            -> IntermediateCtx
-evalEquate Nothing _ _ = Left "Equate is missing symbol to which to assign result."
+evalEquate Nothing    _    _   = Left "Equate is missing symbol to which to assign result."
 evalEquate (Just sym) expr ctx = liftM (insertAsmSymbol ctx sym) (evalAsmExpr ctx expr)
 
 -- | Evaluate an assembler expression to produce a 'Word16' result, within the current assembler evaluation context
@@ -77,8 +78,12 @@ evalAsmExpr :: AsmEvalCtx
             -> EDASExpr
             -> Either T.Text Word16
 evalAsmExpr _ctx (Const cst)  = Right (fromIntegral cst)
-evalAsmExpr  ctx (Var   v)    = case findAsmSymbol ctx v of
-                                  Nothing -> Left (T.append "Unknown symbol name: " v)
+evalAsmExpr  ctx (Var pos v)  = case findAsmSymbol ctx v of
+                                  Nothing -> Left (T.concat [ mkSourcePosT pos
+                                                            , "Unknown equate or label name: "
+                                                            , v
+                                                            ]
+                                                  )
                                   Just x  -> Right x
 evalAsmExpr ctx  (Add l r)    = evalBinOp ctx (+) l r
 evalAsmExpr ctx  (Sub l r)    = evalBinOp ctx (-) l r
@@ -137,3 +142,13 @@ evalAsmExprToWord8 :: AsmEvalCtx
                    -> EDASExpr
                    -> Either T.Text Z80word
 evalAsmExprToWord8 = undefined
+
+-- | Utility function for outputting the source position
+mkSourcePosT :: SourcePos
+             -> T.Text
+mkSourcePosT srcpos = T.pack $ (sourceName srcpos)
+                                 ++ ", line "
+                                 ++ ((show . sourceLine) srcpos)
+                                 ++ ", col "
+                                 ++ ((show . sourceColumn) srcpos)
+                                 ++ ": "
