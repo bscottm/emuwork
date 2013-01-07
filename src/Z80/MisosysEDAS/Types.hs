@@ -40,14 +40,27 @@ data EDASPseudo where
          -> EDASPseudo
   Origin :: EDASExpr            -- Assembly origin (start) address
          -> EDASPseudo
+  DefB   :: [DBValue]           -- Define bytes
+         -> EDASPseudo
+  deriving (Show)
+
+-- | 'DefB' elements
+data DBValue where
+  DBStr  :: T.Text
+         -> DBValue
+  DBExpr :: EDASExpr
+         -> DBValue
   deriving (Show)
 
 -- | EDAS expression data constructors.
 data EDASExpr where
-  Const    :: Int16             -- 16-bit integer constant
+  Const    :: SourcePos         -- 16-bit integer constant, truncated to 8 bits when needed
+           -> Int16
            -> EDASExpr
   Var      :: SourcePos         -- Variable/symbolic label
            -> T.Text
+           -> EDASExpr
+  AsmChar  :: Char              -- Single character constant (GHC stores as 16 bits, but always truncated to 8 bits)
            -> EDASExpr
   Add      :: EDASExpr          -- 16-bit addition
            -> EDASExpr

@@ -5,8 +5,14 @@ import Prelude hiding (pred)
 import Test.HUnit
 import Data.Maybe
 import Data.Word
+import Data.Bits
+import Data.List
+import Control.Lens
+import qualified Data.Char as C
 import qualified Data.Text as T
+import qualified Data.Vector.Unboxed as DVU
 
+import Z80
 import Z80.MisosysEDAS
 
 main :: IO ()
@@ -15,13 +21,65 @@ main = do { _ <- runTestTT edasTests
           }
 
 edasTests :: Test
-edasTests = test [ "equateAsm"    ~: (checkAssembly equatesAsm)                           ~=? True
-                 , "equateSyms-1" ~: (checkSymbolsWith and equatesAsm goodSyms)           ~=? True
-                 , "equateSyms-2" ~: (checkSymbolsWith or  equatesAsm badSyms)            ~=? False
-                 , "equateVals-1" ~: (checkSymbolValuesWith and equatesAsm expectedVals)  ~=? True
-                 , "primExprAsm"  ~: (checkAssembly primExprAsm)                          ~=? True
-                 , "primExprVals" ~: (checkSymbolValuesWith and primExprAsm primExpected) ~=? True
+edasTests = test [ equateTests
+                 , defbTests
                  ]
+
+defbTests :: Test
+defbTests = test [ "defb"              ~: (checkAssembly defbAsm)                                   ~=? True
+                 , "defbExpected"      ~: (checkByteVectors and defbAsm defbExpected)               ~=? True
+                 , "defbProgCtrs"      ~: (checkProgramCounters and defbAsm defbProgCtrs)           ~=? True
+                 , "edasManDB"         ~: (checkAssembly edasManDBAsm)                              ~=? True
+                 , "edasManDBExpected" ~: (checkByteVectors and edasManDBAsm edasManDBExpected)     ~=? True
+                 , "defbProgCtrs"      ~: (checkProgramCounters and edasManDBAsm edasManDBProgCtrs) ~=? True
+                 ]
+  where
+    defbSource = T.intercalate "\n" [ "                DB       00h"
+                                    , "                defb     0, 1"
+                                    , "                defb     0,1"
+                                    , "                DB       00h, 01h, 'c'"
+                                    , "                DEFB     'Memory size?'"
+                                    , "                db       'Mem ''sz''?'"
+                                    ]
+    defbExpected = [ DVU.singleton 0
+                   , DVU.fromList [0, 1]
+                   , DVU.fromList [0, 1]
+                   , DVU.fromList [0, 1, charToWord8 'c']
+                   , DVU.fromList (textToWord8 "Memory size?")
+                   , DVU.fromList (textToWord8 "Mem \'sz\'?")
+                   ]
+    (_finalPC, defbProgCtrs) = generateExpectedStmtAddresses defbExpected
+
+    -- Parse and assemble the source:
+    defbAsm = edasAssemble $ edasParseSequence "defbSource" defbSource
+
+    -- Test case from the EDAS manual:
+    edasManDBSrc = T.intercalate "\n" [ "               DB    'This',' ','is',' ','a',' ','test'"
+                                      , "               DB    1,2,'buckle your shoe',3,4,'close the door'"
+                                      , "               DB    'This is a tes','t'!80H"
+                                      ]
+    edasManDBExpected = [ DVU.fromList (textToWord8 "This is a test")
+                        , DVU.fromList ( [ 1, 2 ]
+                                         ++ (textToWord8 "buckle your shoe")
+                                         ++ [ 3, 4 ]
+                                         ++ (textToWord8 "close the door")
+                                       )
+                        , DVU.concat [ DVU.fromList (textToWord8 "This is a tes")
+                                     , DVU.singleton (((fromIntegral . C.ord) 't') .|. 0x80)
+                                     ]
+                        ]
+    (_finalPC2, edasManDBProgCtrs) = generateExpectedStmtAddresses edasManDBExpected
+
+    edasManDBAsm = edasAssemble $ edasParseSequence "edasManDB" edasManDBSrc
+
+equateTests :: Test
+equateTests = test [ "equateAsm"    ~: (checkAssembly equatesAsm)                           ~=? True
+                   , "equateSyms-1" ~: (checkSymbolsWith and equatesAsm goodSyms)           ~=? True
+                   , "equateSyms-2" ~: (checkSymbolsWith or  equatesAsm badSyms)            ~=? False
+                   , "equateVals-1" ~: (checkSymbolValuesWith and equatesAsm expectedVals)  ~=? True
+                   , "primExprAsm"  ~: (checkAssembly primExprAsm)                          ~=? True
+                   , "primExprVals" ~: (checkSymbolValuesWith and primExprAsm primExpected) ~=? True
+                   ]
   where
     symEquates = T.intercalate "\n" [ "CON30   EQU   30"
                                     , "CON16   EQU   +10H"
@@ -48,13 +106,13 @@ edasTests = test [ "equateAsm"    ~: (checkAssembly equatesAsm)                 
                ]
 
     -- Symbols that will not be present in the final symbol table
-    badSyms  = [ "Cno30", "foobar", "frobnats"
+    badSyms      = [ "Cno30", "foobar", "frobnats"
                , "a5", "A5"
                , "con", "noc"
                ]
 
     -- Primary expression testing
-    primExpr = T.intercalate "\n" [ "C1      EQU   .not. 30"
+    primExpr     = T.intercalate "\n" [ "C1      EQU   .not. 30"
                                   , "C2      EQU   .high. c1"
                                   , "C3      EQU   .low.c1"
                                   , "C4      EQU   .low. c1"
@@ -78,7 +136,7 @@ edasTests = test [ "equateAsm"    ~: (checkAssembly equatesAsm)                 
     -- Assembler output for primary expressions
     primExprAsm = edasAssemble $ edasParseSequence "primExpr" primExpr
 
--- Check to see if the code assembled correctly
+-- | Check to see if the code assembled correctly.
 checkAssembly :: EDASAsmOutput                   -- ^ The assembler's output
               -> Bool
 checkAssembly asm =
@@ -86,7 +144,7 @@ checkAssembly asm =
   Left problems -> error (T.unpack problems)
   Right _       -> True
 
--- Check the symbols in the final symbol table, according to a predicate, e.g., 'and' ensures that all symbols are present.
+-- | Check the symbols in the final symbol table, according to a predicate, e.g., 'and' ensures that all symbols are present.
 checkSymbolsWith :: ([Bool] -> Bool)                    -- ^ Predicate function
                  -> EDASAsmOutput                       -- ^ Assembler output
                  -> [T.Text]                            -- ^ Symbol names
@@ -96,7 +154,7 @@ checkSymbolsWith pred asm syms =
     Left problems             -> error (T.unpack problems)
     Right (finalctx, _result) -> pred $ map (existsAsmSymbol finalctx) syms
 
--- Check symbol values with a predicate, e.g., 'and' ensures that all values are correct.
+-- | Check symbol values with a predicate, e.g., 'and' ensures that all values are correct.
 checkSymbolValuesWith :: ([Bool] -> Bool)               -- ^ Predicate function
                       -> EDASAsmOutput                  -- ^ Assembler output
                       -> [(T.Text, Word16)]             -- ^ (symbol name, expected value) list
@@ -105,3 +163,43 @@ checkSymbolValuesWith pred asm syms =
   case asm of
     Left problems             -> error (T.unpack problems)
     Right (finalctx, _result) -> pred $ [ fromMaybe 0 (findAsmSymbol finalctx x) == y | (x, y) <- syms ]
+
+-- | Check the byte vectors with a predicate
+checkByteVectors :: ([Bool] -> Bool)
+                 -> EDASAsmOutput
+                 -> [(DVU.Vector Word8)]
+                 -> Bool
+checkByteVectors pred asm expected =
+  case asm of
+    Left problems            -> error (T.unpack problems)
+    Right (_finalctx, stmts) -> pred $ zipWith (==) (map (\x -> x ^. bytes & DVU.toList) stmts) (map DVU.toList expected)
+
+-- | Check the expected program counter with a predicate
+checkProgramCounters :: ([Bool] -> Bool)
+                     -> EDASAsmOutput
+                     -> [Z80addr]
+                     -> Bool
+checkProgramCounters pred asm expected =
+  case asm of
+    Left problems            -> error (T.unpack problems)
+    Right (_finalctx, stmts) -> pred $ zipWith (==) (map (\x -> x ^. stmtAddr) stmts) expected
+
+-- | Convert a character to 'Word8'
+charToWord8 :: Char
+            -> Word8
+charToWord8 = fromIntegral . C.ord
+
+-- Convert 'String' to a list of 'Word8's
+stringToWord8 :: String
+              -> [Word8]
+stringToWord8 = map charToWord8
+
+-- Convert 'Text' to a list of 'Word8's
+textToWord8 :: T.Text
+            -> [Word8]
+textToWord8 = (map charToWord8) . T.unpack
+
+-- | Generate statement addresses from the expected byte vector output
+generateExpectedStmtAddresses :: (DVU.Unbox wordType) => [DVU.Vector wordType]
+                              -> (Z80addr, [Z80addr])
+generateExpectedStmtAddresses = mapAccumL (\pc elt -> (pc + (fromIntegral . DVU.length) elt, pc)) (0 :: Z80addr)

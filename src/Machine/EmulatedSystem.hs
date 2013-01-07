@@ -88,7 +88,7 @@ makeLenses ''EmulatedProcessor
 --
 -- The record type implementation is much more flexible than using type classes, since it cuts down on
 -- the amount of type context/constraint that has to be provided.
-data (Unbox wordType) => MemorySystem addrType wordType memInternals =
+data MemorySystem addrType wordType memInternals =
   MemorySystem
   { -- | The internal implementation of the memory system. For simple processors, like the Z80, this can be just
     -- a vector of bytes. More sophisticated processors can have more complicated implementations, obviously. The

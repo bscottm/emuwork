@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 -- | Misosys EDAS assembler parser. There are two basic interfaces: 'edasParseOneLine' and 'edasParseSequence'. 'edasParseOneLine'
 -- is intended to be used as a combinator, e.g., with parsing the analytic disassembly output.
 module Z80.MisosysEDAS.Parser
@@ -9,10 +11,17 @@ module Z80.MisosysEDAS.Parser
 -- import Debug.Trace
 
 import Control.Exception hiding (try)
+
+#ifdef mingw32_HOST_OS
 import Control.Lens hiding (value, walk, op)
+#else
+import Control.Lens hiding (value, walk)
+#endif
+
 import Control.Monad
 import Text.Parsec
 import Text.Parsec.Pos
+import Text.Parsec.Text()                 -- ghci 7.6.1 needs these imported instances, e.g., (Stream T.Text Identity Char)
 import Data.Text.Read
 import Data.Functor.Identity
 import qualified Data.Text as T
@@ -159,7 +168,7 @@ asmOpcode =
            <|> do { _ <- stringIC "st"
                   ; optional whiteSpace
                   ; rstVecConst <- asmExpr
-                  ; returnInsn (\ctx -> case evalAsmExprToWord8 ctx rstVecConst of
+                  ; returnInsn (\ctx -> case evalAsmExprWord8 ctx rstVecConst of
                                           Left stuff   -> Left stuff
                                           Right rstVec ->
                                             if rstVec `elem` [ 0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38 ] then
@@ -189,7 +198,7 @@ asmOpcode =
     -- Simple case for 8-bit constants. This assumes that the 8-bit value is curried into the last argument of the 'insn'
     -- data constructor
     const8Eval insn expr ctx =
-      case evalAsmExprToWord8 ctx expr of
+      case evalAsmExprWord8 ctx expr of
         Left stuff     -> Left stuff
         Right value    -> Right $ insn value
 
@@ -251,27 +260,80 @@ asmOpcode =
                                     }
                             )
     -- Parse an indexed displacement
-    parseDisplacement = do { c <- constExpr True
+    parseDisplacement = do { srcpos <- getPosition
+                           ; c <- constExpr True srcpos
                            ; case c of
-                               Const disp -> if disp >= -128 && disp <= 127 then
-                                               return disp
-                                             else
-                                               fail "index displacement out of bounds"
+                               Const _srcloc disp -> if disp >= -128 && disp <= 127 then
+                                                       return disp
+                                                     else
+                                                       fail "index displacement out of bounds"
                                _otherwise  -> fail "index register displacement"
                             }
 
 -- | Parse EDAS pseudo operations, such as "EQU", "DEFS", "ORG", etc.
 asmPseudo :: EDASParser AsmOp
 asmPseudo =
-  (\pseudoOp -> return $ Pseudo pseudoOp)
-  =<< ( pseudoWithExpr "equ" Equate
-        <|> pseudoWithExpr "org" Origin
-      )
+  liftM Pseudo $ ( charIC 'd'
+                   >> ( do { _ <- charIC 'b'                -- db
+                           ; parseDefB
+                       
+                           }
+                        <|> do { _ <- stringIC "ef"         -- def[bmw]
+                               ; do { _ <- charIC 'b'
+                                    ; parseDefB
+                                    }
+                                 <|> do { _ <- charIC 'm'
+                                        ; parseDefB
+                                        }    }
+                        <|> do { _ <- charIC 'm'            -- dm (same as 'db')
+                               ; parseDefB
+                               }
+                      )
+                 ) <|> pseudoWithExpr "equ" Equate
+                   <|> pseudoWithExpr "org" Origin
   where
     pseudoWithExpr str pseudo = do { _ <- stringIC str
                                    ; whiteSpace
                                    ; liftM pseudo asmExpr
                                    }
+
+    parseDefB = whiteSpace
+                >> ( liftM DefB $ sepBy1 defBArgs ( do { _ <- char ','
+                                                     ; optional whiteSpace
+                                                     }
+                                                )
+                   )
+
+    -- According to the EDAS manual, strings in DEFB/DB lists are 'c' (single quoted characters) or a sequence
+    -- of two or more characters that can include a double-single quote ("''") interpreted as, well, a single
+    -- quote in the middle of a string.
+    defBArgs = try ( liftM DBExpr asmExpr ) -- Might read 'AsmChar', which could consume a single quote
+               <|> liftM (DBStr . T.pack) ( do { _     <- char '\''
+                                               ; c1 <- asciiExceptSQuote
+                                               ; c2 <- asciiExceptSQuote
+                                               ; s1 <- many ( try ( do { _ <- char ('\'')
+                                                                       ; _ <- char ('\'')
+                                                                       ; return $ '\''
+                                                                       }
+                                                                  )
+                                                              <|> asciiExceptSQuote
+                                                            )
+                                               ; _ <- char '\''
+                                               ; return (c1:c2:s1)
+                                               }
+                                          )
+
+    -- | Parse any printable ASCII character, except for a single quote.
+    asciiExceptSQuote :: EDASParser Char
+    asciiExceptSQuote =
+      let showC x           = [ '\'', x, '\'' ]
+          testC x           = let x' = C.ord x
+                              in  if x' /= 0x27 && (x' >= 0x20 && x' <= 0x7e) then 
+                                    Just x
+                                  else
+                                    Nothing
+          nextPos pos x _xs = updatePosChar pos x
+      in  tokenPrim showC nextPos testC
 
 -- | Assembler expression parsing. The expression must minimally have a primary expression (constant, variable name or unary
 -- operator [".not.", ".high." or ".low."]) and may be optionally followed by binary operator expressions.
@@ -284,14 +346,21 @@ asmExpr =
      }
   where
     -- Primary expressions: constants, variables/symbols/labels, unary operators
-    primExpr = constExpr False
-                 <|> do { srcpos <- getPosition
-                        ; liftM (Var srcpos) readLabel
-                        }
-                 <|> ( unaryOp "not" OnesCpl
-                       <|> unaryOp "high" HighByte
-                       <|> unaryOp "low" LowByte
-                     )
+    primExpr = getPosition
+               >>= (\srcpos -> constExpr False srcpos
+                               <|> do { srcpos <- getPosition
+                                      ; liftM (Var srcpos) readLabel
+                                      }
+                               <|> ( unaryOp "not" OnesCpl
+                                     <|> unaryOp "high" HighByte
+                                     <|> unaryOp "low" LowByte
+                                   )
+                               <|> do { _ <- char '\''
+                                      ; c <- asciiChar
+                                      ; _ <- char '\''
+                                      ; return (AsmChar c)
+                                      }
+                   )
 
     -- Thankfully, EDAS makes parsing unary operations easy by putting them between '.'s:
     unaryOp opName opCtor = try ( do { _ <- between (char '.') (char '.') (stringIC opName)
@@ -335,23 +404,35 @@ asmExpr =
                                  ; option term (binOps term)
                                  }
 
+    asciiChar =
+      let showC x           = [ '\'', x, '\'' ]
+          testC x           = let x' = C.ord x
+                              in  if x' >= 0x20 && x' <= 0x7e then 
+                                    Just x
+                                  else
+                                    Nothing
+          nextPos pos x _xs = updatePosChar pos x
+      in  tokenPrim showC nextPos testC
+
 -- Constant expression: Optional sign, digits and base
 constExpr :: Bool                               -- ^ Sign required, 'True' when parsing IX, IY displacements
+          -> SourcePos
           -> EDASParser EDASExpr                -- ^ Result is an 'EDASExpr'
-constExpr signRequired = do { sign <- if signRequired then
-                                        signChars
-                                      else
-                                        option '+' signChars
-                            ; x    <- digit
-                            ; y    <- many hexDigit
-                            ; base <- option 'd' (charIC 'd' <|> charIC 'h' <|> charIC 'q' <|> charIC 'o' <|> charIC 'b')
-                            ; let base' = C.toLower base
-                            ; let theConst = x : y
-                            ; if validConst base' theConst then
-                                convertConst base' (T.pack (sign : theConst))
-                              else
-                                fail "Invalid constant"
-                            }
+constExpr signRequired srcpos =
+  do { sign <- if signRequired then
+                 signChars
+               else
+                 option '+' signChars
+     ; x    <- digit
+     ; y    <- many hexDigit
+     ; base <- option 'd' (charIC 'd' <|> charIC 'h' <|> charIC 'q' <|> charIC 'o' <|> charIC 'b')
+     ; let base' = C.toLower base
+     ; let theConst = x : y
+     ; if validConst base' theConst then
+         convertConst base' (T.pack (sign : theConst))
+       else
+         fail "Invalid constant"
+     }
   where
     signChars             = char '+' <|> char '-'
     validConst 'd' x      = and . (map C.isDigit) $ x
@@ -385,7 +466,7 @@ constExpr signRequired = do { sign <- if signRequired then
     
     convertConst' cvtFunc x = case signed cvtFunc x of
                                 Left errMsg        -> fail errMsg
-                                Right (val, "")    -> return $ Const val
+                                Right (val, "")    -> return $ Const srcpos val
                                 Right (_val, xtra) -> fail $ T.unpack ( T.concat [ "Extra characters following constant, '"
                                                                                  , xtra
                                                                                  , "'"
