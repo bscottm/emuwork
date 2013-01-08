@@ -30,6 +30,7 @@ import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Vector.Unboxed as DVU
 
+import Machine.Utils
 import Z80.Processor
 import Z80.MisosysEDAS.Types
 
@@ -72,9 +73,10 @@ evalPseudo :: AsmEvalCtx
            -> (IntermediateCtx, AsmStmt)
 evalPseudo ctx stmt pseudo =
     case pseudo of
-      Equate expr -> (evalEquate (stmt ^. symLabel) expr ctx, stmt)
-      Origin org  -> (liftM (\o -> asmPC .~ o $ ctx) (evalAsmExpr ctx org), stmt)
-      DefB args   -> evalDefB args ctx stmt
+      Equate expr    -> (evalEquate (stmt ^. symLabel) expr ctx, stmt)
+      Origin org     -> (liftM (\o -> asmPC .~ o $ ctx) (evalAsmExpr ctx org), stmt)
+      DefB args      -> evalDefB args ctx stmt
+      DefC rept fill -> evalDefC rept fill ctx stmt
 
 -- | Evaluate a symbol equate
 evalEquate :: Maybe EDASLabel
@@ -103,6 +105,25 @@ evalDefB args ctx stmt =
               ( Right $ (asmPC %~ (+ (fromIntegral . DVU.length) theBytes)) $ ctx
               , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
               )
+
+-- | Define constant fill/block
+evalDefC :: EDASExpr
+         -> EDASExpr
+         -> AsmEvalCtx
+         -> AsmStmt
+         -> (IntermediateCtx, AsmStmt)
+evalDefC rept fill ctx stmt =
+  let reptVal = evalAsmExpr ctx rept
+      fillVal = evalAsmExprWord8 ctx fill
+      currentPC = ctx ^. asmPC
+  in  case reptVal of
+        Left reptErr -> (Left reptErr, stmt)
+        Right rval   -> case fillVal of
+                          Left fillErr -> (Left fillErr, stmt)
+                          Right fval   -> let theBytes = DVU.replicate (fromIntegral rval) fval
+                                          in  ( Right $ (asmPC %~ (+ (fromIntegral . DVU.length) theBytes) $ ctx)
+                                              , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
+                                              )
 
 -- | Evaluate an assembler expression to produce a 'Word16' result, within the current assembler evaluation context
 evalAsmExpr :: AsmEvalCtx
@@ -171,16 +192,29 @@ evalCompare ctx op l r = liftM2 compareResult (evalAsmExpr ctx l) (evalAsmExpr c
 
 -- | Evaluate an assembler expression to produce a 'Word8' result, within the current assembler evaluation context
 evalAsmExprWord8 :: AsmEvalCtx
-                   -> EDASExpr
-                   -> Either T.Text Z80word
-evalAsmExprWord8 ctx expr = liftM (\x -> fromIntegral (x .&. 0xff)) (evalAsmExpr ctx expr)
+                 -> EDASExpr
+                 -> Either T.Text Z80word
+evalAsmExprWord8 ctx expr = rangeCheck (evalAsmExpr ctx expr)
+  where
+    rangeCheck (Left  x) = Left x
+    rangeCheck (Right x) = if (x .&. 0xff00 == 0xff00) || (x <= 0xff) then
+                             Right $ fromIntegral (x .&. 0xff)
+                           else
+                             Left (T.concat [ "value out of range for 8-bit value: "
+                                            , (T.pack . show) x
+                                            , "("
+                                            , (as0xHex x)
+                                            , ")"
+                                            ]
+                                  )
 
 -- | Utility function for outputting the source position
 mkSourcePosT :: SourcePos
              -> T.Text
-mkSourcePosT srcpos = T.pack $ (sourceName srcpos)
-                                 ++ ", line "
-                                 ++ ((show . sourceLine) srcpos)
-                                 ++ ", col "
-                                 ++ ((show . sourceColumn) srcpos)
-                                 ++ ": "
+mkSourcePosT srcpos = T.concat [ (T.pack . sourceName) srcpos
+                               , ", line "
+                               , (T.pack . show . sourceLine) srcpos
+                               , ", col "
+                               , (T.pack . show . sourceColumn) srcpos
+                               , ": "
+                               ]

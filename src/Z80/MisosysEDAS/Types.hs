@@ -42,6 +42,9 @@ data EDASPseudo where
          -> EDASPseudo
   DefB   :: [DBValue]           -- Define bytes
          -> EDASPseudo
+  DefC   :: EDASExpr            -- Define constant byte fill (repeat, const)
+         -> EDASExpr
+         -> EDASPseudo
   deriving (Show)
 
 -- | 'DefB' elements

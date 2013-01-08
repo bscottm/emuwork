@@ -278,6 +278,15 @@ asmPseudo =
                            ; parseDefB
                        
                            }
+                        <|> do { _ <- charIC 'c'               -- dc (define replicated byte constant)
+                               ; optional whiteSpace
+                               ; rept <- asmExpr
+                               ; optional whiteSpace
+                               ; _ <- char ','
+                               ; optional whiteSpace
+                               ; fill <- asmExpr
+                               ; return $ DefC rept fill
+                               }
                         <|> do { _ <- stringIC "ef"         -- def[bmw]
                                ; do { _ <- charIC 'b'
                                     ; parseDefB
@@ -348,8 +357,8 @@ asmExpr =
     -- Primary expressions: constants, variables/symbols/labels, unary operators
     primExpr = getPosition
                >>= (\srcpos -> constExpr False srcpos
-                               <|> do { srcpos <- getPosition
-                                      ; liftM (Var srcpos) readLabel
+                               <|> do { labSrcPos <- getPosition
+                                      ; liftM (Var labSrcPos) readLabel
                                       }
                                <|> ( unaryOp "not" OnesCpl
                                      <|> unaryOp "high" HighByte
