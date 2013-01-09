@@ -25,6 +25,7 @@ edasTests = test [ equateTests
                  , defbTests
                  , defcTests
                  , defsTests
+                 , defwTests
                  ]
 
 defbTests :: Test
@@ -119,6 +120,36 @@ defsTests = test [ "defs"              ~: (checkAssembly defsAsm)               
 
     -- Parse and assemble the source:
     defsAsm = edasAssemble $ edasParseSequence "defsSource" defsSource
+
+defwTests :: Test
+defwTests = test [ "defw"              ~: (checkAssembly defwAsm)                                   ~=? True
+                 , "defwExpected"      ~: (checkByteVectors and defwAsm defwExpected)               ~=? True
+                 , "defwProgCtrs"      ~: (checkProgramCounters and defwAsm defwProgCtrs)           ~=? True
+                 ]
+  where
+    defwSource = T.intercalate "\n" [ "                Dw       'R', 'o','y'"
+                                    , "                dW       'ab'"
+                                    , "                DW       10000,1000,100,10,1"
+                                    ]
+
+    defwExpected = [ DVU.fromList [ charToWord8 'R', 0, charToWord8 'o', 0, charToWord8 'y', 0 ]
+                   , DVU.fromList [ charToWord8 'a', charToWord8 'b' ]
+                   , DVU.fromList [ low 10000, high 10000
+                                  , low 1000,  high 1000
+                                  , low 100,   high 100
+                                  , low 10,    high 10
+                                  , low 1,     high 1
+                                  ]
+                   ] :: [(DVU.Vector Z80word)]
+
+    high, low :: Word16 -> Word8
+    high x = fromIntegral (x `shiftR` 8)
+    low  x = fromIntegral (x .&. 0xff)
+
+    (_finalPC, defwProgCtrs) = generateExpectedStmtAddresses defwExpected
+
+    -- Parse and assemble the source:
+    defwAsm = edasAssemble $ edasParseSequence "defwSource" defwSource
 
 equateTests :: Test
 equateTests = test [ "equateAsm"    ~: (checkAssembly equatesAsm)                           ~=? True

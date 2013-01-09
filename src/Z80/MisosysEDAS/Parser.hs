@@ -335,7 +335,17 @@ asmPseudo =
                 >>= (\rept -> return $ DefS rept)
 
     -- DW/DEFW parser
-    parseDefW = undefined
+    parseDefW = whiteSpace
+                >> ( liftM DefW $ sepBy1 defWArgs ( char ',' >> optional whiteSpace ) )
+
+    defWArgs = try ( liftM DWExpr asmExpr ) -- Might read 'AsmChar', which could consume a single quote
+               <|> ( char '\''
+                     >> asciiChar
+                     >>= (\c1 -> asciiChar
+                                 >>= (\c2 -> char '\'' >> (return $ DWChars c1 c2))
+                         )
+                   )
+
 
 -- | Assembler expression parsing. The expression must minimally have a primary expression (constant, variable name or unary
 -- operator [".not.", ".high." or ".low."]) and may be optionally followed by binary operator expressions.
@@ -513,6 +523,7 @@ charIC c =
   in  tokenPrim showC nextPos testC
 
 -- | Parse any ASCII character
+asciiChar :: EDASParser Char
 asciiChar =
   let showC x           = [ '\'', x, '\'' ]
       testC x           = let x' = C.ord x

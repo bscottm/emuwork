@@ -14,6 +14,7 @@ library
   hs-source-dirs:       src
   build-depends:      
                         base >= 4,
+                        time,
                         primitive,
                         filepath,
                         directory,
