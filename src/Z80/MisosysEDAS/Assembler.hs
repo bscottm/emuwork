@@ -25,6 +25,8 @@ import Data.Int
 import Data.List
 import Data.Bits
 import Data.Time
+import System.Locale
+import Data.Time.Format
 import Text.Parsec.Pos
 import qualified Data.Char as C
 import qualified Data.Map as Map
@@ -39,23 +41,29 @@ import Z80.MisosysEDAS.Types
 type IntermediateCtx = Either T.Text AsmEvalCtx
 
 -- | Shorthand for the assembler's final result
-type EDASAsmOutput = Either T.Text (AsmEvalCtx, [AsmStmt])
+type EDASAsmOutput = IO (Either T.Text (AsmEvalCtx, [AsmStmt]))
 
 -- | The assembler pass: Evaluate the pseudo-operations and expressions within instructions, update the assembler
 -- statement with the results and 'Z80instruction's.
+--
+-- N.B.: The result is embedded in the 'IO' monad due to the need to call 'Data.Time.getCurrentTime', which returns
+-- 'IO' 'UTCTime'. Yuck.
 edasAssemble :: Either T.Text [AsmStmt]                 -- ^ Parser result
              -> EDASAsmOutput                           -- ^ Assembler result
 edasAssemble parseResult =
   case parseResult of
-    Left stuff   -> Left stuff
-    Right  stmts -> let initialCtx = Right $ AsmEvalCtx { _symbolTab = Map.empty
-                                                        , _asmPC     = 0
-                                                        , _dateTime  = getCurrentTime
-                                                        }
-                        (finalctx, result) = mapAccumL evalAsmStmt initialCtx stmts
-                    in  case finalctx of
-                          Left stuff   -> Left stuff
-                          Right  ctx   -> Right (ctx, result)
+    Left stuff   -> return $ Left stuff
+    Right  stmts -> getZonedTime
+                    >>= (\currentTime ->
+                          let initialCtx = Right $ AsmEvalCtx { _symbolTab = Map.empty
+                                                              , _asmPC     = 0
+                                                              , _dateTime  = currentTime
+                                                              }
+                              (finalctx, result) = mapAccumL evalAsmStmt initialCtx stmts
+                          in  return $ case finalctx of
+                                         Left stuff   -> Left stuff
+                                         Right  ctx   -> Right (ctx, result)
+                        )
 
 -- | Evaluate a single assembler statement
 evalAsmStmt :: IntermediateCtx
@@ -83,12 +91,18 @@ evalPseudo ctx stmt pseudo =
       DefC rept fill -> evalDefC rept fill ctx stmt
       DefS rept      -> evalDefS rept ctx stmt
       DefW args      -> let cvtDWValue (DWChars c1 c2) = Right $ [(charIntegral c1), (charIntegral c2)]
-                            cvtDWValue (DWExpr expr)   = liftM word2Bytes (evalAsmExpr ctx expr)
-                            -- Little endian word order
-                            word2Bytes w               = [(fromIntegral (w .&. 0xff)), (fromIntegral (w `shiftR` 8))]
+                            cvtDWValue (DWExpr expr)   = liftM word2ByteList (evalAsmExpr ctx expr)
                         in  evalDefXXArgs args cvtDWValue ctx stmt
-      AsmDate        -> undefined
-      AsmTime        -> undefined
+      DSym sym       -> emitText sym ctx stmt
+      DExp expr      -> case liftM word2ByteList (evalAsmExpr ctx expr) of
+                          Left issues -> (Left issues, stmt)
+                          Right words -> let currentPC = ctx ^. asmPC
+                                             theBytes  = DVU.fromList words
+                                         in ( Right $ asmPC %~ (+ (fromIntegral . DVU.length) theBytes) $ ctx
+                                            , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
+                                            )
+      AsmDate        -> emitString (ctx ^. dateTime & formatTime defaultTimeLocale "%D") ctx stmt
+      AsmTime        -> emitString (ctx ^. dateTime & formatTime defaultTimeLocale "%T") ctx stmt
 
 -- | Evaluate a symbol equate
 evalEquate :: Maybe EDASLabel
@@ -150,6 +164,29 @@ evalDefS rept ctx stmt =
                         in  ( Right $ (asmPC %~ (+ (fromIntegral . DVU.length) theBytes) $ ctx)
                             , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
                             )
+
+-- | Convert a string to bytes, update statement and intermediate assembler context.
+emitString :: String
+           -> AsmEvalCtx
+           -> AsmStmt
+           -> (IntermediateCtx, AsmStmt)
+emitString str ctx stmt = let theBytes  = DVU.fromList (stringToWords str)
+                              currentPC = ctx ^. asmPC
+                          in  ( Right $ (asmPC %~ (+ (fromIntegral . DVU.length) theBytes)) $ ctx
+                              , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
+                              )
+
+-- | Emit 'Data.Text' string as a sequence of bytes
+emitText :: T.Text
+         -> AsmEvalCtx
+         -> AsmStmt
+         -> (IntermediateCtx, AsmStmt)
+emitText = emitString . T.unpack
+
+-- | Convert word to list of bytes in little endian order 
+word2ByteList :: Word16
+              -> [Z80word]
+word2ByteList w = [(fromIntegral (w .&. 0xff)), (fromIntegral (w `shiftR` 8))]
 
 -- | Evaluate an assembler expression to produce a 'Word16' result, within the current assembler evaluation context
 evalAsmExpr :: AsmEvalCtx
@@ -249,3 +286,9 @@ mkSourcePosT srcpos = T.concat [ (T.pack . sourceName) srcpos
 charIntegral :: (Integral wordType) => Char
           -> wordType
 charIntegral = fromIntegral . C.ord
+
+-- | Convert a 'String' to a list of integral words ('Word16' or 'Word8', generally)
+stringToWords :: (Integral wordType) =>
+                 String
+              -> [wordType]
+stringToWords = map charIntegral

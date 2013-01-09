@@ -50,6 +50,10 @@ data EDASPseudo where
           -> EDASPseudo
   DefW    :: [DWValue]          -- Define little endian words
           -> EDASPseudo
+  DSym    :: T.Text             -- Emit the symbol as a byte string
+          -> EDASPseudo
+  DExp    :: EDASExpr           -- Emit the 16-bit value of the expression
+          -> EDASPseudo
   AsmDate :: EDASPseudo         -- Emit the current date as "MM/DD/YY" byte sequence
   AsmTime :: EDASPseudo         -- Emit the current time as "HH:MM:SS" byte sequence
   deriving (Show)
@@ -145,7 +149,7 @@ data AsmEvalCtx where
   AsmEvalCtx ::
     { _symbolTab :: Map T.Text Word16
     , _asmPC     :: Z80addr
-    , _dateTime  :: IO UTCTime
+    , _dateTime  :: ZonedTime
     } -> AsmEvalCtx
 
 makeLenses ''AsmEvalCtx

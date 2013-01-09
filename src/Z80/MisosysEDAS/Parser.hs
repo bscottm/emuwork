@@ -275,8 +275,9 @@ asmOpcode =
 asmPseudo :: EDASParser AsmOp
 asmPseudo =
   liftM Pseudo $ ( charIC 'd'
-                   >> ( ( charIC 'b' >> parseDefB )           -- db
-                        <|> ( charIC 'c'                      -- dc (define replicated byte constant)
+                   >> ( ( stringIC "ate" >> return AsmDate )    -- date
+                        <|> ( charIC 'b' >> parseDefB )         -- db
+                        <|> ( charIC 'c'                        -- dc (define replicated byte constant)
                               >> whiteSpace
                               >> asmExpr
                               >>= (\rept -> optional whiteSpace
@@ -286,19 +287,31 @@ asmPseudo =
                                             >>= (\fill -> return $ DefC rept fill)
                                   )
                             )
-                        <|> ( stringIC "ef"                   -- def[bmw]
+                        <|> ( stringIC "ef"                     -- def[bmws]
                               >> ( ( charIC 'b' >> parseDefB )
                                    <|> ( charIC 'm' >> parseDefB )
-                                   <|> ( charIC 's' >> parseDefS )
+                                   <|> ( charIC 's' >> whiteSpace >> parseDefS )
                                    <|> ( charIC 'w' >> parseDefW )
                                  )
                             )
-                        <|> ( charIC 'm' >> parseDefB )       -- dm (same as 'db')
-                        <|> ( charIC 's' >> parseDefS )       -- ds (define space, same as 'dc', but the constant is 0)
-                        <|> ( charIC 'w' >> parseDefW )       -- dw (define words)
+                        <|> ( charIC 'm' >> parseDefB )         -- dm (same as 'db')
+                        <|> ( charIC 's'
+                              >> ( ( whiteSpace >> parseDefS )  -- ds (define space, same as 'dc', but the constant is 0)
+                                    <|> ( stringIC "ym"         -- dsym (dump symbol, emits symbol's name as byte sequence)
+                                          >> whiteSpace
+                                          >> liftM DSym readLabel
+                                        )
+                                 )
+                            )
+                        <|> ( charIC 'w' >> parseDefW )         -- dw (define words)
+                        <|> ( charIC 'x'                        -- dx (define expression: emit 16-bit expression value)
+                              >> whiteSpace
+                              >> liftM DExp asmExpr
+                            )
                       )
                  ) <|> pseudoWithExpr "equ" Equate
                    <|> pseudoWithExpr "org" Origin
+                   <|> ( stringIC "time" >> return AsmTime )
   where
     pseudoWithExpr str pseudo = stringIC str
                                 >> whiteSpace
@@ -330,9 +343,7 @@ asmPseudo =
                                           )
 
     -- DS/DEFS parser
-    parseDefS = whiteSpace
-                >> asmExpr
-                >>= (\rept -> return $ DefS rept)
+    parseDefS = liftM DefS asmExpr
 
     -- DW/DEFW parser
     parseDefW = whiteSpace
