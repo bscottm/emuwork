@@ -4,6 +4,7 @@ module Z80.MisosysEDAS.Types where
 import Control.Lens
 import Data.Word
 import Data.Int
+import Data.Time
 import Text.Parsec.Pos
 import qualified Data.Text as T
 import Data.Map (Map)
@@ -36,15 +37,21 @@ instance Show (AsmEvalCtx -> Either T.Text Z80instruction) where
 
 -- | EDAS\' pseudo operations
 data EDASPseudo where
-  Equate :: EDASExpr            -- Symbol constant equate
-         -> EDASPseudo
-  Origin :: EDASExpr            -- Assembly origin (start) address
-         -> EDASPseudo
-  DefB   :: [DBValue]           -- Define bytes
-         -> EDASPseudo
-  DefC   :: EDASExpr            -- Define constant byte fill (repeat, const)
-         -> EDASExpr
-         -> EDASPseudo
+  Equate  :: EDASExpr           -- Symbol constant equate
+          -> EDASPseudo
+  Origin  :: EDASExpr           -- Assembly origin (start) address
+          -> EDASPseudo
+  DefB    :: [DBValue]          -- Define bytes
+          -> EDASPseudo
+  DefC    :: EDASExpr           -- Define constant byte fill (repeat, const)
+          -> EDASExpr
+          -> EDASPseudo
+  DefS    :: EDASExpr           -- Define space ('DefC' with 0 as the constant)
+          -> EDASPseudo
+  DefW    :: [DWValue]          -- Define little endian words
+          -> EDASPseudo
+  AsmDate :: EDASPseudo         -- Emit the current date as "MM/DD/YY" byte sequence
+  AsmTime :: EDASPseudo         -- Emit the current time as "HH:MM:SS" byte sequence
   deriving (Show)
 
 -- | 'DefB' elements
@@ -53,6 +60,15 @@ data DBValue where
          -> DBValue
   DBExpr :: EDASExpr
          -> DBValue
+  deriving (Show)
+
+-- | 'DefW' elements
+data DWValue where
+  DWChars :: Char
+          -> Char
+          -> DWValue
+  DWExpr  :: EDASExpr
+          -> DWValue
   deriving (Show)
 
 -- | EDAS expression data constructors.
@@ -129,6 +145,7 @@ data AsmEvalCtx where
   AsmEvalCtx ::
     { _symbolTab :: Map T.Text Word16
     , _asmPC     :: Z80addr
+    , _dateTime  :: IO UTCTime
     } -> AsmEvalCtx
 
 makeLenses ''AsmEvalCtx

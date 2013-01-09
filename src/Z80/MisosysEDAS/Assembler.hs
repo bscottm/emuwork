@@ -24,6 +24,7 @@ import Data.Word
 import Data.Int
 import Data.List
 import Data.Bits
+import Data.Time
 import Text.Parsec.Pos
 import qualified Data.Char as C
 import qualified Data.Map as Map
@@ -49,6 +50,7 @@ edasAssemble parseResult =
     Left stuff   -> Left stuff
     Right  stmts -> let initialCtx = Right $ AsmEvalCtx { _symbolTab = Map.empty
                                                         , _asmPC     = 0
+                                                        , _dateTime  = getCurrentTime
                                                         }
                         (finalctx, result) = mapAccumL evalAsmStmt initialCtx stmts
                     in  case finalctx of
@@ -64,7 +66,7 @@ evalAsmStmt ictx stmt =
     Left stuff  -> (Left stuff, stmt)
     Right ctx   -> case stmt ^. asmOp of
                      Nothing              -> (Right ctx, stmt)
-                     Just (Insn insn)     -> (Right ctx, stmt)
+                     Just (Insn _insn)    -> (Right ctx, stmt)
                      Just (Pseudo pseudo) -> evalPseudo ctx stmt pseudo
 
 evalPseudo :: AsmEvalCtx
@@ -77,6 +79,10 @@ evalPseudo ctx stmt pseudo =
       Origin org     -> (liftM (\o -> asmPC .~ o $ ctx) (evalAsmExpr ctx org), stmt)
       DefB args      -> evalDefB args ctx stmt
       DefC rept fill -> evalDefC rept fill ctx stmt
+      DefS rept      -> evalDefS rept ctx stmt
+      DefW args      -> undefined -- evalDefW args ctx stmt
+      AsmDate        -> undefined
+      AsmTime        -> undefined
 
 -- | Evaluate a symbol equate
 evalEquate :: Maybe EDASLabel
@@ -124,6 +130,21 @@ evalDefC rept fill ctx stmt =
                                           in  ( Right $ (asmPC %~ (+ (fromIntegral . DVU.length) theBytes) $ ctx)
                                               , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
                                               )
+
+-- | Define aribtrary space
+evalDefS :: EDASExpr
+         -> AsmEvalCtx
+         -> AsmStmt
+         -> (IntermediateCtx, AsmStmt)
+evalDefS rept ctx stmt =
+  let reptVal = evalAsmExpr ctx rept
+      currentPC = ctx ^. asmPC
+  in  case reptVal of
+        Left reptErr -> (Left reptErr, stmt)
+        Right rval   -> let theBytes = DVU.replicate (fromIntegral rval) (0 :: Z80word)
+                        in  ( Right $ (asmPC %~ (+ (fromIntegral . DVU.length) theBytes) $ ctx)
+                            , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
+                            )
 
 -- | Evaluate an assembler expression to produce a 'Word16' result, within the current assembler evaluation context
 evalAsmExpr :: AsmEvalCtx

@@ -24,6 +24,7 @@ edasTests :: Test
 edasTests = test [ equateTests
                  , defbTests
                  , defcTests
+                 , defsTests
                  ]
 
 defbTests :: Test
@@ -95,6 +96,29 @@ defcTests = test [ "defc"              ~: (checkAssembly defcAsm)               
 
     -- Parse and assemble the source:
     defcAsm = edasAssemble $ edasParseSequence "defcSource" defcSource
+
+defsTests :: Test
+defsTests = test [ "defs"              ~: (checkAssembly defsAsm)                                   ~=? True
+                 , "defsExpected"      ~: (checkByteVectors and defsAsm defsExpected)               ~=? True
+                 , "defsProgCtrs"      ~: (checkProgramCounters and defsAsm defsProgCtrs)           ~=? True
+                 ]
+  where
+    defsSource = T.intercalate "\n" [ "                Ds       16"
+                                    , "                dS       17"
+                                    , "                DS       37"
+                                    , "                DS       256"
+                                    ]
+
+    defsExpected = [ DVU.replicate 16 0
+                   , DVU.replicate 17 0
+                   , DVU.replicate 37 0
+                   , DVU.replicate 256 0
+                   ] :: [(DVU.Vector Z80word)]
+
+    (_finalPC, defsProgCtrs) = generateExpectedStmtAddresses defsExpected
+
+    -- Parse and assemble the source:
+    defsAsm = edasAssemble $ edasParseSequence "defsSource" defsSource
 
 equateTests :: Test
 equateTests = test [ "equateAsm"    ~: (checkAssembly equatesAsm)                           ~=? True

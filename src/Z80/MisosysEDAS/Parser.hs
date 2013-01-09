@@ -140,8 +140,9 @@ asmStatement =
          ; collectLabel
          ; collectInsnOrPseudo
          ; collectComment
-         ; ustate <- getState
-         ; {- trace (show ustate) $ -} return ustate
+         ; getState
+         ; {- ustate <- getState
+         ; trace (show ustate) $ return ustate -}
          }
 
 -- | Parse a Z80 assembler opcode
@@ -274,75 +275,67 @@ asmOpcode =
 asmPseudo :: EDASParser AsmOp
 asmPseudo =
   liftM Pseudo $ ( charIC 'd'
-                   >> ( do { _ <- charIC 'b'                -- db
-                           ; parseDefB
-                       
-                           }
-                        <|> do { _ <- charIC 'c'               -- dc (define replicated byte constant)
-                               ; optional whiteSpace
-                               ; rept <- asmExpr
-                               ; optional whiteSpace
-                               ; _ <- char ','
-                               ; optional whiteSpace
-                               ; fill <- asmExpr
-                               ; return $ DefC rept fill
-                               }
-                        <|> do { _ <- stringIC "ef"         -- def[bmw]
-                               ; do { _ <- charIC 'b'
-                                    ; parseDefB
-                                    }
-                                 <|> do { _ <- charIC 'm'
-                                        ; parseDefB
-                                        }    }
-                        <|> do { _ <- charIC 'm'            -- dm (same as 'db')
-                               ; parseDefB
-                               }
+                   >> ( ( charIC 'b' >> parseDefB )           -- db
+                        <|> ( charIC 'c'                      -- dc (define replicated byte constant)
+                              >> whiteSpace
+                              >> asmExpr
+                              >>= (\rept -> optional whiteSpace
+                                            >> char ','
+                                            >> optional whiteSpace
+                                            >> asmExpr
+                                            >>= (\fill -> return $ DefC rept fill)
+                                  )
+                            )
+                        <|> ( stringIC "ef"                   -- def[bmw]
+                              >> ( ( charIC 'b' >> parseDefB )
+                                   <|> ( charIC 'm' >> parseDefB )
+                                   <|> ( charIC 's' >> parseDefS )
+                                   <|> ( charIC 'w' >> parseDefW )
+                                 )
+                            )
+                        <|> ( charIC 'm' >> parseDefB )       -- dm (same as 'db')
+                        <|> ( charIC 's' >> parseDefS )       -- ds (define space, same as 'dc', but the constant is 0)
+                        <|> ( charIC 'w' >> parseDefW )       -- dw (define words)
                       )
                  ) <|> pseudoWithExpr "equ" Equate
                    <|> pseudoWithExpr "org" Origin
   where
-    pseudoWithExpr str pseudo = do { _ <- stringIC str
-                                   ; whiteSpace
-                                   ; liftM pseudo asmExpr
-                                   }
+    pseudoWithExpr str pseudo = stringIC str
+                                >> whiteSpace
+                                >> liftM pseudo asmExpr
 
+    -- DB/DEFB/DEFM/DM: a list of strings, single characters, expressions or bytes (which are constant expressions)
+    -- Note that range checking is done by the assembler.
     parseDefB = whiteSpace
-                >> ( liftM DefB $ sepBy1 defBArgs ( do { _ <- char ','
-                                                     ; optional whiteSpace
-                                                     }
-                                                )
-                   )
+                >> ( liftM DefB $ sepBy1 defBArgs ( char ',' >> optional whiteSpace ) )
 
     -- According to the EDAS manual, strings in DEFB/DB lists are 'c' (single quoted characters) or a sequence
     -- of two or more characters that can include a double-single quote ("''") interpreted as, well, a single
     -- quote in the middle of a string.
     defBArgs = try ( liftM DBExpr asmExpr ) -- Might read 'AsmChar', which could consume a single quote
-               <|> liftM (DBStr . T.pack) ( do { _     <- char '\''
-                                               ; c1 <- asciiExceptSQuote
-                                               ; c2 <- asciiExceptSQuote
-                                               ; s1 <- many ( try ( do { _ <- char ('\'')
-                                                                       ; _ <- char ('\'')
-                                                                       ; return $ '\''
-                                                                       }
-                                                                  )
-                                                              <|> asciiExceptSQuote
-                                                            )
-                                               ; _ <- char '\''
-                                               ; return (c1:c2:s1)
-                                               }
+               <|> liftM (DBStr . T.pack) ( char '\''
+                                            >> asciiExceptSQuote
+                                            >>= (\c1 -> 
+                                                  asciiExceptSQuote
+                                                  >>= (\c2 ->
+                                                        ( many ( try ( char '\''
+                                                                       >> char '\''
+                                                                       >> return '\''
+                                                                     )
+                                                                     <|> asciiExceptSQuote
+                                                               )
+                                                        ) >>= (\s1 -> char '\'' >> return (c1:c2:s1))
+                                                      )
+                                               )
                                           )
 
-    -- | Parse any printable ASCII character, except for a single quote.
-    asciiExceptSQuote :: EDASParser Char
-    asciiExceptSQuote =
-      let showC x           = [ '\'', x, '\'' ]
-          testC x           = let x' = C.ord x
-                              in  if x' /= 0x27 && (x' >= 0x20 && x' <= 0x7e) then 
-                                    Just x
-                                  else
-                                    Nothing
-          nextPos pos x _xs = updatePosChar pos x
-      in  tokenPrim showC nextPos testC
+    -- DS/DEFS parser
+    parseDefS = whiteSpace
+                >> asmExpr
+                >>= (\rept -> return $ DefS rept)
+
+    -- DW/DEFW parser
+    parseDefW = undefined
 
 -- | Assembler expression parsing. The expression must minimally have a primary expression (constant, variable name or unary
 -- operator [".not.", ".high." or ".low."]) and may be optionally followed by binary operator expressions.
@@ -412,16 +405,6 @@ asmExpr =
                                  ; let term = leftExpr `op` rightExpr
                                  ; option term (binOps term)
                                  }
-
-    asciiChar =
-      let showC x           = [ '\'', x, '\'' ]
-          testC x           = let x' = C.ord x
-                              in  if x' >= 0x20 && x' <= 0x7e then 
-                                    Just x
-                                  else
-                                    Nothing
-          nextPos pos x _xs = updatePosChar pos x
-      in  tokenPrim showC nextPos testC
 
 -- Constant expression: Optional sign, digits and base
 constExpr :: Bool                               -- ^ Sign required, 'True' when parsing IX, IY displacements
@@ -526,6 +509,29 @@ charIC :: Char
 charIC c =
   let showC x           = [ '\'', x, '\'' ]
       testC x           = if C.toLower x == c then Just x else Nothing
+      nextPos pos x _xs = updatePosChar pos x
+  in  tokenPrim showC nextPos testC
+
+-- | Parse any ASCII character
+asciiChar =
+  let showC x           = [ '\'', x, '\'' ]
+      testC x           = let x' = C.ord x
+                          in  if x' >= 0x20 && x' <= 0x7e then 
+                                Just x
+                              else
+                                Nothing
+      nextPos pos x _xs = updatePosChar pos x
+  in  tokenPrim showC nextPos testC
+
+-- | Parse any printable ASCII character, except for a single quote.
+asciiExceptSQuote :: EDASParser Char
+asciiExceptSQuote =
+  let showC x           = [ '\'', x, '\'' ]
+      testC x           = let x' = C.ord x
+                          in  if x' /= 0x27 && (x' >= 0x20 && x' <= 0x7e) then 
+                                Just x
+                              else
+                                Nothing
       nextPos pos x _xs = updatePosChar pos x
   in  tokenPrim showC nextPos testC
 
