@@ -5,6 +5,7 @@ import Control.Lens
 import Data.Word
 import Data.Int
 import Data.Time
+import Data.Maybe
 import Text.Parsec.Pos
 import qualified Data.Text as T
 import Data.Map (Map)
@@ -147,7 +148,8 @@ data EDASExpr where
 -- | Assembler evaluation context, when evaluating expressions.
 data AsmEvalCtx where
   AsmEvalCtx ::
-    { _symbolTab :: Map T.Text Word16
+    { _equateTab :: Map T.Text Word16
+    , _labelTab  :: Map T.Text Word16
     , _asmPC     :: Z80addr
     , _dateTime  :: ZonedTime
     } -> AsmEvalCtx
@@ -158,20 +160,36 @@ makeLenses ''AsmEvalCtx
 findAsmSymbol :: AsmEvalCtx
               -> T.Text
               -> Maybe Word16
-findAsmSymbol ctx sym = ctx ^. symbolTab & Map.lookup (T.toLower sym)
+findAsmSymbol ctx sym =
+  let eqSym = ctx ^. equateTab & Map.lookup (T.toLower sym)
+      lbSym = ctx ^. labelTab  & Map.lookup (T.toLower sym)
+  in  if isJust eqSym then
+        eqSym
+      else
+        lbSym
 
--- | Insert a new symbol into the context's symbol table
-insertAsmSymbol :: AsmEvalCtx
-                -> T.Text
-                -> Word16
-                -> AsmEvalCtx
-insertAsmSymbol ctx sym symval = symbolTab %~ (Map.insert (T.toLower sym) symval) $ ctx
+-- | Insert a new symbol into the context's equate table
+insertEquate :: AsmEvalCtx
+             -> T.Text
+             -> Word16
+             -> AsmEvalCtx
+insertEquate ctx sym symval = equateTab %~ (Map.insert (T.toLower sym) symval) $ ctx
 
--- | Insert a new symbol into the context's symbol table
+-- | Insert a new statement label into the context's label table
+insertSymLabel :: AsmEvalCtx
+               -> T.Text
+               -> Word16
+               -> AsmEvalCtx
+insertSymLabel ctx lab labval = labelTab %~ (Map.insert (T.toLower lab) labval) $ ctx
+
+-- | Determine if a symbol is present as either an equate or statement label
 existsAsmSymbol :: AsmEvalCtx
                 -> T.Text
                 -> Bool
-existsAsmSymbol ctx sym = ctx ^. symbolTab & (Map.member (T.toLower sym))
+existsAsmSymbol ctx sym =
+  let haveEqSym = ctx ^. equateTab & (Map.member (T.toLower sym))
+      haveLbSym = ctx ^. labelTab  & (Map.member (T.toLower sym))
+  in  haveEqSym || haveLbSym
 
 -- | Data type constructors for EDAS data elements
 data AsmStmt where

@@ -296,11 +296,12 @@ asmPseudo =
                             )
                         <|> ( charIC 'm' >> parseDefB )         -- dm (same as 'db')
                         <|> ( charIC 's'
-                              >> ( ( whiteSpace >> parseDefS )  -- ds (define space, same as 'dc', but the constant is 0)
-                                    <|> ( stringIC "ym"         -- dsym (dump symbol, emits symbol's name as byte sequence)
-                                          >> whiteSpace
-                                          >> liftM DSym readLabel
-                                        )
+                              >> ( try ( ( stringIC "ym"        -- dsym (dump symbol, emits symbol's name as byte sequence)
+                                           >> whiteSpace
+                                           >> liftM DSym readLabel
+                                         ) <?> "Expecting label to follow DSYM"
+                                       )
+                                   <|> ( whiteSpace >> parseDefS )  -- ds (define space, same as 'dc', but the constant is 0)
                                  )
                             )
                         <|> ( charIC 'w' >> parseDefW )         -- dw (define words)

@@ -2,6 +2,9 @@
 module Main where
 
 import Prelude hiding (pred)
+
+-- import Debug.Trace
+
 import Test.HUnit
 import Data.Maybe
 import Data.Word
@@ -36,6 +39,7 @@ edasTests = test [ defbTests
                  , defsTests
                  , defwTests
                  , dateTimeTest
+                 , dsymTests
                  , equateTests
                  ]
 
@@ -75,7 +79,7 @@ defbTests = test [ "defb"              ~: (checkAssembly defbAsm)               
                    , DVU.fromList (textToWord8 "Mem \'sz\'?")
                    ]
 
-    (_finalPC, defbProgCtrs) = generateExpectedStmtAddresses defbExpected
+    (_finalPC, defbProgCtrs) = generateExpectedStmtAddresses 0 defbExpected
 
     -- Parse and assemble the source:
     defbAsm = edasAssemble $ edasParseSequence "defbSource" defbSource
@@ -95,7 +99,7 @@ defbTests = test [ "defb"              ~: (checkAssembly defbAsm)               
                                      , DVU.singleton (((fromIntegral . C.ord) 't') .|. 0x80)
                                      ]
                         ]
-    (_finalPC2, edasManDBProgCtrs) = generateExpectedStmtAddresses edasManDBExpected
+    (_finalPC2, edasManDBProgCtrs) = generateExpectedStmtAddresses 0 edasManDBExpected
 
     edasManDBAsm = edasAssemble $ edasParseSequence "edasManDB" edasManDBSrc
 
@@ -118,7 +122,7 @@ defcTests = test [ "defc"              ~: (checkAssembly defcAsm)               
                    , DVU.replicate 256 (((fromIntegral . C.ord) 'a') .|. 0x80)
                    ] :: [(DVU.Vector Z80word)]
 
-    (_finalPC, defcProgCtrs) = generateExpectedStmtAddresses defcExpected
+    (_finalPC, defcProgCtrs) = generateExpectedStmtAddresses 0 defcExpected
 
     -- Parse and assemble the source:
     defcAsm = edasAssemble $ edasParseSequence "defcSource" defcSource
@@ -142,7 +146,7 @@ defsTests = test [ "defs"              ~: (checkAssembly defsAsm)               
                    , DVU.replicate 256 0
                    ] :: [(DVU.Vector Z80word)]
 
-    (_finalPC, defsProgCtrs) = generateExpectedStmtAddresses defsExpected
+    (_finalPC, defsProgCtrs) = generateExpectedStmtAddresses 0 defsExpected
 
     -- Parse and assemble the source:
     defsAsm = edasAssemble $ edasParseSequence "defsSource" defsSource
@@ -173,7 +177,7 @@ defwTests = test [ "defw"              ~: (checkAssembly defwAsm)               
     high x = fromIntegral (x `shiftR` 8)
     low  x = fromIntegral (x .&. 0xff)
 
-    (_finalPC, defwProgCtrs) = generateExpectedStmtAddresses defwExpected
+    (_finalPC, defwProgCtrs) = generateExpectedStmtAddresses 0 defwExpected
 
     -- Parse and assemble the source:
     defwAsm = edasAssemble $ edasParseSequence "defwSource" defwSource
@@ -200,6 +204,35 @@ dateTimeTest = test [ "datetimeAsm"       ~: (checkAssembly dateTimeAsm)        
                    ] :: [Z80addr]
 
     dateTimeAsm = edasAssemble $ edasParseSequence "dateTimeTestSource" theSource
+
+-- | "DSYM" and "DX" tests.
+dsymTests :: Test
+dsymTests = test [ "dsym"              ~: (checkAssembly dsymAsm)                         @? asmPassFailed
+                 , "dsymExpected"      ~: (checkByteVectors and dsymAsm dsymExpected)     @? byteVecMismatch
+                 , "dsymProgCtrs"      ~: (checkProgramCounters and dsymAsm dsymProgCtrs) @? progCtrsMismatch
+                 ]
+  where
+    dsymSource = T.intercalate "\n" [ "         ORG     0E143H"
+                                    , "LABEL:"
+                                    , "         DSYM    LABEL"
+                                    , "         DX      LABEL"
+                                    ]
+
+    dsymExpected = [ DVU.empty
+                   , DVU.empty
+                   , DVU.fromList $ textToWord8 "LABEL"
+                   , DVU.fromList [ 0x43, 0xe1 ]
+                   ] :: [(DVU.Vector Z80word)]
+
+    dsymProgCtrs = [ 0
+                   , 0xe143
+                   , (dsymProgCtrs !! 1) + (fromIntegral . DVU.length) (dsymExpected !! 1)
+                   , (dsymProgCtrs !! 2) + (fromIntegral . DVU.length) (dsymExpected !! 2)
+                   ]
+
+    -- Parse and assemble the source:
+    dsymAsm = edasAssemble $ edasParseSequence "dsymSource" dsymSource
+
 
 -- | Symbol equate and expression tests. This checks for a successful assembler pass, that the symbols inserted are
 -- present, that bad/extraneous/invalid symbols are not in the final symbol table, and checks that expression parsing
@@ -326,7 +359,8 @@ checkProgramCounters pred asm expected = liftM checkPCs asm
   where
     checkPCs theAsm = case theAsm of
                         Left problems            -> error (T.unpack problems)
-                        Right (_finalctx, stmts) -> pred $ zipWith (==) (map (\x -> x ^. stmtAddr) stmts) expected
+                        Right (_finalctx, stmts) -> pred $ zipWith (==) (stmtAddrs stmts) expected
+    stmtAddrs stmts = map (\x -> x ^. stmtAddr) stmts
 
 -- | Convert a character to 'Word8'
 charToWord8 :: Char
@@ -341,9 +375,11 @@ stringToWord8 = map charToWord8
 -- Convert 'Text' to a list of 'Word8's
 textToWord8 :: T.Text
             -> [Word8]
-textToWord8 = (map charToWord8) . T.unpack
+textToWord8 = stringToWord8 . T.unpack
 
 -- | Generate statement addresses from the expected byte vector output
-generateExpectedStmtAddresses :: (DVU.Unbox wordType) => [DVU.Vector wordType]
+generateExpectedStmtAddresses :: (DVU.Unbox wordType) =>
+                                 Z80addr
+                              -> [DVU.Vector wordType]
                               -> (Z80addr, [Z80addr])
-generateExpectedStmtAddresses = mapAccumL (\pc elt -> (pc + (fromIntegral . DVU.length) elt, pc)) (0 :: Z80addr)
+generateExpectedStmtAddresses origin = mapAccumL (\pc elt -> (pc + (fromIntegral . DVU.length) elt, pc)) origin
