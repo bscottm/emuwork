@@ -56,10 +56,11 @@ edasAssemble parseResult =
     Left stuff   -> return $ Left stuff
     Right  stmts -> getZonedTime
                     >>= (\currentTime ->
-                          let initialCtx = Right $ AsmEvalCtx { _equateTab = Map.empty
-                                                              , _labelTab  = Map.empty
-                                                              , _asmPC     = 0
-                                                              , _dateTime  = currentTime
+                          let initialCtx = Right $ AsmEvalCtx { _equateTab   = Map.empty
+                                                              , _symLabelTab = Map.empty
+                                                              , _defLabelTab = Map.empty
+                                                              , _asmPC       = 0
+                                                              , _dateTime    = currentTime
                                                               }
                               (finalctx, result) = mapAccumL evalAsmStmt initialCtx stmts
                           in  return $ case finalctx of
@@ -85,42 +86,67 @@ evalAsmStmt ictx stmt =
                                     , stmtAddr .~ currentPC $ stmt
                                     )
             Just (Insn _insn)    -> (Right stmtCtx, stmt)
-            Just (Pseudo pseudo) -> evalPseudo stmtCtx stmt pseudo
+            -- Don't jamb the statement label into the symbol table just yet. EQU and DEFL treat
+            -- their labels differently.
+            Just (Pseudo pseudo) -> evalPseudo ctx stmt pseudo
 
+-- | Evaluate and generate code for pseudo-operations
 evalPseudo :: AsmEvalCtx
            -> AsmStmt
            -> EDASPseudo
            -> (IntermediateCtx, AsmStmt)
 evalPseudo ctx stmt pseudo =
-    case pseudo of
-      Equate expr    -> (evalEquate (stmt ^. symLabel) expr ctx, stmt)
-      Origin org     -> (liftM (\o -> asmPC .~ o $ ctx) (evalAsmExpr ctx org), stmt)
-      DefB args      -> let cvtDBValue (DBStr str)   = Right $ map charIntegral $ T.unpack str
-                            cvtDBValue (DBExpr expr) = liftM (: []) (evalAsmExprWord8 ctx expr)
-                        in  evalDefXXArgs args cvtDBValue ctx stmt
-      DefC rept fill -> evalDefC rept fill ctx stmt
-      DefS rept      -> evalDefS rept ctx stmt
-      DefW args      -> let cvtDWValue (DWChars c1 c2) = Right $ [(charIntegral c1), (charIntegral c2)]
-                            cvtDWValue (DWExpr expr)   = liftM word2ByteList (evalAsmExpr ctx expr)
-                        in  evalDefXXArgs args cvtDWValue ctx stmt
-      DSym sym       -> emitText sym ctx stmt
-      DExp expr      -> case liftM word2ByteList (evalAsmExpr ctx expr) of
-                          Left issues -> (Left issues, stmt)
-                          Right words -> let currentPC = ctx ^. asmPC
-                                             theBytes  = DVU.fromList words
-                                         in ( Right $ asmPC %~ (+ (fromIntegral . DVU.length) theBytes) $ ctx
-                                            , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
-                                            )
-      AsmDate        -> emitString (ctx ^. dateTime & formatTime defaultTimeLocale "%D") ctx stmt
-      AsmTime        -> emitString (ctx ^. dateTime & formatTime defaultTimeLocale "%T") ctx stmt
+    let stmtCtx   = case stmt ^. symLabel of
+                        Nothing    -> ctx
+                        Just label -> insertSymLabel ctx label (ctx ^. asmPC)
+    in  case pseudo of
+          -- Equate uses the original assembler context, statement label is stored in the context's equateTab
+          Equate expr    -> (evalEquate (stmt ^. symLabel) expr ctx, stmt)
+          Origin org     -> (liftM (\o -> asmPC .~ o $ stmtCtx) (evalAsmExpr stmtCtx org), stmt)
+          DefB args      -> let cvtDBValue (DBStr str)   = Right $ map charIntegral $ T.unpack str
+                                cvtDBValue (DBExpr expr) = liftM (: []) (evalAsmExprWord8 stmtCtx expr)
+                            in  evalDefXXArgs args cvtDBValue stmtCtx stmt
+          DefC rept fill -> evalDefC rept fill stmtCtx stmt
+          DefS rept      -> evalDefS rept stmtCtx stmt
+          DefW args      -> let cvtDWValue (DWChars c1 c2) = Right $ [(charIntegral c1), (charIntegral c2)]
+                                cvtDWValue (DWExpr expr)   = liftM word2ByteList (evalAsmExpr stmtCtx expr)
+                            in  evalDefXXArgs args cvtDWValue stmtCtx stmt
+          DSym sym       -> emitText sym stmtCtx stmt
+          DExp expr      -> case liftM word2ByteList (evalAsmExpr stmtCtx expr) of
+                              Left issues -> (Left issues, stmt)
+                              Right words -> updateCtxStmtBytes stmtCtx stmt (DVU.fromList words)
+          AsmDate        -> emitString (stmtCtx ^. dateTime & formatTime defaultTimeLocale "%D") stmtCtx stmt
+          AsmTime        -> emitString (stmtCtx ^. dateTime & formatTime defaultTimeLocale "%T") stmtCtx stmt
+          -- DefL uses the original assembler context, statement label is stored in the context's defLabelTab
+          DefL expr      -> (evalDefLabel (stmt ^. symLabel) expr ctx, stmt)
+
+-- | Update statement with its byte vector, context with the updated program counter
+updateCtxStmtBytes :: AsmEvalCtx
+                   -> AsmStmt
+                   -> DVU.Vector Z80word
+                   -> (IntermediateCtx, AsmStmt)
+updateCtxStmtBytes ctx stmt byteVec = ( Right $ asmPC %~ (+ (fromIntegral . DVU.length) byteVec) $ ctx
+                                      , stmtAddr .~ (ctx ^. asmPC) $ bytes .~ byteVec $ stmt
+                                      )
 
 -- | Evaluate a symbol equate
 evalEquate :: Maybe EDASLabel
            -> EDASExpr
            -> AsmEvalCtx
            -> IntermediateCtx
-evalEquate Nothing    _    _   = Left "Equate is missing symbol to which to assign result."
-evalEquate (Just sym) expr ctx = liftM (insertEquate ctx sym) (evalAsmExpr ctx expr)
+evalEquate Nothing    _    _   = Left "Equate is missing symbol to which to assign a result."
+evalEquate (Just sym) expr ctx = if not (existsEquate ctx sym) then
+                                   liftM (insertEquate ctx sym) (evalAsmExpr ctx expr)
+                                 else
+                                   Left (T.append sym ": cannot redefine an already equated symbol")
+
+-- | Evaluate a defined label
+evalDefLabel :: Maybe EDASLabel
+             -> EDASExpr
+             -> AsmEvalCtx
+             -> IntermediateCtx
+evalDefLabel Nothing    _    _   = Left "DEFL is missing a symbol to which to assign a result."
+evalDefLabel (Just sym) expr ctx = liftM (insertDefLabel ctx sym) (evalAsmExpr ctx expr)
 
 -- | Evaluate the "db"/"defb", "dw"/"defw" argument lists and fold the generated bytes into the assembler statement
 evalDefXXArgs :: [argType]
@@ -131,15 +157,12 @@ evalDefXXArgs :: [argType]
 evalDefXXArgs args cvtFunc ctx stmt =
         let (ls, rs)                 = partitionEithers $ map cvtFunc args
             theBytes                 = DVU.concat $ map DVU.fromList rs
-            currentPC                = ctx ^. asmPC
         in  if (not . null) ls then
               -- Only report the first error
               (Left $ head ls, stmt)
             else
               -- No error: move the program counter forward, save the bytes generated
-              ( Right $ (asmPC %~ (+ (fromIntegral . DVU.length) theBytes)) $ ctx
-              , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
-              )
+              updateCtxStmtBytes ctx stmt theBytes
 
 -- | Define constant fill/block
 evalDefC :: EDASExpr
@@ -150,41 +173,27 @@ evalDefC :: EDASExpr
 evalDefC rept fill ctx stmt =
   let reptVal = evalAsmExpr ctx rept
       fillVal = evalAsmExprWord8 ctx fill
-      currentPC = ctx ^. asmPC
   in  case reptVal of
         Left reptErr -> (Left reptErr, stmt)
         Right rval   -> case fillVal of
                           Left fillErr -> (Left fillErr, stmt)
-                          Right fval   -> let theBytes = DVU.replicate (fromIntegral rval) fval
-                                          in  ( Right $ (asmPC %~ (+ (fromIntegral . DVU.length) theBytes) $ ctx)
-                                              , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
-                                              )
+                          Right fval   -> updateCtxStmtBytes ctx stmt (DVU.replicate (fromIntegral rval) fval)
 
 -- | Define aribtrary space
 evalDefS :: EDASExpr
          -> AsmEvalCtx
          -> AsmStmt
          -> (IntermediateCtx, AsmStmt)
-evalDefS rept ctx stmt =
-  let reptVal = evalAsmExpr ctx rept
-      currentPC = ctx ^. asmPC
-  in  case reptVal of
-        Left reptErr -> (Left reptErr, stmt)
-        Right rval   -> let theBytes = DVU.replicate (fromIntegral rval) (0 :: Z80word)
-                        in  ( Right $ (asmPC %~ (+ (fromIntegral . DVU.length) theBytes) $ ctx)
-                            , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
-                            )
+evalDefS rept ctx stmt = case evalAsmExpr ctx rept of
+                           Left reptErr -> (Left reptErr, stmt)
+                           Right rval   -> updateCtxStmtBytes ctx stmt (DVU.replicate (fromIntegral rval) (0 :: Z80word))
 
 -- | Convert a string to bytes, update statement and intermediate assembler context.
 emitString :: String
            -> AsmEvalCtx
            -> AsmStmt
            -> (IntermediateCtx, AsmStmt)
-emitString str ctx stmt = let theBytes  = DVU.fromList (stringToWords str)
-                              currentPC = ctx ^. asmPC
-                          in  ( Right $ (asmPC %~ (+ (fromIntegral . DVU.length) theBytes)) $ ctx
-                              , stmtAddr .~ currentPC $ bytes .~ theBytes $ stmt
-                              )
+emitString str ctx stmt = updateCtxStmtBytes ctx stmt (DVU.fromList (stringToWords str))
 
 -- | Emit 'Data.Text' string as a sequence of bytes
 emitText :: T.Text
@@ -210,6 +219,7 @@ evalAsmExpr  ctx (Var pos v)         = case findAsmSymbol ctx v of
                                                                    ]
                                                          )
                                          Just x  -> Right x
+evalAsmExpr ctx  CurrentPC           = Right (ctx ^. asmPC)
 evalAsmExpr _ctx (AsmChar c)         = Right (charIntegral c)
 evalAsmExpr ctx  (Add l r)           = evalBinOp ctx (+) l r
 evalAsmExpr ctx  (Sub l r)           = evalBinOp ctx (-) l r

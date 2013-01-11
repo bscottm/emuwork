@@ -57,6 +57,8 @@ data EDASPseudo where
           -> EDASPseudo
   AsmDate :: EDASPseudo         -- Emit the current date as "MM/DD/YY" byte sequence
   AsmTime :: EDASPseudo         -- Emit the current time as "HH:MM:SS" byte sequence
+  DefL    :: EDASExpr           -- Define label, i.e., something that can be reassigned, as opposed to equates and statement labels
+          -> EDASPseudo
   deriving (Show)
 
 -- | 'DefB' elements
@@ -78,80 +80,82 @@ data DWValue where
 
 -- | EDAS expression data constructors.
 data EDASExpr where
-  Const    :: SourcePos         -- 16-bit integer constant, truncated to 8 bits when needed
-           -> Int16
-           -> EDASExpr
-  Var      :: SourcePos         -- Variable/symbolic label
-           -> T.Text
-           -> EDASExpr
-  AsmChar  :: Char              -- Single character constant (GHC stores as 16 bits, but always truncated to 8 bits)
-           -> EDASExpr
-  Add      :: EDASExpr          -- 16-bit addition
-           -> EDASExpr
-           -> EDASExpr
-  Sub      :: EDASExpr          -- 16-bit subtraction
-           -> EDASExpr
-           -> EDASExpr
-  Mul      :: EDASExpr          -- 16-bit multiplication (overflow is ignored)
-           -> EDASExpr
-           -> EDASExpr
-  Div      :: EDASExpr          -- 16-bit value,  8-bit divisor division
-           -> EDASExpr
-           -> EDASExpr
-  Mod      :: EDASExpr          -- Modulus of division's value
-           -> EDASExpr
-           -> EDASExpr
-  Shift    :: EDASExpr          -- Shift: negative -> shift right, positive -> shift left
-           -> EDASExpr
-           -> EDASExpr
-  LogAnd   :: EDASExpr          -- Bitwise AND
-           -> EDASExpr
-           -> EDASExpr
-  LogOr    :: EDASExpr          -- Bitwise OR
-           -> EDASExpr
-           -> EDASExpr
-  LogXor   :: EDASExpr          -- Bitwise XOR
-           -> EDASExpr
-           -> EDASExpr
-  LogNE    :: EDASExpr          -- Not equal (0/-1)
-           -> EDASExpr
-           -> EDASExpr
-  LogEQ    :: EDASExpr          -- Equal (0/-1)
-           -> EDASExpr
-           -> EDASExpr
-  LogGE    :: EDASExpr          -- Greater than or equal (0/-1)
-           -> EDASExpr
-           -> EDASExpr
-  LogGT    :: EDASExpr          -- Greater than (0/-1)
-           -> EDASExpr
-           -> EDASExpr
-  LogLE    :: EDASExpr          -- Less than or equal (0/-1)
-           -> EDASExpr
-           -> EDASExpr
-  LogLT    :: EDASExpr          -- Less than (0/-1)
-           -> EDASExpr
-           -> EDASExpr
-  ShiftL   :: EDASExpr          -- Shift left
-           -> EDASExpr
-           -> EDASExpr
-  ShiftR   :: EDASExpr          -- Shift right
-           -> EDASExpr
-           -> EDASExpr
-  OnesCpl  :: EDASExpr          -- One's complement
-           -> EDASExpr
-  HighByte :: EDASExpr          -- High 8 bits of 16-bit value
-           -> EDASExpr
-  LowByte  :: EDASExpr          -- Low 8 bits of 16-bit value
-           -> EDASExpr
+  Const     :: SourcePos        -- 16-bit integer constant, truncated to 8 bits when needed
+            -> Int16
+            -> EDASExpr
+  Var       :: SourcePos        -- Variable/symbolic label
+            -> T.Text
+            -> EDASExpr
+  CurrentPC :: EDASExpr         -- Current program counter
+  AsmChar   :: Char             -- Single character constant (GHC stores as 16 bits, but always truncated to 8 bits)
+            -> EDASExpr
+  Add       :: EDASExpr         -- 16-bit addition
+            -> EDASExpr
+            -> EDASExpr
+  Sub       :: EDASExpr         -- 16-bit subtraction
+            -> EDASExpr
+            -> EDASExpr
+  Mul       :: EDASExpr         -- 16-bit multiplication (overflow is ignored)
+            -> EDASExpr
+            -> EDASExpr
+  Div       :: EDASExpr         -- 16-bit value,  8-bit divisor division
+            -> EDASExpr
+            -> EDASExpr
+  Mod       :: EDASExpr         -- Modulus of division's value
+            -> EDASExpr
+            -> EDASExpr
+  Shift     :: EDASExpr         -- Shift: negative -> shift right, positive -> shift left
+            -> EDASExpr
+            -> EDASExpr
+  LogAnd    :: EDASExpr         -- Bitwise AND
+            -> EDASExpr
+            -> EDASExpr
+  LogOr     :: EDASExpr         -- Bitwise OR
+            -> EDASExpr
+            -> EDASExpr
+  LogXor    :: EDASExpr         -- Bitwise XOR
+            -> EDASExpr
+            -> EDASExpr
+  LogNE     :: EDASExpr         -- Not equal (0/-1)
+            -> EDASExpr
+            -> EDASExpr
+  LogEQ     :: EDASExpr         -- Equal (0/-1)
+            -> EDASExpr
+            -> EDASExpr
+  LogGE     :: EDASExpr         -- Greater than or equal (0/-1)
+            -> EDASExpr
+            -> EDASExpr
+  LogGT     :: EDASExpr         -- Greater than (0/-1)
+            -> EDASExpr
+            -> EDASExpr
+  LogLE     :: EDASExpr         -- Less than or equal (0/-1)
+            -> EDASExpr
+            -> EDASExpr
+  LogLT     :: EDASExpr         -- Less than (0/-1)
+            -> EDASExpr
+            -> EDASExpr
+  ShiftL    :: EDASExpr         -- Shift left
+            -> EDASExpr
+            -> EDASExpr
+  ShiftR    :: EDASExpr         -- Shift right
+            -> EDASExpr
+            -> EDASExpr
+  OnesCpl   :: EDASExpr         -- One's complement
+            -> EDASExpr
+  HighByte  :: EDASExpr         -- High 8 bits of 16-bit value
+            -> EDASExpr
+  LowByte   :: EDASExpr         -- Low 8 bits of 16-bit value
+            -> EDASExpr
   deriving (Show)
 
 -- | Assembler evaluation context, when evaluating expressions.
 data AsmEvalCtx where
   AsmEvalCtx ::
-    { _equateTab :: Map T.Text Word16
-    , _labelTab  :: Map T.Text Word16
-    , _asmPC     :: Z80addr
-    , _dateTime  :: ZonedTime
+    { _equateTab    :: Map T.Text Word16    -- Equates (cannot be changed once evaluated)
+    , _symLabelTab  :: Map T.Text Word16    -- Statement/symbolic labels (cannot be changed, once assigned)
+    , _defLabelTab  :: Map T.Text Word16    -- Defined labels (i.e., 'defl' pseudo-operation)
+    , _asmPC        :: Z80addr              -- Current assembler program counter
+    , _dateTime     :: ZonedTime            -- Time at which the assembler pass started
     } -> AsmEvalCtx
 
 makeLenses ''AsmEvalCtx
@@ -161,12 +165,15 @@ findAsmSymbol :: AsmEvalCtx
               -> T.Text
               -> Maybe Word16
 findAsmSymbol ctx sym =
-  let eqSym = ctx ^. equateTab & Map.lookup (T.toLower sym)
-      lbSym = ctx ^. labelTab  & Map.lookup (T.toLower sym)
+  let eqSym  = ctx ^. equateTab & Map.lookup (T.toLower sym)
+      symLab = ctx ^. symLabelTab & Map.lookup (T.toLower sym)
+      defLab = ctx ^. defLabelTab & Map.lookup (T.toLower sym)
   in  if isJust eqSym then
         eqSym
-      else
-        lbSym
+      else if isJust symLab then
+             symLab
+           else
+             defLab
 
 -- | Insert a new symbol into the context's equate table
 insertEquate :: AsmEvalCtx
@@ -175,21 +182,43 @@ insertEquate :: AsmEvalCtx
              -> AsmEvalCtx
 insertEquate ctx sym symval = equateTab %~ (Map.insert (T.toLower sym) symval) $ ctx
 
--- | Insert a new statement label into the context's label table
+-- | Insert a new statement label into the context's statement/symbol label table
 insertSymLabel :: AsmEvalCtx
                -> T.Text
                -> Word16
                -> AsmEvalCtx
-insertSymLabel ctx lab labval = labelTab %~ (Map.insert (T.toLower lab) labval) $ ctx
+insertSymLabel ctx lab labval = symLabelTab %~ (Map.insert (T.toLower lab) labval) $ ctx
+
+-- | Insert a new 'DefL' label into the context's defined label table
+insertDefLabel :: AsmEvalCtx
+               -> T.Text
+               -> Word16
+               -> AsmEvalCtx
+insertDefLabel ctx lab labval = defLabelTab %~ (Map.insert (T.toLower lab) labval) $ ctx
+
+-- | Determine if a symbol is present as an equate symbol
+existsEquate :: AsmEvalCtx
+             -> T.Text
+             -> Bool
+existsEquate ctx sym = ctx ^. equateTab & (Map.member (T.toLower sym))
+
+-- | Determine if a symbol is present as an equate symbol
+existsSymLabel :: AsmEvalCtx
+               -> T.Text
+               -> Bool
+existsSymLabel ctx sym = ctx ^. symLabelTab  & (Map.member (T.toLower sym))
+
+-- | Determine if a symbol is present as an equate symbol
+existsDefLabel :: AsmEvalCtx
+               -> T.Text
+               -> Bool
+existsDefLabel ctx sym = ctx ^. defLabelTab  & (Map.member (T.toLower sym))
 
 -- | Determine if a symbol is present as either an equate or statement label
 existsAsmSymbol :: AsmEvalCtx
                 -> T.Text
                 -> Bool
-existsAsmSymbol ctx sym =
-  let haveEqSym = ctx ^. equateTab & (Map.member (T.toLower sym))
-      haveLbSym = ctx ^. labelTab  & (Map.member (T.toLower sym))
-  in  haveEqSym || haveLbSym
+existsAsmSymbol ctx sym = (existsEquate ctx sym) || (existsSymLabel ctx sym) || (existsDefLabel ctx sym)
 
 -- | Data type constructors for EDAS data elements
 data AsmStmt where
@@ -200,7 +229,6 @@ data AsmStmt where
              , _stmtAddr :: Word16                      -- Statement address, i.e., current program counter
              , _bytes    :: Vector Z80word              -- The bytes corresponding to this statement
              } -> AsmStmt
-  -- TODO: something here for macro definition
   -- TODO: something here for macro expansion
   deriving (Show)
 

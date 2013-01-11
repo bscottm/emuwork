@@ -9,7 +9,6 @@ import Test.HUnit
 import Data.Maybe
 import Data.Word
 import Data.Bits
-import Data.List
 import Control.Lens
 import Control.Monad
 import qualified Data.Char as C
@@ -40,6 +39,7 @@ edasTests = test [ defbTests
                  , defwTests
                  , dateTimeTest
                  , dsymTests
+                 , deflTests
                  , equateTests
                  ]
 
@@ -58,10 +58,8 @@ progCtrsMismatch = "Program counters or expected byte vector length don't match"
 defbTests :: Test
 defbTests = test [ "defb"              ~: (checkAssembly defbAsm)                                   @? asmPassFailed
                  , "defbExpected"      ~: (checkByteVectors and defbAsm defbExpected)               @? byteVecMismatch
-                 , "defbProgCtrs"      ~: (checkProgramCounters and defbAsm defbProgCtrs)           @? progCtrsMismatch
                  , "edasManDB"         ~: (checkAssembly edasManDBAsm)                              @? asmPassFailed
                  , "edasManDBExpected" ~: (checkByteVectors and edasManDBAsm edasManDBExpected)     @? byteVecMismatch
-                 , "defbProgCtrs"      ~: (checkProgramCounters and edasManDBAsm edasManDBProgCtrs) @? progCtrsMismatch
                  ]
   where
     defbSource = T.intercalate "\n" [ "                DB       00h"
@@ -78,8 +76,6 @@ defbTests = test [ "defb"              ~: (checkAssembly defbAsm)               
                    , DVU.fromList (textToWord8 "Memory size?")
                    , DVU.fromList (textToWord8 "Mem \'sz\'?")
                    ]
-
-    (_finalPC, defbProgCtrs) = generateExpectedStmtAddresses 0 defbExpected
 
     -- Parse and assemble the source:
     defbAsm = edasAssemble $ edasParseSequence "defbSource" defbSource
@@ -99,7 +95,6 @@ defbTests = test [ "defb"              ~: (checkAssembly defbAsm)               
                                      , DVU.singleton (((fromIntegral . C.ord) 't') .|. 0x80)
                                      ]
                         ]
-    (_finalPC2, edasManDBProgCtrs) = generateExpectedStmtAddresses 0 edasManDBExpected
 
     edasManDBAsm = edasAssemble $ edasParseSequence "edasManDB" edasManDBSrc
 
@@ -107,11 +102,10 @@ defbTests = test [ "defb"              ~: (checkAssembly defbAsm)               
 defcTests :: Test
 defcTests = test [ "defc"              ~: (checkAssembly defcAsm)                         @? asmPassFailed
                  , "defcExpected"      ~: (checkByteVectors and defcAsm defcExpected)     @? byteVecMismatch
-                 , "defcProgCtrs"      ~: (checkProgramCounters and defcAsm defcProgCtrs) @? progCtrsMismatch
                  ]
   where
     defcSource = T.intercalate "\n" [ "                Dc       16, 00h"
-                                    , "                dC       17, -1"
+                                    , "                dC       17, -1      ; Prime number of constants"
                                     , "                DC       37, 'A'"
                                     , "                DC       256, 'a' !80H"
                                     ]
@@ -122,8 +116,6 @@ defcTests = test [ "defc"              ~: (checkAssembly defcAsm)               
                    , DVU.replicate 256 (((fromIntegral . C.ord) 'a') .|. 0x80)
                    ] :: [(DVU.Vector Z80word)]
 
-    (_finalPC, defcProgCtrs) = generateExpectedStmtAddresses 0 defcExpected
-
     -- Parse and assemble the source:
     defcAsm = edasAssemble $ edasParseSequence "defcSource" defcSource
 
@@ -131,7 +123,6 @@ defcTests = test [ "defc"              ~: (checkAssembly defcAsm)               
 defsTests :: Test
 defsTests = test [ "defs"              ~: (checkAssembly defsAsm)                         @? asmPassFailed
                  , "defsExpected"      ~: (checkByteVectors and defsAsm defsExpected)     @? byteVecMismatch
-                 , "defsProgCtrs"      ~: (checkProgramCounters and defsAsm defsProgCtrs) @? progCtrsMismatch
                  ]
   where
     defsSource = T.intercalate "\n" [ "                Ds       16"
@@ -146,8 +137,6 @@ defsTests = test [ "defs"              ~: (checkAssembly defsAsm)               
                    , DVU.replicate 256 0
                    ] :: [(DVU.Vector Z80word)]
 
-    (_finalPC, defsProgCtrs) = generateExpectedStmtAddresses 0 defsExpected
-
     -- Parse and assemble the source:
     defsAsm = edasAssemble $ edasParseSequence "defsSource" defsSource
 
@@ -155,7 +144,6 @@ defsTests = test [ "defs"              ~: (checkAssembly defsAsm)               
 defwTests :: Test
 defwTests = test [ "defw"              ~: (checkAssembly defwAsm)                         @? asmPassFailed
                  , "defwExpected"      ~: (checkByteVectors and defwAsm defwExpected)     @? byteVecMismatch
-                 , "defwProgCtrs"      ~: (checkProgramCounters and defwAsm defwProgCtrs) @? progCtrsMismatch
                  ]
   where
     defwSource = T.intercalate "\n" [ "                Dw       'R', 'o','y'"
@@ -176,8 +164,6 @@ defwTests = test [ "defw"              ~: (checkAssembly defwAsm)               
     high, low :: Word16 -> Word8
     high x = fromIntegral (x `shiftR` 8)
     low  x = fromIntegral (x .&. 0xff)
-
-    (_finalPC, defwProgCtrs) = generateExpectedStmtAddresses 0 defwExpected
 
     -- Parse and assemble the source:
     defwAsm = edasAssemble $ edasParseSequence "defwSource" defwSource
@@ -209,7 +195,6 @@ dateTimeTest = test [ "datetimeAsm"       ~: (checkAssembly dateTimeAsm)        
 dsymTests :: Test
 dsymTests = test [ "dsym"              ~: (checkAssembly dsymAsm)                         @? asmPassFailed
                  , "dsymExpected"      ~: (checkByteVectors and dsymAsm dsymExpected)     @? byteVecMismatch
-                 , "dsymProgCtrs"      ~: (checkProgramCounters and dsymAsm dsymProgCtrs) @? progCtrsMismatch
                  ]
   where
     dsymSource = T.intercalate "\n" [ "         ORG     0E143H"
@@ -224,15 +209,51 @@ dsymTests = test [ "dsym"              ~: (checkAssembly dsymAsm)               
                    , DVU.fromList [ 0x43, 0xe1 ]
                    ] :: [(DVU.Vector Z80word)]
 
-    dsymProgCtrs = [ 0
-                   , 0xe143
-                   , (dsymProgCtrs !! 1) + (fromIntegral . DVU.length) (dsymExpected !! 1)
-                   , (dsymProgCtrs !! 2) + (fromIntegral . DVU.length) (dsymExpected !! 2)
-                   ]
-
     -- Parse and assemble the source:
     dsymAsm = edasAssemble $ edasParseSequence "dsymSource" dsymSource
 
+-- | "DEFL" tests
+deflTests :: Test
+deflTests = test [ "defl"              ~: (checkAssembly deflAsm)                         @? asmPassFailed
+                 , "deflExpected"      ~: (checkByteVectors and deflAsm deflExpected)     @? byteVecMismatch
+                 ]
+  where
+    deflSource = T.intercalate "\n" [ "         ORG     8080H"
+                                    , "prog$    defl    $         ; Program code"
+                                    , "         org     8100H"
+                                    , "         db      'This is a message'"
+                                    , "data$    defl    $"
+                                    , ""
+                                    , "         org     prog$     ; Back to program code"
+                                    , "         nop"
+                                    , "prog$    defl    $"
+                                    , ""
+                                    , "         org     data$     ; More data"
+                                    , "         db      'More message data'"
+                                    , ""
+                                    , "data$    defl    $"
+                                    , "         org     prog$"
+                                    ]
+
+    deflExpected =  [ DVU.empty
+                    , DVU.empty
+                    , DVU.empty
+                    , DVU.fromList $ textToWord8 "This is a message"
+                    , DVU.empty
+                    , DVU.empty
+                    , DVU.empty
+                    , DVU.empty -- FIXME: Should be DVU.singleton 0 when instructions are generated.
+                    , DVU.empty
+                    , DVU.empty
+                    , DVU.empty
+                    , DVU.fromList $ textToWord8 "More message data"
+                    , DVU.empty
+                    , DVU.empty
+                    , DVU.empty
+                    ]:: [(DVU.Vector Z80word)]
+
+    -- Parse and assemble the source:
+    deflAsm = edasAssemble $ edasParseSequence "deflSource" deflSource
 
 -- | Symbol equate and expression tests. This checks for a successful assembler pass, that the symbols inserted are
 -- present, that bad/extraneous/invalid symbols are not in the final symbol table, and checks that expression parsing
@@ -249,19 +270,26 @@ equateTests = test [ "equateAsm"    ~: (checkAssembly equatesAsm)               
                    , "primExprVals" ~: (checkSymbolValuesWith and primExprAsm primExpected) @? "Expected evaluation failed"
                    ]
   where
-    symEquates = T.intercalate "\n" [ "CON30   EQU   30"
+    symEquates = T.intercalate "\n" [ "        ORG   4001H          ; Sets a4 to some value other than 0"
+                                    , "CON30   EQU   30             ; An example from the EDAS manual"
                                     , "CON16   EQU   +10H"
                                     , "CON3    EQU   3"
                                     , "A2      EQU   CON30+CON16"
                                     , "A3      equ   con30+con16*4"
+                                    , "a4      equ   $              ; should be 4001H"
+                                    , "$abc    equ   0E010H"
+                                    , "a5      equ   $abc + 2"
                                     ]
-    expectedVals = [ ("con30", 30)
-                   , ("CoN30", 30)
-                   , ("cOn30", 30)
-                   , ("con16", 16)
-                   , ("CON3",   3)
-                   , ("A2",    46)
-                   , ("A3",  46*4)                      -- Note lack of operator precedence
+    expectedVals = [ ("con30",    30)
+                   , ("CoN30",    30)
+                   , ("cOn30",    30)
+                   , ("con16",    16)
+                   , ("CON3",      3)
+                   , ("A2",       46)
+                   , ("A3",     46*4)                   -- Note lack of operator precedence
+                   , ("A4",   0x4001)
+                   , ("$abc", 0xe010)
+                   , ("a5",   0xe012)
                    ]
 
     -- Parse and assemble the equates
@@ -277,7 +305,7 @@ equateTests = test [ "equateAsm"    ~: (checkAssembly equatesAsm)               
 
     -- Symbols that will not be present in the final symbol table
     badSyms      = [ "Cno30", "foobar", "frobnats"
-                   , "a5", "A5"
+                   , "a51", "A5x"
                    , "con", "noc"
                    ]
 
@@ -376,10 +404,3 @@ stringToWord8 = map charToWord8
 textToWord8 :: T.Text
             -> [Word8]
 textToWord8 = stringToWord8 . T.unpack
-
--- | Generate statement addresses from the expected byte vector output
-generateExpectedStmtAddresses :: (DVU.Unbox wordType) =>
-                                 Z80addr
-                              -> [DVU.Vector wordType]
-                              -> (Z80addr, [Z80addr])
-generateExpectedStmtAddresses origin = mapAccumL (\pc elt -> (pc + (fromIntegral . DVU.length) elt, pc)) origin

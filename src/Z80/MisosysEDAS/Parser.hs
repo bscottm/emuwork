@@ -113,27 +113,27 @@ asmStatement =
                                              case theLabel ^. symLabel of
                                                 Just _label ->
                                                   -- ':' after a symbol might have an instruction following it.
-                                                  do { optional (char ':')
-                                                     ; optional whiteSpace
-                                                     ; maybeAsmOrPseudo         <?> "Z80 instruction or pseudo-operation"
-                                                     }
+                                                  optional (char ':')
+                                                  >> optional whiteSpace
+                                                  >> maybeAsmOrPseudo         <?> "Z80 instruction or pseudo-operation"
                                                   -- FIXME: What to do about equates that have no ':'?
                                                 Nothing     ->
                                                   -- No label: expect an instruction or pseudo-op
-                                                  maybeAsmOrPseudo              <?> "Z80 instruction or pseudo-operation"
+                                                  maybeAsmOrPseudo            <?> "Z80 instruction or pseudo-operation"
                                           )
                                       >>= (modifyState . updateAsmOp)
-      collectComment                = do { _ <- newline
-                                         ; modifyState (updateComment Nothing )
-                                         ; return ()
-                                         }
-                                      <|> do { cmnt <- asmComment
-                                             ; modifyState (updateComment (Just cmnt))
-                                             ; return ()
-                                             }
+      collectComment                = optional whiteSpace
+                                      >> ( ( newline
+                                             >> modifyState (updateComment Nothing)
+                                             >> return ()
+                                           ) <|> ( asmComment
+                                                   >>= (\cmnt -> modifyState (updateComment (Just cmnt)))
+                                                   >> return ()
+                                                 )
+                                         )
 
       maybeAsmOrPseudo              = optionMaybe ( asmOpcode
-                                                      <|> asmPseudo
+                                                    <|> asmPseudo
                                                   )
 
   in  do { setState mkEmptyAsmStmt
@@ -287,21 +287,25 @@ asmPseudo =
                                             >>= (\fill -> return $ DefC rept fill)
                                   )
                             )
-                        <|> ( stringIC "ef"                     -- def[bmws]
-                              >> ( ( charIC 'b' >> parseDefB )
-                                   <|> ( charIC 'm' >> parseDefB )
-                                   <|> ( charIC 's' >> whiteSpace >> parseDefS )
-                                   <|> ( charIC 'w' >> parseDefW )
+                        <|> ( stringIC "ef"
+                              >> ( ( charIC 'b' >> parseDefB )          -- defb (aka 'db')
+                                   <|> ( charIC 'l' >> parseDefL )      -- defl (define re-assignable label)
+                                   <|> ( charIC 'm' >> parseDefB )      -- defm (aka 'db')
+                                   <|> ( charIC 's' >> parseDefS )      -- defs (aka 'ds')
+                                   <|> ( charIC 'w' >> parseDefW )      -- defw
                                  )
                             )
                         <|> ( charIC 'm' >> parseDefB )         -- dm (same as 'db')
                         <|> ( charIC 's'
-                              >> ( try ( ( stringIC "ym"        -- dsym (dump symbol, emits symbol's name as byte sequence)
+                              >> ( try ( ( notFollowedBy letter
+                                           >> parseDefS         -- ds (define space, same as 'dc', but the constant is 0)
+                                         ) <?> "constant or expression following DS"
+                                       )
+                                   <|> ( ( stringIC "ym"        -- dsym (dump symbol, emits symbol's name as byte sequence)
                                            >> whiteSpace
                                            >> liftM DSym readLabel
-                                         ) <?> "Expecting label to follow DSYM"
+                                         ) <?> "label to follow DSYM"
                                        )
-                                   <|> ( whiteSpace >> parseDefS )  -- ds (define space, same as 'dc', but the constant is 0)
                                  )
                             )
                         <|> ( charIC 'w' >> parseDefW )         -- dw (define words)
@@ -314,7 +318,8 @@ asmPseudo =
                    <|> pseudoWithExpr "org" Origin
                    <|> ( stringIC "time" >> return AsmTime )
   where
-    pseudoWithExpr str pseudo = stringIC str
+    pseudoWithExpr str pseudo = whiteSpace
+                                >> stringIC str
                                 >> whiteSpace
                                 >> liftM pseudo asmExpr
 
@@ -344,7 +349,8 @@ asmPseudo =
                                           )
 
     -- DS/DEFS parser
-    parseDefS = liftM DefS asmExpr
+    parseDefS = whiteSpace
+                >> liftM DefS asmExpr
 
     -- DW/DEFW parser
     parseDefW = whiteSpace
@@ -358,6 +364,9 @@ asmPseudo =
                          )
                    )
 
+    -- DEFL parser
+    parseDefL = whiteSpace
+                >> liftM DefL asmExpr
 
 -- | Assembler expression parsing. The expression must minimally have a primary expression (constant, variable name or unary
 -- operator [".not.", ".high." or ".low."]) and may be optionally followed by binary operator expressions.
@@ -366,24 +375,24 @@ asmPseudo =
 asmExpr :: EDASParser EDASExpr
 asmExpr =
   do { leftExpr <- primExpr
-     ; option leftExpr (binOps leftExpr)
+     ; binOps leftExpr
      }
   where
     -- Primary expressions: constants, variables/symbols/labels, unary operators
     primExpr = getPosition
                >>= (\srcpos -> constExpr False srcpos
-                               <|> do { labSrcPos <- getPosition
-                                      ; liftM (Var labSrcPos) readLabel
-                                      }
-                               <|> ( unaryOp "not" OnesCpl
-                                     <|> unaryOp "high" HighByte
-                                     <|> unaryOp "low" LowByte
-                                   )
-                               <|> do { _ <- char '\''
-                                      ; c <- asciiChar
-                                      ; _ <- char '\''
-                                      ; return (AsmChar c)
-                                      }
+                               <|> try ( char '$'
+                                         >> notFollowedBy readLabel
+                                         >> return CurrentPC
+                                       )
+                               <|> try ( getPosition
+                                         >>= (\labSrcPos -> liftM (Var labSrcPos) readLabel)
+                                       )
+                               <|> try ( unaryOp "not" OnesCpl
+                                         <|> unaryOp "high" HighByte
+                                         <|> unaryOp "low" LowByte
+                                       )
+                               <|> try ( liftM AsmChar (between (char '\'') (char '\'') asciiChar) )
                    )
 
     -- Thankfully, EDAS makes parsing unary operations easy by putting them between '.'s:
@@ -393,40 +402,43 @@ asmExpr =
                                      }
                                 )
 
-    binOps leftExpr = do { optional whiteSpace
-                         ; binOp leftExpr '+' Add
-                             <|> binOp leftExpr '-' Sub
-                             <|> binOp leftExpr '*' Mul
-                             <|> binOp leftExpr '/' Div
-                             <|> binOp leftExpr '<' Shift
-                             <|> binOp leftExpr '&' LogAnd
-                             <|> binOp leftExpr '!' LogOr
-                             <|> try ( binOpSI leftExpr ".and." LogAnd )
-                             <|> try ( binOpSI leftExpr ".or." LogOr )
-                             <|> try ( binOpSI leftExpr ".mod." Mod )
-                             <|> try ( binOpSI leftExpr ".xor." LogXor )
-                             <|> try ( binOpSI leftExpr ".eq." LogEQ )
-                             <|> try ( binOpSI leftExpr ".ge." LogGE )
-                             <|> try ( binOpSI leftExpr ".gt." LogGT )
-                             <|> try ( binOpSI leftExpr ".le." LogLE )
-                             <|> try ( binOpSI leftExpr ".lt." LogLT )
-                             <|> try ( binOpSI leftExpr ".shl." ShiftL )
-                             <|> try ( binOpSI leftExpr ".shr." ShiftR )
-                         }
+    binOps leftExpr = binOp leftExpr '+' Add
+                      <|> binOp leftExpr '-' Sub
+                      <|> binOp leftExpr '*' Mul
+                      <|> binOp leftExpr '/' Div
+                      <|> binOp leftExpr '<' Shift
+                      <|> binOp leftExpr '&' LogAnd
+                      <|> binOp leftExpr '!' LogOr
+                      <|> binOpWord leftExpr "and" LogAnd
+                      <|> binOpWord leftExpr "or" LogOr
+                      <|> binOpWord leftExpr "mod" Mod
+                      <|> binOpWord leftExpr "xor" LogXor
+                      <|> binOpWord leftExpr "eq" LogEQ
+                      <|> binOpWord leftExpr "ge" LogGE
+                      <|> binOpWord leftExpr "gt" LogGT
+                      <|> binOpWord leftExpr "le" LogLE
+                      <|> binOpWord leftExpr "lt" LogLT
+                      <|> binOpWord leftExpr "shl" ShiftL
+                      <|> binOpWord leftExpr "shr" ShiftR
+                      <|> return leftExpr                     -- None of the parsers matched, so return the expression
 
-    binOp leftExpr c op = do { _ <- char c
-                             ; optional whiteSpace
-                             ; rightExpr <- primExpr
-                             ; let term = leftExpr `op` rightExpr
-                             ; option term (binOps term)
-                             }
-
-    binOpSI leftExpr str op = do { _  <- stringIC str
-                                 ; optional whiteSpace
-                                 ; rightExpr <- primExpr
-                                 ; let term = leftExpr `op` rightExpr
-                                 ; option term (binOps term)
+    binOp leftExpr c op = try ( do { optional whiteSpace
+                                   ; _ <- char c
+                                   ; optional whiteSpace
+                                   ; rightExpr <- primExpr
+                                   ; let term = leftExpr `op` rightExpr
+                                   ; binOps term
                                  }
+                              )
+
+    binOpWord leftExpr str op = try ( do { optional whiteSpace
+                                         ; _  <- between (char '.') (char '.') (stringIC str)
+                                         ; optional whiteSpace
+                                         ; rightExpr <- primExpr
+                                         ; let term = leftExpr `op` rightExpr
+                                         ; binOps term
+                                         }
+                                   )
 
 -- Constant expression: Optional sign, digits and base
 constExpr :: Bool                               -- ^ Sign required, 'True' when parsing IX, IY displacements
