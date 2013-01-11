@@ -13,8 +13,10 @@ import Control.Lens
 import Control.Monad
 import qualified Data.Char as C
 import qualified Data.Text as T
+import qualified Data.Text.IO as TIO
 import qualified Data.Vector.Unboxed as DVU
 
+import Machine
 import Z80
 import Z80.MisosysEDAS
 
@@ -40,6 +42,7 @@ edasTests = test [ defbTests
                  , dateTimeTest
                  , dsymTests
                  , deflTests
+                 , endEntryTests
                  , equateTests
                  ]
 
@@ -255,6 +258,29 @@ deflTests = test [ "defl"              ~: (checkAssembly deflAsm)               
     -- Parse and assemble the source:
     deflAsm = edasAssemble $ edasParseSequence "deflSource" deflSource
 
+-- | "END" and "ENTRY" tests
+endEntryTests :: Test
+endEntryTests = test [ "end1"            ~: (checkAssembly endAsm1)                         @? asmPassFailed
+                     , "end1saddr"       ~: (checkStartAddress 0x8080 endAsm1)              @? "Start address doesn't match"
+                     , "end2"            ~: (checkAssembly endAsm2)                         @? asmPassFailed
+                     , "end2saddr"       ~: (checkStartAddress 0x8081 endAsm2)              @? "Start address doesn't match"
+                     ]
+  where
+    endAsm1Source = T.intercalate "\n" [ "         ORG     8080H"
+                                       , "START:"
+                                       , "         end     start"
+                                       ]
+
+    endAsm2Source = T.intercalate "\n" [ "         ORG     8080H"
+                                       , "START:"
+                                       , "         ENTRY   START + 1"
+                                       , "         end"
+                                       ]
+
+    -- Parse and assemble the source:
+    endAsm1 = edasAssemble $ edasParseSequence "endAsm1Source" endAsm1Source
+    endAsm2 = edasAssemble $ edasParseSequence "endAsm2Source" endAsm2Source
+
 -- | Symbol equate and expression tests. This checks for a successful assembler pass, that the symbols inserted are
 -- present, that bad/extraneous/invalid symbols are not in the final symbol table, and checks that expression parsing
 -- and evaluation functions correctly. 
@@ -337,7 +363,7 @@ equateTests = test [ "equateAsm"    ~: (checkAssembly equatesAsm)               
 -- | Check to see if the code assembled correctly.
 checkAssembly :: EDASAsmOutput                          -- ^ The assembler's output
               -> IO Bool
-checkAssembly asm = liftM checkAsm asm
+checkAssembly asm = checkAssemblerWarnings asm True >> liftM checkAsm asm
   where
     checkAsm theAsm = case theAsm of
                         Left problems -> error (T.unpack problems)
@@ -389,6 +415,43 @@ checkProgramCounters pred asm expected = liftM checkPCs asm
                         Left problems            -> error (T.unpack problems)
                         Right (_finalctx, stmts) -> pred $ zipWith (==) (stmtAddrs stmts) expected
     stmtAddrs stmts = map (\x -> x ^. stmtAddr) stmts
+
+-- | Check the start address of the assembler\'s output
+checkStartAddress :: Z80addr
+                  -> EDASAsmOutput
+                  -> IO Bool
+checkStartAddress sAddr asm = liftM checkSAddr asm
+  where
+    checkSAddr theAsm = case theAsm of
+                          Left problems       -> error (T.unpack problems)
+                          Right (ctx, _stmts) ->
+                            let asmStartAddr = startAddr ^$ ctx
+                                sAddrsMatch  = (isJust asmStartAddr) && (fromJust asmStartAddr) == sAddr
+                            in  if sAddrsMatch then
+                                  sAddrsMatch
+                                else
+                                  error (T.unpack $ T.concat [ "sAddr = "
+                                                             , as0xHex sAddr
+                                                             , ", got "
+                                                             , (T.pack . show . (liftM as0xHex)) asmStartAddr
+                                                             ]
+                                        )
+
+-- | Check for assembler warnings, dump them out if requested
+checkAssemblerWarnings :: EDASAsmOutput
+                       -> Bool
+                       -> IO Bool
+checkAssemblerWarnings asm showWarnings =
+  asm >>= (\theAsm -> case theAsm of
+            Left problems       -> error (T.unpack problems)
+            Right (ctx, _stmts) -> let theWarnings = warnings ^$ ctx
+                                       retval      = null theWarnings
+                                   in  if (not . null) theWarnings then
+                                         when showWarnings (mapM_ TIO.putStrLn theWarnings)
+                                         >> return retval
+                                       else
+                                         return retval
+          )
 
 -- | Convert a character to 'Word8'
 charToWord8 :: Char

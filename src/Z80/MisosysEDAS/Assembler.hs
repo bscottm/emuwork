@@ -21,6 +21,7 @@ import Control.Lens hiding (value)
 import Prelude hiding (words)
 import Control.Monad
 import Data.Either
+import Data.Maybe
 import Data.Word
 import Data.Int
 import Data.List hiding (words)
@@ -30,7 +31,6 @@ import System.Locale
 -- import Data.Time.Format
 import Text.Parsec.Pos
 import qualified Data.Char as C
-import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Vector.Unboxed as DVU
 
@@ -46,23 +46,14 @@ type EDASAsmOutput = IO (Either T.Text (AsmEvalCtx, [AsmStmt]))
 
 -- | The assembler pass: Evaluate the pseudo-operations and expressions within instructions, update the assembler
 -- statement with the results and 'Z80instruction's.
---
--- N.B.: The result is embedded in the 'IO' monad due to the need to call 'Data.Time.getCurrentTime', which returns
--- 'IO' 'UTCTime'. Yuck.
 edasAssemble :: Either T.Text [AsmStmt]                 -- ^ Parser result
              -> EDASAsmOutput                           -- ^ Assembler result
 edasAssemble parseResult =
   case parseResult of
     Left stuff   -> return $ Left stuff
-    Right  stmts -> getZonedTime
-                    >>= (\currentTime ->
-                          let initialCtx = Right $ AsmEvalCtx { _equateTab   = Map.empty
-                                                              , _symLabelTab = Map.empty
-                                                              , _defLabelTab = Map.empty
-                                                              , _asmPC       = 0
-                                                              , _dateTime    = currentTime
-                                                              }
-                              (finalctx, result) = mapAccumL evalAsmStmt initialCtx stmts
+    Right  stmts -> mkAsmEvalCtx
+                    >>= (\initialCtx ->
+                          let (finalctx, result) = mapAccumL evalAsmStmt (Right initialCtx) stmts
                           in  return $ case finalctx of
                                          Left stuff   -> Left stuff
                                          Right  ctx   -> Right (ctx, result)
@@ -76,19 +67,24 @@ evalAsmStmt ictx stmt =
   case ictx of
     Left stuff  -> (Left stuff, stmt)
     Right ctx   ->
-      let currentPC = ctx ^. asmPC
+      let currentPC  = ctx ^. asmPC
+          atEndOfAsm = ctx ^. endOfAsm
           -- Associate the statement's label with the current program counter
-          stmtCtx   = case stmt ^. symLabel of
-                        Nothing    -> ctx
-                        Just label -> insertSymLabel ctx label currentPC
-      in  case stmt ^. asmOp of
-            Nothing              -> ( Right stmtCtx
-                                    , stmtAddr .~ currentPC $ stmt
-                                    )
-            Just (Insn _insn)    -> (Right stmtCtx, stmt)
-            -- Don't jamb the statement label into the symbol table just yet. EQU and DEFL treat
-            -- their labels differently.
-            Just (Pseudo pseudo) -> evalPseudo ctx stmt pseudo
+          stmtCtx    = case stmt ^. symLabel of
+                         Nothing    -> ctx
+                         Just label -> insertSymLabel ctx label currentPC
+      in  if not atEndOfAsm then
+            case stmt ^. asmOp of
+              Nothing              -> ( Right stmtCtx
+                                      , stmtAddr .~ currentPC $ stmt
+                                      )
+              Just (Insn _insn)    -> (Right stmtCtx, stmt)
+              -- Don't jamb the statement label into the symbol table just yet. EQU and DEFL handle
+              -- their labels differently.
+              Just (Pseudo pseudo) -> evalPseudo ctx stmt pseudo
+          else
+            -- Ignore everything after the 'END' pseudo-operation
+            (ictx, stmt)
 
 -- | Evaluate and generate code for pseudo-operations
 evalPseudo :: AsmEvalCtx
@@ -101,24 +97,26 @@ evalPseudo ctx stmt pseudo =
                         Just label -> insertSymLabel ctx label (ctx ^. asmPC)
     in  case pseudo of
           -- Equate uses the original assembler context, statement label is stored in the context's equateTab
-          Equate expr    -> (evalEquate (stmt ^. symLabel) expr ctx, stmt)
-          Origin org     -> (liftM (\o -> asmPC .~ o $ stmtCtx) (evalAsmExpr stmtCtx org), stmt)
-          DefB args      -> let cvtDBValue (DBStr str)   = Right $ map charIntegral $ T.unpack str
-                                cvtDBValue (DBExpr expr) = liftM (: []) (evalAsmExprWord8 stmtCtx expr)
-                            in  evalDefXXArgs args cvtDBValue stmtCtx stmt
-          DefC rept fill -> evalDefC rept fill stmtCtx stmt
-          DefS rept      -> evalDefS rept stmtCtx stmt
-          DefW args      -> let cvtDWValue (DWChars c1 c2) = Right $ [(charIntegral c1), (charIntegral c2)]
-                                cvtDWValue (DWExpr expr)   = liftM word2ByteList (evalAsmExpr stmtCtx expr)
-                            in  evalDefXXArgs args cvtDWValue stmtCtx stmt
-          DSym sym       -> emitText sym stmtCtx stmt
-          DExp expr      -> case liftM word2ByteList (evalAsmExpr stmtCtx expr) of
-                              Left issues -> (Left issues, stmt)
-                              Right words -> updateCtxStmtBytes stmtCtx stmt (DVU.fromList words)
-          AsmDate        -> emitString (stmtCtx ^. dateTime & formatTime defaultTimeLocale "%D") stmtCtx stmt
-          AsmTime        -> emitString (stmtCtx ^. dateTime & formatTime defaultTimeLocale "%T") stmtCtx stmt
+          Equate expr     -> (evalEquate (stmt ^. symLabel) expr ctx, stmt)
+          Origin org      -> (liftM (\o -> asmPC .~ o $ stmtCtx) (evalAsmExpr stmtCtx org), stmt)
+          DefB args       -> let cvtDBValue (DBStr str)   = Right $ map charIntegral $ T.unpack str
+                                 cvtDBValue (DBExpr expr) = liftM (: []) (evalAsmExprWord8 stmtCtx expr)
+                             in  evalDefXXArgs args cvtDBValue stmtCtx stmt
+          DefC rept fill  -> evalDefC rept fill stmtCtx stmt
+          DefS rept       -> evalDefS rept stmtCtx stmt
+          DefW args       -> let cvtDWValue (DWChars c1 c2) = Right $ [(charIntegral c1), (charIntegral c2)]
+                                 cvtDWValue (DWExpr expr)   = liftM word2ByteList (evalAsmExpr stmtCtx expr)
+                             in  evalDefXXArgs args cvtDWValue stmtCtx stmt
+          DSym sym        -> emitText sym stmtCtx stmt
+          DExp expr       -> case liftM word2ByteList (evalAsmExpr stmtCtx expr) of
+                               Left issues -> (Left issues, stmt)
+                               Right words -> updateCtxStmtBytes stmtCtx stmt (DVU.fromList words)
+          AsmDate         -> emitString (stmtCtx ^. dateTime & formatTime defaultTimeLocale "%D") stmtCtx stmt
+          AsmTime         -> emitString (stmtCtx ^. dateTime & formatTime defaultTimeLocale "%T") stmtCtx stmt
           -- DefL uses the original assembler context, statement label is stored in the context's defLabelTab
-          DefL expr      -> (evalDefLabel (stmt ^. symLabel) expr ctx, stmt)
+          DefL expr       -> (evalDefLabel (stmt ^. symLabel) expr ctx, stmt)
+          EndAsm loc expr -> evalEndAsm ctx stmt loc expr
+          Entry  loc expr -> evalEntry ctx stmt loc expr
 
 -- | Update statement with its byte vector, context with the updated program counter
 updateCtxStmtBytes :: AsmEvalCtx
@@ -207,6 +205,46 @@ word2ByteList :: Word16
               -> [Z80word]
 word2ByteList w = [(fromIntegral (w .&. 0xff)), (fromIntegral (w `shiftR` 8))]
 
+-- | Set end of assembly flag, update start address if not already set.
+evalEndAsm :: AsmEvalCtx
+           -> AsmStmt
+           -> SourcePos
+           -> Maybe EDASExpr
+           -> (IntermediateCtx, AsmStmt)
+evalEndAsm ctx stmt loc expr =
+  let stmtCtx = endOfAsm .~ True $ ctx
+  in  case expr of
+        Just toEval -> case evalAsmExpr stmtCtx toEval of
+                         Left issues -> (Left issues, stmt)
+                         Right val   ->
+                           let stmtCtx' = if isNothing (stmtCtx ^. startAddr) then
+                                            stmtCtx
+                                          else
+                                            appendWarning stmtCtx loc
+                                                          (T.append "Start address already set to "
+                                                                    ((asHex . fromJust) $ stmtCtx ^. startAddr))
+                           in  (Right (startAddr .~ (Just val) $ stmtCtx')
+                               , stmt
+                               )
+        Nothing     -> (Right stmtCtx, stmt)
+
+-- | Update the start address specified by an \'ENTRY\' pseudo-operation
+evalEntry :: AsmEvalCtx
+          -> AsmStmt
+          -> SourcePos
+          -> EDASExpr
+          -> (IntermediateCtx, AsmStmt)
+evalEntry ctx stmt loc expr =
+  case evalAsmExpr ctx expr of
+    Left issues -> (Left issues, stmt)
+    Right val   -> let stmtCtx = startAddr .~ (Just val) $ if isNothing (ctx ^. startAddr) then
+                                                             ctx
+                                                           else
+                                                             appendWarning ctx loc
+                                                                           (T.append "Start address already set to "
+                                                                                     (ctx ^. startAddr & (asHex . fromJust)))
+                   in  (Right stmtCtx , stmt)
+    
 -- | Evaluate an assembler expression to produce a 'Word16' result, within the current assembler evaluation context
 evalAsmExpr :: AsmEvalCtx
             -> EDASExpr
@@ -312,3 +350,10 @@ stringToWords :: (Integral wordType) =>
                  String
               -> [wordType]
 stringToWords = map charIntegral
+
+-- | Append a new warning onto the existing assembler warnings
+appendWarning :: AsmEvalCtx
+              -> SourcePos
+              -> T.Text
+              -> AsmEvalCtx
+appendWarning ctx loc msg = warnings %~ (++ [T.append (mkSourcePosT loc) msg]) $ ctx

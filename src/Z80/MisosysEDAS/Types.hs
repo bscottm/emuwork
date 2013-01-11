@@ -59,6 +59,12 @@ data EDASPseudo where
   AsmTime :: EDASPseudo         -- Emit the current time as "HH:MM:SS" byte sequence
   DefL    :: EDASExpr           -- Define label, i.e., something that can be reassigned, as opposed to equates and statement labels
           -> EDASPseudo
+  EndAsm  :: SourcePos          -- End of Assembly source, with optional entry point
+          -> Maybe EDASExpr
+          -> EDASPseudo
+  Entry   :: SourcePos          -- Explicit start address/entry point
+          -> EDASExpr
+          -> EDASPseudo
   deriving (Show)
 
 -- | 'DefB' elements
@@ -148,77 +154,115 @@ data EDASExpr where
             -> EDASExpr
   deriving (Show)
 
+-- | Symbol types that are stored in the symbol table. Equates and statement labels cannot be modified once
+-- set, whereas defined labels (via 'DEFL') may take on multiple values. Defined labels are stored as a list,
+-- with the most recent value at the head.
+
+data SymbolType where
+  SymEquate :: Word16                       -- Equate
+            -> SymbolType
+  StmtLabel :: Word16                       -- Statement label
+            -> SymbolType
+  DefLabel  :: [Word16]
+            -> SymbolType
+  deriving (Show)
+
 -- | Assembler evaluation context, when evaluating expressions.
 data AsmEvalCtx where
   AsmEvalCtx ::
-    { _equateTab    :: Map T.Text Word16    -- Equates (cannot be changed once evaluated)
-    , _symLabelTab  :: Map T.Text Word16    -- Statement/symbolic labels (cannot be changed, once assigned)
-    , _defLabelTab  :: Map T.Text Word16    -- Defined labels (i.e., 'defl' pseudo-operation)
-    , _asmPC        :: Z80addr              -- Current assembler program counter
-    , _dateTime     :: ZonedTime            -- Time at which the assembler pass started
+    { _symbolTab    :: Map T.Text SymbolType  -- The symbol table
+    , _asmPC        :: Z80addr                -- Current assembler program counter
+    , _dateTime     :: ZonedTime              -- Time at which the assembler pass started
+    , _startAddr    :: Maybe Z80addr          -- Start address from 'END' or 'ENTRY' pseudo-operations
+    , _endOfAsm     :: Bool                   -- 'END' pseudo-instruction encountered?
+    , _warnings     :: [T.Text]               -- Accumulated warning messages
     } -> AsmEvalCtx
+    deriving (Show)
 
 makeLenses ''AsmEvalCtx
 
--- | Find a symbol or label in the 'AsmEvalCtx' by case-insensitive key
-findAsmSymbol :: AsmEvalCtx
-              -> T.Text
-              -> Maybe Word16
+-- | Make an initialized (empty) assembler context in the 'IO' context
+--
+-- N.B.: The result is embedded in the 'IO' monad due to the need to call 'Data.Time.getZonedTime'. Yuck.
+mkAsmEvalCtx :: IO AsmEvalCtx
+mkAsmEvalCtx = getZonedTime
+               >>= (\currentTime -> return ( AsmEvalCtx { _symbolTab = Map.empty
+                                                        , _asmPC     = 0
+                                                        , _dateTime  = currentTime
+                                                        , _startAddr = Nothing
+                                                        , _endOfAsm  = False
+                                                        , _warnings  = []
+                                                        }
+                                           )
+                   )
+
+-- | Find a symbol or label in the 'AsmEvalCtx' by case-insensitive key, returning its value
+findAsmSymbol :: AsmEvalCtx                   -- ^ Current assembler context
+              -> T.Text                       -- ^ Symbol name
+              -> Maybe Word16                 -- ^ Nothing, if not found, otherwise the 16-bit value
 findAsmSymbol ctx sym =
-  let eqSym  = ctx ^. equateTab & Map.lookup (T.toLower sym)
-      symLab = ctx ^. symLabelTab & Map.lookup (T.toLower sym)
-      defLab = ctx ^. defLabelTab & Map.lookup (T.toLower sym)
-  in  if isJust eqSym then
-        eqSym
-      else if isJust symLab then
-             symLab
-           else
-             defLab
+  let getValue Nothing                   = Nothing
+      getValue (Just (SymEquate val))    = Just val
+      getValue (Just (StmtLabel val))    = Just val
+      getValue (Just (DefLabel []))      = Nothing
+      getValue (Just (DefLabel (val:_))) = Just val
+  in  getValue (ctx ^. symbolTab & Map.lookup (T.toLower sym))
 
 -- | Insert a new symbol into the context's equate table
 insertEquate :: AsmEvalCtx
              -> T.Text
              -> Word16
              -> AsmEvalCtx
-insertEquate ctx sym symval = equateTab %~ (Map.insert (T.toLower sym) symval) $ ctx
+insertEquate ctx sym symval = symbolTab %~ (Map.insert (T.toLower sym) (SymEquate symval)) $ ctx
 
 -- | Insert a new statement label into the context's statement/symbol label table
 insertSymLabel :: AsmEvalCtx
                -> T.Text
                -> Word16
                -> AsmEvalCtx
-insertSymLabel ctx lab labval = symLabelTab %~ (Map.insert (T.toLower lab) labval) $ ctx
+insertSymLabel ctx lab labval = symbolTab %~ (Map.insert (T.toLower lab) (StmtLabel labval)) $ ctx
 
 -- | Insert a new 'DefL' label into the context's defined label table
 insertDefLabel :: AsmEvalCtx
                -> T.Text
                -> Word16
                -> AsmEvalCtx
-insertDefLabel ctx lab labval = defLabelTab %~ (Map.insert (T.toLower lab) labval) $ ctx
+insertDefLabel ctx lab labval = symbolTab .~ updatedSymtab $ ctx
+  where
+    (_ignored, updatedSymtab) = ctx ^. symbolTab & Map.insertLookupWithKey updateDef (T.toLower lab) (DefLabel [labval])
+    updateDef _k (DefLabel newval) (DefLabel existing) = DefLabel (newval ++ existing)
+    updateDef _k badNewVal         badOldVal           =
+      error ("insertDefLabel assertion: new = " ++ (show badNewVal) ++ ", old = " ++ (show badOldVal))
 
 -- | Determine if a symbol is present as an equate symbol
 existsEquate :: AsmEvalCtx
              -> T.Text
              -> Bool
-existsEquate ctx sym = ctx ^. equateTab & (Map.member (T.toLower sym))
+existsEquate ctx sym = case ctx ^. symbolTab & (Map.lookup (T.toLower sym)) of
+                         (Just (SymEquate _)) -> True
+                         _otherwise           -> False
 
 -- | Determine if a symbol is present as an equate symbol
 existsSymLabel :: AsmEvalCtx
                -> T.Text
                -> Bool
-existsSymLabel ctx sym = ctx ^. symLabelTab  & (Map.member (T.toLower sym))
+existsSymLabel ctx sym = case ctx ^. symbolTab  & (Map.lookup (T.toLower sym)) of
+                           (Just (StmtLabel _)) -> True
+                           _otherwise           -> False
 
 -- | Determine if a symbol is present as an equate symbol
 existsDefLabel :: AsmEvalCtx
                -> T.Text
                -> Bool
-existsDefLabel ctx sym = ctx ^. defLabelTab  & (Map.member (T.toLower sym))
+existsDefLabel ctx sym = case ctx ^. symbolTab  & (Map.lookup (T.toLower sym)) of
+                           (Just (DefLabel _)) -> True
+                           _otherwise          -> False
 
 -- | Determine if a symbol is present as either an equate or statement label
 existsAsmSymbol :: AsmEvalCtx
                 -> T.Text
                 -> Bool
-existsAsmSymbol ctx sym = (existsEquate ctx sym) || (existsSymLabel ctx sym) || (existsDefLabel ctx sym)
+existsAsmSymbol ctx sym = isJust (ctx ^. symbolTab  & (Map.lookup (T.toLower sym)))
 
 -- | Data type constructors for EDAS data elements
 data AsmStmt where

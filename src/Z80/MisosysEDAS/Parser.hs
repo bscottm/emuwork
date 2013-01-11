@@ -274,54 +274,70 @@ asmOpcode =
 -- | Parse EDAS pseudo operations, such as "EQU", "DEFS", "ORG", etc.
 asmPseudo :: EDASParser AsmOp
 asmPseudo =
-  liftM Pseudo $ ( charIC 'd'
-                   >> ( ( stringIC "ate" >> return AsmDate )    -- date
-                        <|> ( charIC 'b' >> parseDefB )         -- db
-                        <|> ( charIC 'c'                        -- dc (define replicated byte constant)
-                              >> whiteSpace
-                              >> asmExpr
-                              >>= (\rept -> optional whiteSpace
-                                            >> char ','
-                                            >> optional whiteSpace
-                                            >> asmExpr
-                                            >>= (\fill -> return $ DefC rept fill)
+  liftM Pseudo $ getPosition
+                 >>= (\srcloc -> 
+                       ( charIC 'd'
+                         >> ( ( stringIC "ate" >> return AsmDate )    -- date
+                              <|> ( charIC 'b' >> parseDefB )         -- db
+                              <|> ( charIC 'c'                        -- dc (define replicated byte constant)
+                                    >> whiteSpace
+                                    >> asmExpr
+                                    >>= (\rept -> optional whiteSpace
+                                                  >> char ','
+                                                  >> optional whiteSpace
+                                                  >> asmExpr
+                                                  >>= (\fill -> return $ DefC rept fill)
+                                        )
+                                  )
+                              <|> ( stringIC "ef"
+                                    >> ( ( charIC 'b' >> parseDefB )          -- defb (aka 'db')
+                                         <|> ( charIC 'l' >> parseDefL )      -- defl (define re-assignable label)
+                                         <|> ( charIC 'm' >> parseDefB )      -- defm (aka 'db')
+                                         <|> ( charIC 's' >> parseDefS )      -- defs (aka 'ds')
+                                         <|> ( charIC 'w' >> parseDefW )      -- defw
+                                       )
+                                  )
+                              <|> ( charIC 'm' >> parseDefB )         -- dm (same as 'db')
+                              <|> ( charIC 's'
+                                    >> ( try ( ( notFollowedBy letter
+                                                 >> parseDefS         -- ds (define space, same as 'dc', but the constant is 0)
+                                               ) <?> "constant or expression following DS"
+                                             )
+                                         <|> ( ( stringIC "ym"        -- dsym (dump symbol, emits symbol's name as byte sequence)
+                                                 >> whiteSpace
+                                                 >> liftM DSym readLabel
+                                               ) <?> "label to follow DSYM"
+                                             )
+                                       )
+                                  )
+                              <|> ( charIC 'w' >> parseDefW )         -- dw (define words)
+                              <|> ( charIC 'x'                        -- dx (define expression: emit 16-bit expression value)
+                                    >> whiteSpace
+                                    >> liftM DExp asmExpr
                                   )
                             )
-                        <|> ( stringIC "ef"
-                              >> ( ( charIC 'b' >> parseDefB )          -- defb (aka 'db')
-                                   <|> ( charIC 'l' >> parseDefL )      -- defl (define re-assignable label)
-                                   <|> ( charIC 'm' >> parseDefB )      -- defm (aka 'db')
-                                   <|> ( charIC 's' >> parseDefS )      -- defs (aka 'ds')
-                                   <|> ( charIC 'w' >> parseDefW )      -- defw
-                                 )
-                            )
-                        <|> ( charIC 'm' >> parseDefB )         -- dm (same as 'db')
-                        <|> ( charIC 's'
-                              >> ( try ( ( notFollowedBy letter
-                                           >> parseDefS         -- ds (define space, same as 'dc', but the constant is 0)
-                                         ) <?> "constant or expression following DS"
-                                       )
-                                   <|> ( ( stringIC "ym"        -- dsym (dump symbol, emits symbol's name as byte sequence)
-                                           >> whiteSpace
-                                           >> liftM DSym readLabel
-                                         ) <?> "label to follow DSYM"
-                                       )
-                                 )
-                            )
-                        <|> ( charIC 'w' >> parseDefW )         -- dw (define words)
-                        <|> ( charIC 'x'                        -- dx (define expression: emit 16-bit expression value)
-                              >> whiteSpace
-                              >> liftM DExp asmExpr
-                            )
-                      )
-                 ) <|> pseudoWithExpr "equ" Equate
-                   <|> pseudoWithExpr "org" Origin
+                       )
+                   <|> ( charIC 'e'
+                           >> ( ( stringIC "qu"                     -- equ (symbol equation)
+                                  >> pseudoWithExpr Equate
+                                )
+                                <|> try ( stringIC "nd"             -- end
+                                          >> whiteSpace
+                                          >> liftM (EndAsm srcloc) (optionMaybe asmExpr)
+                                        )
+                                <|> try ( stringIC "ntry"           -- entry
+                                          >> pseudoWithExpr (Entry srcloc)
+                                        )
+                              )
+                       )
+                   <|> ( stringIC "org"
+                         >> pseudoWithExpr Origin
+                       )
                    <|> ( stringIC "time" >> return AsmTime )
+                 )
   where
-    pseudoWithExpr str pseudo = whiteSpace
-                                >> stringIC str
-                                >> whiteSpace
-                                >> liftM pseudo asmExpr
+    pseudoWithExpr pseudo = whiteSpace
+                            >> liftM pseudo asmExpr
 
     -- DB/DEFB/DEFM/DM: a list of strings, single characters, expressions or bytes (which are constant expressions)
     -- Note that range checking is done by the assembler.
