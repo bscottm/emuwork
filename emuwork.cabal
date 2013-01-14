@@ -55,7 +55,12 @@ library
                         Z80.DisasmOutput,
                         Z80.ParseAnalytic,
                         Z80.MisosysEDAS.Types,
+                        Z80.MisosysEDAS.AsmPrettyPrinter,
+                        Z80.MisosysEDAS.ParserUtils,
                         Z80.MisosysEDAS.Assembler,
+                        Z80.MisosysEDAS.PseudoOpParser,
+                        Z80.MisosysEDAS.MnemonicParser,
+                        Z80.MisosysEDAS.ExprParser,
                         Z80.MisosysEDAS.Parser
 
 executable emuwork

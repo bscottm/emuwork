@@ -1,3 +1,10 @@
+{-# OPTIONS_HADDOCK ignore-exports #-}
+
+-- | Z80 disassmbler output.
+--
+-- Disassembler output consists of two elements: the "analytic" part (address, opcode bytes and ASCII) and the "assembler" part.
+-- The assembler part is Misosys EDAS-compatible, so, if the "analytic" part is stripped from the output, the resulting "assembler"
+-- part could be fed into the Misosys-EDAS compatible assembler to regenerate the object code.
 module Z80.DisasmOutput
   ( z80AnalyticDisassembly
   , z80AnalyticDisassemblyOutput

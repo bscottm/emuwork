@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# OPTIONS_HADDOCK ignore-exports #-}
 
 -- | The Haskell representation of the Z80 instruction set
 module Z80.InstructionSet

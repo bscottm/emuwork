@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK ignore-exports #-}
+
 module Z80.InsnDecode 
   ( -- * Types
     Z80decodedInsn

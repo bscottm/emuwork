@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK ignore-exports #-}
+
 -- | Intel Hex format parser/reader
 module Reader.IntelHex 
   ( readIntelHexVector

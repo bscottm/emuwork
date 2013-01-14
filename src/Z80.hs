@@ -5,7 +5,7 @@ module Z80
        , module Z80.InsnDecode
        , module Z80.Disassembler
        , module Z80.DisasmOutput
-       , module Z80.ParseAnalytic
+       -- , module Z80.ParseAnalytic
        , z80processor
        ) where
 
@@ -15,7 +15,7 @@ import Z80.Processor
 import Z80.InstructionSet
 import Z80.Disassembler
 import Z80.DisasmOutput
-import Z80.ParseAnalytic
+-- import Z80.ParseAnalytic
 
 import Z80.InsnDecode
 

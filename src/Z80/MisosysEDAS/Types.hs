@@ -1,12 +1,18 @@
+{-# OPTIONS_HADDOCK ignore-exports #-}
+
 -- | Types shared across the Misosys EDAS assembler
 module Z80.MisosysEDAS.Types where
 
+-- import Debug.Trace
+
 import Control.Lens
+import Data.Functor.Identity
 import Data.Word
 import Data.Int
 import Data.Time
 import Data.Maybe
-import Text.Parsec.Pos
+import Data.Monoid
+import Text.Parsec
 import qualified Data.Text as T
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -22,19 +28,92 @@ type EDASLabel = T.Text
 data Comment = Comment Int T.Text
   deriving (Show)
 
+-- | Symbol types that are stored in the symbol table. Equates and statement labels cannot be modified once
+-- set, whereas defined labels (via 'DEFL') may take on multiple values. Defined labels are stored as a list,
+-- with the most recent value at the head.
+
+data SymbolType where
+  SymEquate :: Word16                       -- Equate
+            -> SymbolType
+  StmtLabel :: Word16                       -- Statement label
+            -> SymbolType
+  DefLabel  :: [Word16]
+            -> SymbolType
+  deriving (Show)
+
+-- | Assembler evaluation context, when evaluating expressions.
+data AsmEvalCtx where
+  AsmEvalCtx ::
+    { _symbolTab    :: Map T.Text SymbolType  -- The symbol table
+    , _asmPC        :: Z80addr                -- Current assembler program counter
+    , _lorgPC       :: Z80addr                -- Load origin program counter
+    , _dateTime     :: ZonedTime              -- Time at which the assembler pass started
+    , _startAddr    :: Maybe Z80addr          -- Start address from 'END' or 'ENTRY' pseudo-operations
+    , _endOfAsm     :: Bool                   -- 'END' pseudo-instruction encountered?
+    , _warnings     :: [T.Text]               -- Accumulated warning messages
+    } -> AsmEvalCtx
+    deriving (Show)
+
+makeLenses ''AsmEvalCtx
+
+-- | Shorthand for catching issues and problems detected while using 'AsmEvalCtx', e.g., duplicate symbols and
+-- labels.
+type IntermediateCtx = Either T.Text AsmEvalCtx
+
+-- | Make an initialized (empty) assembler context in the 'IO' Monad.
+--
+-- N.B.: The result is embedded in the 'IO' monad due to the need to call 'Data.Time.getZonedTime'. Yuck.
+mkAsmEvalCtx :: IO AsmEvalCtx
+mkAsmEvalCtx = getZonedTime
+               >>= (\currentTime -> return ( AsmEvalCtx { _symbolTab = Map.empty
+                                                        , _asmPC     = 0
+                                                        , _lorgPC    = 0
+                                                        , _dateTime  = currentTime
+                                                        , _startAddr = Nothing
+                                                        , _endOfAsm  = False
+                                                        , _warnings  = []
+                                                        }
+                                           )
+                   )
+
 -- | Assembler operation: a Z80 instruction or EDAS pseudo operation
 data AsmOp where
-  Insn   :: (AsmEvalCtx -> Either T.Text Z80instruction)
+  NoAsmOp  :: AsmOp                             -- Monoid 'mempty' element. Note that this eliminates the need to
+                                                -- wrap 'AsmOp' in 'Data.Maybe' when there is no 'Insn' or 'Pseudo'.
+  InsnEval :: (IntermediateCtx -> Either T.Text Z80instruction)
                                                 -- Left: Warning or error message
                                                 -- Right: An instruction constructor, may involve an expression
                                                 -- and an evaluation context. 
-         -> AsmOp
-  Pseudo :: EDASPseudo                          -- A pseudo operation, e.g., equate, db, ds, etc.
-         -> AsmOp
+          -> AsmOp
+  Insn    :: Z80instruction
+          -> AsmOp
+  Pseudo  :: EDASPseudo                         -- A pseudo operation, e.g., equate, db, ds, etc.
+          -> AsmOp
+  AsmSeq  :: [AsmOp]                            -- An assembly sequence, mainly used to implement 'Monoid' properties
+                                                -- Note: This is not used or referenced, other than in the 'Monoid'
+                                                -- instance.
+          -> AsmOp
   deriving (Show)
 
-instance Show (AsmEvalCtx -> Either T.Text Z80instruction) where
+instance Show (IntermediateCtx -> Either T.Text Z80instruction) where
   show _ctxInsn = "<asm insn eval>"
+
+-- | Generating lenses for 'AsmStmt' requires 'AsmOp' to have 'Data.Monoid.Monoid' properties. However,
+-- no of these instance functions get invoked at runtime (at least right now...)
+instance Monoid AsmOp where
+  -- Easy case. This also eliminates the need to wrap 'AsmOp' within 'Data.Maybe' when there is no value.
+  mempty  = NoAsmOp
+
+  -- Easy cases.
+  NoAsmOp       `mappend` x             = x
+  x             `mappend` NoAsmOp       = x
+
+  (AsmSeq aseq) `mappend` (AsmSeq bseq) = AsmSeq (aseq ++ bseq)
+  (AsmSeq aseq) `mappend` x             = AsmSeq (aseq ++ [x])
+  x             `mappend` (AsmSeq aseq) = AsmSeq (x:aseq)
+
+  -- Create 'AsmSeq' sequences for all other 'mappend' cases:
+  x             `mappend` y             = AsmSeq [x, y]
 
 -- | EDAS\' pseudo operations
 data EDASPseudo where
@@ -64,6 +143,8 @@ data EDASPseudo where
           -> EDASPseudo
   Entry   :: SourcePos          -- Explicit start address/entry point
           -> EDASExpr
+          -> EDASPseudo
+  LoadOrg :: EDASExpr           -- Sets the executable's load origin
           -> EDASPseudo
   deriving (Show)
 
@@ -154,53 +235,11 @@ data EDASExpr where
             -> EDASExpr
   deriving (Show)
 
--- | Symbol types that are stored in the symbol table. Equates and statement labels cannot be modified once
--- set, whereas defined labels (via 'DEFL') may take on multiple values. Defined labels are stored as a list,
--- with the most recent value at the head.
-
-data SymbolType where
-  SymEquate :: Word16                       -- Equate
-            -> SymbolType
-  StmtLabel :: Word16                       -- Statement label
-            -> SymbolType
-  DefLabel  :: [Word16]
-            -> SymbolType
-  deriving (Show)
-
--- | Assembler evaluation context, when evaluating expressions.
-data AsmEvalCtx where
-  AsmEvalCtx ::
-    { _symbolTab    :: Map T.Text SymbolType  -- The symbol table
-    , _asmPC        :: Z80addr                -- Current assembler program counter
-    , _dateTime     :: ZonedTime              -- Time at which the assembler pass started
-    , _startAddr    :: Maybe Z80addr          -- Start address from 'END' or 'ENTRY' pseudo-operations
-    , _endOfAsm     :: Bool                   -- 'END' pseudo-instruction encountered?
-    , _warnings     :: [T.Text]               -- Accumulated warning messages
-    } -> AsmEvalCtx
-    deriving (Show)
-
-makeLenses ''AsmEvalCtx
-
--- | Make an initialized (empty) assembler context in the 'IO' context
---
--- N.B.: The result is embedded in the 'IO' monad due to the need to call 'Data.Time.getZonedTime'. Yuck.
-mkAsmEvalCtx :: IO AsmEvalCtx
-mkAsmEvalCtx = getZonedTime
-               >>= (\currentTime -> return ( AsmEvalCtx { _symbolTab = Map.empty
-                                                        , _asmPC     = 0
-                                                        , _dateTime  = currentTime
-                                                        , _startAddr = Nothing
-                                                        , _endOfAsm  = False
-                                                        , _warnings  = []
-                                                        }
-                                           )
-                   )
-
 -- | Find a symbol or label in the 'AsmEvalCtx' by case-insensitive key, returning its value
-findAsmSymbol :: AsmEvalCtx                   -- ^ Current assembler context
-              -> T.Text                       -- ^ Symbol name
+findAsmSymbol :: T.Text                       -- ^ Symbol name
+              -> AsmEvalCtx                   -- ^ Current assembler context
               -> Maybe Word16                 -- ^ Nothing, if not found, otherwise the 16-bit value
-findAsmSymbol ctx sym =
+findAsmSymbol sym ctx =
   let getValue Nothing                   = Nothing
       getValue (Just (SymEquate val))    = Just val
       getValue (Just (StmtLabel val))    = Just val
@@ -209,25 +248,25 @@ findAsmSymbol ctx sym =
   in  getValue (ctx ^. symbolTab & Map.lookup (T.toLower sym))
 
 -- | Insert a new symbol into the context's equate table
-insertEquate :: AsmEvalCtx
-             -> T.Text
+insertEquate :: T.Text
              -> Word16
              -> AsmEvalCtx
-insertEquate ctx sym symval = symbolTab %~ (Map.insert (T.toLower sym) (SymEquate symval)) $ ctx
+             -> AsmEvalCtx
+insertEquate sym symval ctx = symbolTab %~ (Map.insert (T.toLower sym) (SymEquate symval)) $ ctx
 
 -- | Insert a new statement label into the context's statement/symbol label table
-insertSymLabel :: AsmEvalCtx
-               -> T.Text
+insertSymLabel :: T.Text
                -> Word16
                -> AsmEvalCtx
-insertSymLabel ctx lab labval = symbolTab %~ (Map.insert (T.toLower lab) (StmtLabel labval)) $ ctx
+               -> AsmEvalCtx
+insertSymLabel lab labval ctx = symbolTab %~ (Map.insert (T.toLower lab) (StmtLabel labval)) $ ctx
 
 -- | Insert a new 'DefL' label into the context's defined label table
-insertDefLabel :: AsmEvalCtx
-               -> T.Text
+insertDefLabel :: T.Text
                -> Word16
                -> AsmEvalCtx
-insertDefLabel ctx lab labval = symbolTab .~ updatedSymtab $ ctx
+               -> AsmEvalCtx
+insertDefLabel lab labval ctx = symbolTab .~ updatedSymtab $ ctx
   where
     (_ignored, updatedSymtab) = ctx ^. symbolTab & Map.insertLookupWithKey updateDef (T.toLower lab) (DefLabel [labval])
     updateDef _k (DefLabel newval) (DefLabel existing) = DefLabel (newval ++ existing)
@@ -235,46 +274,163 @@ insertDefLabel ctx lab labval = symbolTab .~ updatedSymtab $ ctx
       error ("insertDefLabel assertion: new = " ++ (show badNewVal) ++ ", old = " ++ (show badOldVal))
 
 -- | Determine if a symbol is present as an equate symbol
-existsEquate :: AsmEvalCtx
-             -> T.Text
+existsEquate :: T.Text
+             -> AsmEvalCtx
              -> Bool
-existsEquate ctx sym = case ctx ^. symbolTab & (Map.lookup (T.toLower sym)) of
+existsEquate sym ctx = case ctx ^. symbolTab & (Map.lookup (T.toLower sym)) of
                          (Just (SymEquate _)) -> True
                          _otherwise           -> False
 
 -- | Determine if a symbol is present as an equate symbol
-existsSymLabel :: AsmEvalCtx
-               -> T.Text
+existsSymLabel :: T.Text
+               -> AsmEvalCtx
                -> Bool
-existsSymLabel ctx sym = case ctx ^. symbolTab  & (Map.lookup (T.toLower sym)) of
+existsSymLabel sym ctx = case ctx ^. symbolTab  & (Map.lookup (T.toLower sym)) of
                            (Just (StmtLabel _)) -> True
                            _otherwise           -> False
 
 -- | Determine if a symbol is present as an equate symbol
-existsDefLabel :: AsmEvalCtx
-               -> T.Text
+existsDefLabel :: T.Text
+               -> AsmEvalCtx
                -> Bool
-existsDefLabel ctx sym = case ctx ^. symbolTab  & (Map.lookup (T.toLower sym)) of
+existsDefLabel sym ctx = case ctx ^. symbolTab  & (Map.lookup (T.toLower sym)) of
                            (Just (DefLabel _)) -> True
                            _otherwise          -> False
 
 -- | Determine if a symbol is present as either an equate or statement label
-existsAsmSymbol :: AsmEvalCtx
-                -> T.Text
+existsAsmSymbol :: T.Text
+                -> AsmEvalCtx
                 -> Bool
-existsAsmSymbol ctx sym = isJust (ctx ^. symbolTab  & (Map.lookup (T.toLower sym)))
+existsAsmSymbol sym ctx = isJust (ctx ^. symbolTab  & (Map.lookup (T.toLower sym)))
 
--- | Data type constructors for EDAS data elements
+-- | Data type constructors for EDAS assembler statements.
 data AsmStmt where
   -- Basic parsed assembler statement
-  AsmStmt :: { _symLabel :: Maybe EDASLabel
-             , _asmOp    :: Maybe AsmOp
-             , _comment  :: Maybe Comment
-             , _stmtAddr :: Word16                      -- Statement address, i.e., current program counter
-             , _bytes    :: Vector Z80word              -- The bytes corresponding to this statement
-             } -> AsmStmt
+  AsmStmt     :: { _symLabel   :: Maybe EDASLabel
+                 , _asmOp      :: AsmOp
+                 , _comment    :: Maybe Comment
+                 , _stmtAddr   :: Word16            -- Statement address, i.e., current program counter
+                 , _bytes      :: Vector Z80word    -- The bytes corresponding to this statement
+                 } -> AsmStmt
+  -- Conditional assembly depending on pass number (1 = symbol evaluation, 2 = listing, 3 = object code generation)
+  CondPass    :: { _symLabel   :: Maybe EDASLabel
+                 , _passNo     :: Int
+                 , _stmtsTrue  :: [AsmStmt]
+                 , _stmtsFalse :: [AsmStmt]
+                 , _comment    :: Maybe Comment
+                 } -> AsmStmt
+  -- Conditional assembly depending on EQ, LT, GT or NE comparison
+  CondCmp     :: { _symLabel   :: Maybe EDASLabel
+                 , _leftExp    :: EDASExpr
+                 , _rightExp   :: EDASExpr
+                 , _condF      :: (Word16 -> Word16 -> Bool)
+                 , _stmtsTrue  :: [AsmStmt]
+                 , _stmtsFalse :: [AsmStmt]
+                 , _comment    :: Maybe Comment
+                 , _condResult   :: Bool
+                 } -> AsmStmt
+  -- Conditional assembly depending on EQ, LT, GT or NE string comparison
+  CondCmpStr  :: { _symLabel   :: Maybe EDASLabel
+                 , _leftExp    :: EDASExpr
+                 , _rightExp   :: EDASExpr
+                 , _strcmpF    :: (T.Text -> T.Text -> Bool)
+                 , _stmtsTrue  :: [AsmStmt]
+                 , _stmtsFalse :: [AsmStmt]
+                 , _comment    :: Maybe Comment
+                 , _condResult   :: Bool
+                 } -> AsmStmt
+  -- Conditional assembly depending on the value of an expression
+  CondAsmEval :: { _symLabel     :: Maybe EDASLabel
+                 , _evalExp      :: EDASExpr
+                 , _comment      :: Maybe Comment
+                 , _stmtsTrue    :: [AsmStmt]
+                 , _elseLabel    :: Maybe EDASLabel
+                 , _elseComment  :: Maybe Comment
+                 , _stmtsFalse   :: [AsmStmt]
+                 , _endifLabel   :: Maybe EDASLabel
+                 , _endifComment :: Maybe Comment
+                 , _condResult   :: Bool
+                 } -> AsmStmt
   -- TODO: something here for macro expansion
-  deriving (Show)
+
+-- | 'Show' instance for assembler statements
+instance Show AsmStmt where
+  show (AsmStmt symLabel asmOp comment stmtAddr bytes) =
+    T.unpack (T.concat [ "AsmStmt("
+                       , T.intercalate ", " [ textShow symLabel
+                                            , textShow asmOp
+                                            , textShow comment
+                                            , textShow stmtAddr
+                                            , textShow bytes
+                                            ]
+                       , ")"
+                       ])
+
+  show (CondPass symLabel passNo stmtsTrue stmtsFalse comment) =
+    T.unpack (T.concat [ "CondPass("
+                       , T.intercalate ", " [ textShow symLabel
+                                            , textShow passNo
+                                            , textShow stmtsTrue
+                                            , textShow stmtsFalse
+                                            , textShow comment
+                                            ]
+                       , ")"
+                       ])
+
+  show (CondCmp symLabel leftExp rightExp _condF stmtsTrue stmtsFalse comment condResult) =
+    T.unpack (T.concat [ "CondCmp("
+                       , T.intercalate ", " [ textShow symLabel
+                                            , textShow leftExp
+                                            , textShow rightExp
+                                            , textShow stmtsTrue
+                                            , textShow stmtsFalse
+                                            , textShow comment
+                                            , textShow condResult
+                                            ]
+                       , ")"
+                       ])
+
+  -- Conditional assembly depending on EQ, LT, GT or NE string comparison
+  show (CondCmpStr symLabel leftExp rightExp _strcmpF stmtsTrue stmtsFalse comment condResult) =
+    T.unpack (T.concat [ "CondCmpStr("
+                       , T.intercalate ", " [ textShow symLabel
+                                            , textShow leftExp
+                                            , textShow rightExp
+                                            , textShow stmtsTrue
+                                            , textShow stmtsFalse
+                                            , textShow comment
+                                            , textShow condResult
+                                            ]
+                       , ")"
+                       ])
+
+  -- Conditional assembly depending on the value of an expression
+  show (CondAsmEval symLabel evalExp comment stmtsTrue elseLabel elseComment stmtsFalse endifLabel endifComment
+                    condResult) =
+    T.unpack (T.concat [ "CondAsmEval("
+                       , T.intercalate ", " [ textShow symLabel
+                                            , textShow evalExp
+                                            , textShow comment
+                                            , textShow stmtsTrue
+                                            , textShow elseLabel
+                                            , textShow elseComment
+                                            , textShow stmtsFalse
+                                            , textShow endifLabel
+                                            , textShow endifComment
+                                            , textShow condResult
+                                            ]
+                       , ")"
+                       ])
+
+-- | Shorthand (not exported) converter
+textShow :: (Show thingType) =>
+            thingType
+         -> T.Text
+textShow = T.pack . show
+
 
 -- Emit TH lens hair:
 makeLenses ''AsmStmt
+
+-- | Shorthand for the parser's type, leaving the "return" type free
+type EDASParser retType = ParsecT T.Text AsmStmt Identity retType
