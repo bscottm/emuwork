@@ -97,22 +97,24 @@ asmPseudo =
     -- According to the EDAS manual, strings in DEFB/DB lists are 'c' (single quoted characters) or a sequence
     -- of two or more characters that can include a double-single quote ("''") interpreted as, well, a single
     -- quote in the middle of a string.
-    defBArgs = try ( liftM DBExpr asmExpr ) -- Might read 'AsmChar', which could consume a single quote
-               <|> liftM (DBStr . T.pack) ( char '\''
-                                            >> asciiExceptSQuote
-                                            >>= (\c1 -> 
-                                                  asciiExceptSQuote
-                                                  >>= (\c2 ->
-                                                        ( many ( try ( char '\''
-                                                                       >> char '\''
-                                                                       >> return '\''
-                                                                     )
-                                                                     <|> asciiExceptSQuote
-                                                               )
-                                                        ) >>= (\s1 -> char '\'' >> return (c1:c2:s1))
-                                                      )
-                                               )
-                                          )
+    defBArgs = try (  -- Might read 'AsmChar', which could consume a single quote
+                      liftM DBExpr asmExpr
+                      <?> "expression in DEFB/DB argument list"
+                   )
+               <|> ( do { _  <- char '\''
+                        ; c1 <- asciiExceptSQuote
+                        ; c2 <- asciiExceptSQuote
+                        ; s1 <- many ( try ( char '\''
+                                             >> char '\''
+                                             >> return '\''
+                                           )
+                                       <|> asciiExceptSQuote
+                                     )
+                        ; _ <- char '\''
+                        ; return ((DBStr . T.pack) (c1:c2:s1))
+                        }
+                     <?> "string in DEFB/DB argument list"
+                   )
 
     -- DS/DEFS parser
     parseDefS = whiteSpace

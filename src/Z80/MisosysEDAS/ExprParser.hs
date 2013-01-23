@@ -128,11 +128,11 @@ constExpr signRequired srcpos =
   where
     signChars             = char '+' <|> char '-'
 
-    convertConst 'd'      = convertConst' decimal
-    convertConst 'h'      = convertConst' hexadecimal
-    convertConst 'o'      = convertConst' octal
-    convertConst 'q'      = convertConst' octal
-    convertConst 'b'      = convertConst' binary
+    convertConst 'd'      = convertConst' 'd' decimal
+    convertConst 'h'      = convertConst' 'h' hexadecimal
+    convertConst 'o'      = convertConst' 'o' octal
+    convertConst 'q'      = convertConst' 'q' octal
+    convertConst 'b'      = convertConst' 'b' binary
     convertConst _        = undefined
 
     binary txt
@@ -149,9 +149,9 @@ constExpr signRequired srcpos =
 
     digitToInt d = C.ord d - C.ord '0'
     
-    convertConst' cvtFunc x = case signed cvtFunc x of
+    convertConst' base cvtFunc x = case signed cvtFunc x of
                                 Left errMsg        -> fail errMsg
-                                Right (val, "")    -> return $ Const srcpos val
+                                Right (val, "")    -> return $ Const srcpos val base
                                 Right (_val, xtra) -> fail $ T.unpack ( T.concat [ "Extra characters following constant, '"
                                                                                  , xtra
                                                                                  , "'"

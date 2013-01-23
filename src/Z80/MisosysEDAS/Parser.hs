@@ -20,6 +20,7 @@ import Control.Lens hiding (value, walk)
 #endif
 
 import Text.Parsec
+import Text.Parsec.Pos
 import Text.Parsec.Text()                 -- ghci 7.6.1 needs these imported instances, e.g., (Stream T.Text Identity Char)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -61,7 +62,8 @@ edasParseSequence path inp =
 
 -- | Make an empty assembler statement
 initialAsmStmt :: AsmStmt
-initialAsmStmt = AsmStmt { _symLabel = Nothing
+initialAsmStmt = AsmStmt { _srcPos   = newPos "!!nosrc!!" 0 0
+                         , _symLabel = Nothing
                          , _asmOp    = NoAsmOp
                          , _comment  = Nothing
                          , _stmtAddr = 0
@@ -74,18 +76,28 @@ initialAsmStmt = AsmStmt { _symLabel = Nothing
 --
 -- All of the parts of the statement are optional.
 asmStatement :: EDASParser AsmStmt
-asmStatement =
-  do { stmtLabel <- collectLabel
-     ; try ( do { asmop <- collectOp stmtLabel
-                ; cmnt  <- collectComment
-                ; let ustate = (symLabel .~ stmtLabel) $ (asmOp .~ asmop) $ (comment .~ cmnt) $ initialAsmStmt
-                ; {- trace (show ustate) $ return ustate -}
-                ; return ustate
-                }
-           )
-       <|> try (conditionalAsm stmtLabel)
-       -- Add alternative here for macro invocation
-     }
+asmStatement = do { sourcePos <- getPosition
+                  ; stmtLabel <- collectLabel
+                  ; ustate <- parseOpAndComment stmtLabel
+                  ; return ((srcPos .~ sourcePos) $ ustate)
+                  }
+
+-- | Common code for parsing what follows the statement label, see 'asmStatement'. The main reason why this is separated from
+-- 'asmStatement' is that it is used in parsing conditionals, where the statement label has already been read and a sequence
+-- of assembler statements are being collected. Insead of duplicating code, keep it all together in one function.
+parseOpAndComment :: Maybe EDASLabel
+                  -> EDASParser AsmStmt
+parseOpAndComment stmtLabel =
+  try ( do { ustate <- collectOp stmtLabel
+           ; cmnt  <- collectComment
+           ; let ustate' = (comment .~ cmnt) $ ustate
+           ; {- trace (show ustate') $ return ustate -}
+           ; return ustate'
+           }
+      )
+  <|> conditionalAsm stmtLabel
+  -- Add alternative here for macro invocation
+  <?> "'valid assembler statement (instruction, pseudo-op, conditional)"
 
 -- | Collect the statement label. Note that either the statement label is present or there is whitespace to separate
 -- and disambiguate the label from a mnemonic or pseudo-operation:
@@ -99,22 +111,26 @@ asmStatement =
 -- Without the whitespace, @ld@ could be misinterpreted or misparsed as the statement label.
 collectLabel :: EDASParser (Maybe EDASLabel)
 collectLabel = do { stmtLab <- readLabel
+                  ; optional (char ':')
+                  ; whiteSpace
                   ; return (Just stmtLab)
                   }
                <|> do { whiteSpace
                       ; return Nothing
                       }
                <?> "a statement label"
+
 -- | Collect the assembler operation following the optional statement label parsed by 'collectLabel'. If the statement label is
 -- present, it can be followed by an optional colon (@:@).
 --
 -- Valid assembler operations include: an instruction mnemonic and its arguments, or an assembler pseudo-operation.
 collectOp :: Maybe EDASLabel
-          -> EDASParser AsmOp
-collectOp stmtLabel = skipLabelColon stmtLabel
-                      >> option NoAsmOp ( asmMnemonic
-                                          <|> asmPseudo
-                                        ) <?> "Z80 instruction or pseudo-operation"
+          -> EDASParser AsmStmt
+collectOp stmtLabel = do { theOp <- option NoAsmOp ( asmMnemonic
+                                                     <|> asmPseudo
+                                                   ) <?> "Z80 instruction or pseudo-operation"
+                         ; return ((symLabel .~ stmtLabel) $ (asmOp .~ theOp) $ initialAsmStmt)
+                         }
 
 -- | Collect the comment that optionally follows the assembler operation. Comments are start with a semicolon (@;@) and extend to
 -- the end of the input line.
@@ -128,12 +144,6 @@ collectComment = optional whiteSpace
                               >>= (\cmnt -> return (Just cmnt))
                             )
                     )
-
--- | Skip a statement label's optional @:@
-skipLabelColon :: Maybe EDASLabel
-               -> EDASParser ()
-skipLabelColon (Just _label) = optional (char ':') >> optional whiteSpace
-skipLabelColon Nothing       = return ()
 
 -- | Parse a comment, preserving its position in the input.
 asmComment :: EDASParser Comment
@@ -153,12 +163,13 @@ asmComment =
 conditionalAsm :: Maybe EDASLabel
                -> EDASParser AsmStmt
 conditionalAsm stmtLabel =
-  do { skipLabelColon stmtLabel
-     ; _ <- stringIC "if"
-     ; do { whiteSpace
+  do { _ <- stringIC "if"
+     ; do { sourcePos <- getPosition
+          ; whiteSpace
           ; expr <- asmExpr
           ; cmnt <- collectComment
-          ; let ustate = CondAsmEval { _symLabel     = stmtLabel
+          ; let ustate = CondAsmEval { _srcPos       = sourcePos
+                                     , _symLabel     = stmtLabel
                                      , _evalExp      = expr
                                      , _comment      = cmnt
                                      , _stmtsTrue    = []
@@ -181,8 +192,8 @@ condStatements :: EDASParser ()
 condStatements = condStatements' []
   where
     condStatements' stmts =
-      do { stmtLabel <- collectLabel
-         ; skipLabelColon stmtLabel
+      do { sourcePos <- getPosition
+         ; stmtLabel <- collectLabel
          ; do { _    <- try ( stringIC "else" )
               ; cmnt <- collectComment
                 -- Update the current state with the collected statements for the \"true\" part of the conditional
@@ -199,8 +210,9 @@ condStatements = condStatements' []
                   ; modifyState (\ustate -> stmtsTrue .~ trueStmts $ ustate)
                   ; return ()
                   }
-           <|> do { ustate <- condAsmStatement stmtLabel
-                  ; condStatements' (ustate:stmts)
+           <|> do { ustate <- parseOpAndComment stmtLabel
+                  ; let ustate' = (srcPos .~ sourcePos) $ ustate
+                  ; condStatements' (ustate':stmts)
                   }
          } <?> "'ELSE' or 'ENDIF' expected in 'IF' conditional assembly sequence"
 
@@ -215,20 +227,14 @@ condStatements = condStatements' []
          ; return (reverse stmts)
          }
 
-    -- Common code for collecting assembler statements until "else" or "endif" is encountered
-    condAsmStatement stmtLabel = 
-      do { asmop <- collectOp stmtLabel
-         ; cmnt  <- collectComment
-         ; return $ (symLabel .~ stmtLabel) $ (asmOp .~ asmop) $ (comment .~ cmnt) $ initialAsmStmt
-         }
-
     -- Grab everything following the "else" statement. Note this is written for clarity, not for efficiency
     condElseStatements stmts =
-      do { stmtLabel <- collectLabel
-         ; skipLabelColon stmtLabel
+      do { sourcePos <- getPosition
+         ; stmtLabel <- collectLabel
          ; condEndIf stmtLabel stmts
-           <|> do { ustate <- condAsmStatement stmtLabel
-                  ; condElseStatements (ustate:stmts)
+           <|> do { ustate <- parseOpAndComment stmtLabel
+                  ; let ustate' = (srcPos .~ sourcePos) $ ustate
+                  ; condElseStatements (ustate':stmts)
                   }
            <?> "'ENDIF' at the end of 'IF' conditional assembly sequence"
           }

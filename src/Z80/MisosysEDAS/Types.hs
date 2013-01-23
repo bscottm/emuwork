@@ -117,37 +117,37 @@ instance Monoid AsmOp where
 
 -- | EDAS\' pseudo operations
 data EDASPseudo where
-  Equate  :: EDASExpr           -- Symbol constant equate
-          -> EDASPseudo
-  Origin  :: EDASExpr           -- Assembly origin (start) address
-          -> EDASPseudo
-  DefB    :: [DBValue]          -- Define bytes
-          -> EDASPseudo
-  DefC    :: EDASExpr           -- Define constant byte fill (repeat, const)
-          -> EDASExpr
-          -> EDASPseudo
-  DefS    :: EDASExpr           -- Define space ('DefC' with 0 as the constant)
-          -> EDASPseudo
-  DefW    :: [DWValue]          -- Define little endian words
-          -> EDASPseudo
-  DSym    :: T.Text             -- Emit the symbol as a byte string
-          -> EDASPseudo
-  DExp    :: EDASExpr           -- Emit the 16-bit value of the expression
-          -> EDASPseudo
-  AsmDate :: EDASPseudo         -- Emit the current date as "MM/DD/YY" byte sequence
-  AsmTime :: EDASPseudo         -- Emit the current time as "HH:MM:SS" byte sequence
-  DefL    :: EDASExpr           -- Define label, i.e., something that can be reassigned, as opposed to equates and statement labels
-          -> EDASPseudo
-  EndAsm  :: SourcePos          -- End of Assembly source, with optional entry point
-          -> Maybe EDASExpr
-          -> EDASPseudo
-  Entry   :: SourcePos          -- Explicit start address/entry point
-          -> EDASExpr
-          -> EDASPseudo
-  LoadOrg :: EDASExpr           -- Sets the executable's load origin
-          -> EDASPseudo
+  Equate    :: EDASExpr           -- Symbol constant equate
+            -> EDASPseudo
+  Origin    :: EDASExpr           -- Assembly origin (start) address
+            -> EDASPseudo
+  DefB      :: [DBValue]          -- Define bytes
+            -> EDASPseudo
+  DefC      :: EDASExpr           -- Define constant byte fill (repeat, const)
+            -> EDASExpr
+            -> EDASPseudo
+  DefS      :: EDASExpr           -- Define space ('DefC' with 0 as the constant)
+            -> EDASPseudo
+  DefW      :: [DWValue]          -- Define little endian words
+            -> EDASPseudo
+  DSym      :: T.Text             -- Emit the symbol as a byte string
+            -> EDASPseudo
+  DExp      :: EDASExpr           -- Emit the 16-bit value of the expression
+            -> EDASPseudo
+  AsmDate   :: EDASPseudo         -- Emit the current date as "MM/DD/YY" byte sequence
+  AsmTime   :: EDASPseudo         -- Emit the current time as "HH:MM:SS" byte sequence
+  DefL      :: EDASExpr           -- Define label, i.e., something that can be reassigned, as opposed to equates and statement labels
+            -> EDASPseudo
+  EndAsm    :: SourcePos          -- End of Assembly source, with optional entry point
+            -> Maybe EDASExpr
+            -> EDASPseudo
+  Entry     :: SourcePos          -- Explicit start address/entry point
+            -> EDASExpr
+            -> EDASPseudo
+  LoadOrg   :: EDASExpr           -- Sets the executable's load origin
+            -> EDASPseudo
   deriving (Show)
-
+ 
 -- | 'DefB' elements
 data DBValue where
   DBStr  :: T.Text
@@ -167,8 +167,10 @@ data DWValue where
 
 -- | EDAS expression data constructors.
 data EDASExpr where
+  EmptyExpr :: EDASExpr         -- The null expression
   Const     :: SourcePos        -- 16-bit integer constant, truncated to 8 bits when needed
-            -> Int16
+            -> Int16            -- Constant's value
+            -> Char             -- Constant's original base
             -> EDASExpr
   Var       :: SourcePos        -- Variable/symbolic label
             -> T.Text
@@ -234,6 +236,15 @@ data EDASExpr where
   LowByte   :: EDASExpr         -- Low 8 bits of 16-bit value
             -> EDASExpr
   deriving (Show)
+
+-- | Generating lenses for 'AsmStmt' requires 'EDASExpr' to have 'Data.Monoid.Monoid' properties. However,
+-- no of these instance functions get invoked at runtime (at least right now...)
+instance Monoid EDASExpr where
+  -- Easy case. This also eliminates the need to wrap 'EDASExpr' within 'Data.Maybe' when there is no value.
+  mempty  = EmptyExpr
+
+  -- 'mappend' is undefined
+  _x `mappend` _y = error "EDASExpr mappend"
 
 -- | Find a symbol or label in the 'AsmEvalCtx' by case-insensitive key, returning its value
 findAsmSymbol :: T.Text                       -- ^ Symbol name
@@ -306,21 +317,24 @@ existsAsmSymbol sym ctx = isJust (ctx ^. symbolTab  & (Map.lookup (T.toLower sym
 -- | Data type constructors for EDAS assembler statements.
 data AsmStmt where
   -- Basic parsed assembler statement
-  AsmStmt     :: { _symLabel   :: Maybe EDASLabel
+  AsmStmt     :: { _srcPos     :: SourcePos
+                 , _symLabel   :: Maybe EDASLabel
                  , _asmOp      :: AsmOp
                  , _comment    :: Maybe Comment
                  , _stmtAddr   :: Word16            -- Statement address, i.e., current program counter
                  , _bytes      :: Vector Z80word    -- The bytes corresponding to this statement
                  } -> AsmStmt
   -- Conditional assembly depending on pass number (1 = symbol evaluation, 2 = listing, 3 = object code generation)
-  CondPass    :: { _symLabel   :: Maybe EDASLabel
+  CondPass    :: { _srcPos     :: SourcePos
+                 , _symLabel   :: Maybe EDASLabel
                  , _passNo     :: Int
                  , _stmtsTrue  :: [AsmStmt]
                  , _stmtsFalse :: [AsmStmt]
                  , _comment    :: Maybe Comment
                  } -> AsmStmt
   -- Conditional assembly depending on EQ, LT, GT or NE comparison
-  CondCmp     :: { _symLabel   :: Maybe EDASLabel
+  CondCmp     :: { _srcPos     :: SourcePos
+                 , _symLabel   :: Maybe EDASLabel
                  , _leftExp    :: EDASExpr
                  , _rightExp   :: EDASExpr
                  , _condF      :: (Word16 -> Word16 -> Bool)
@@ -330,7 +344,8 @@ data AsmStmt where
                  , _condResult   :: Bool
                  } -> AsmStmt
   -- Conditional assembly depending on EQ, LT, GT or NE string comparison
-  CondCmpStr  :: { _symLabel   :: Maybe EDASLabel
+  CondCmpStr  :: { _srcPos     :: SourcePos
+                 , _symLabel   :: Maybe EDASLabel
                  , _leftExp    :: EDASExpr
                  , _rightExp   :: EDASExpr
                  , _strcmpF    :: (T.Text -> T.Text -> Bool)
@@ -340,7 +355,8 @@ data AsmStmt where
                  , _condResult   :: Bool
                  } -> AsmStmt
   -- Conditional assembly depending on the value of an expression
-  CondAsmEval :: { _symLabel     :: Maybe EDASLabel
+  CondAsmEval :: { _srcPos     :: SourcePos
+                 , _symLabel     :: Maybe EDASLabel
                  , _evalExp      :: EDASExpr
                  , _comment      :: Maybe Comment
                  , _stmtsTrue    :: [AsmStmt]
@@ -355,9 +371,10 @@ data AsmStmt where
 
 -- | 'Show' instance for assembler statements
 instance Show AsmStmt where
-  show (AsmStmt symLabel asmOp comment stmtAddr bytes) =
+  show (AsmStmt srcPos symLabel asmOp comment stmtAddr bytes) =
     T.unpack (T.concat [ "AsmStmt("
-                       , T.intercalate ", " [ textShow symLabel
+                       , T.intercalate ", " [ sourcePosText srcPos
+                                            , textShow symLabel
                                             , textShow asmOp
                                             , textShow comment
                                             , textShow stmtAddr
@@ -366,9 +383,10 @@ instance Show AsmStmt where
                        , ")"
                        ])
 
-  show (CondPass symLabel passNo stmtsTrue stmtsFalse comment) =
+  show (CondPass srcPos symLabel passNo stmtsTrue stmtsFalse comment) =
     T.unpack (T.concat [ "CondPass("
-                       , T.intercalate ", " [ textShow symLabel
+                       , T.intercalate ", " [ sourcePosText srcPos
+                                            , textShow symLabel
                                             , textShow passNo
                                             , textShow stmtsTrue
                                             , textShow stmtsFalse
@@ -377,9 +395,10 @@ instance Show AsmStmt where
                        , ")"
                        ])
 
-  show (CondCmp symLabel leftExp rightExp _condF stmtsTrue stmtsFalse comment condResult) =
+  show (CondCmp srcPos symLabel leftExp rightExp _condF stmtsTrue stmtsFalse comment condResult) =
     T.unpack (T.concat [ "CondCmp("
-                       , T.intercalate ", " [ textShow symLabel
+                       , T.intercalate ", " [ sourcePosText srcPos
+                                            , textShow symLabel
                                             , textShow leftExp
                                             , textShow rightExp
                                             , textShow stmtsTrue
@@ -391,9 +410,10 @@ instance Show AsmStmt where
                        ])
 
   -- Conditional assembly depending on EQ, LT, GT or NE string comparison
-  show (CondCmpStr symLabel leftExp rightExp _strcmpF stmtsTrue stmtsFalse comment condResult) =
+  show (CondCmpStr srcPos symLabel leftExp rightExp _strcmpF stmtsTrue stmtsFalse comment condResult) =
     T.unpack (T.concat [ "CondCmpStr("
-                       , T.intercalate ", " [ textShow symLabel
+                       , T.intercalate ", " [ sourcePosText srcPos
+                                            , textShow symLabel
                                             , textShow leftExp
                                             , textShow rightExp
                                             , textShow stmtsTrue
@@ -405,10 +425,11 @@ instance Show AsmStmt where
                        ])
 
   -- Conditional assembly depending on the value of an expression
-  show (CondAsmEval symLabel evalExp comment stmtsTrue elseLabel elseComment stmtsFalse endifLabel endifComment
+  show (CondAsmEval srcPos symLabel evalExp comment stmtsTrue elseLabel elseComment stmtsFalse endifLabel endifComment
                     condResult) =
     T.unpack (T.concat [ "CondAsmEval("
-                       , T.intercalate ", " [ textShow symLabel
+                       , T.intercalate ", " [ sourcePosText srcPos
+                                            , textShow symLabel
                                             , textShow evalExp
                                             , textShow comment
                                             , textShow stmtsTrue
@@ -428,6 +449,19 @@ textShow :: (Show thingType) =>
          -> T.Text
 textShow = T.pack . show
 
+-- | Customized source position-to-Text converter
+sourcePosText :: SourcePos
+              -> T.Text
+sourcePosText loc = let srcLine = sourceLine loc
+                        srcCol  = sourceColumn loc
+                        srcFile = sourceName loc
+                    in  T.concat [ "@("
+                                 , T.intercalate "/" [ (T.cons '"' (T.snoc (T.pack srcFile) '"'))
+                                                     , textShow srcLine
+                                                     , textShow srcCol
+                                                     ]
+                                 , ")"
+                                 ]
 
 -- Emit TH lens hair:
 makeLenses ''AsmStmt

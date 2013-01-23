@@ -69,6 +69,7 @@ edasTests = test [ defbTests
                  , endEntryTests
                  , equateTests
                  , dupLabelTests
+                 , originTests
                  , condAsmEvalTests
                  ]
 
@@ -427,12 +428,27 @@ dupLabelTests = test [ "dupLabelAsm"  ~: (checkAssembly dupLabelAsm True)       
     dupLabelAsm  = edasAssemble $ edasParseSequence "dupLabel"  dupLabelSource
     dupLabelAsm2 = edasAssemble $ edasParseSequence "dupLabel2" dupLabelSource2
 
+-- | Assembly origin tests, specifically check that a label on an origin pseudo-operation is rejected.
+originTests :: Test
+originTests = test [ "originAsm"  ~: (checkAssembly originSymbolAsm True)                   @? unexpectedAsmPassSucceeded
+                   ]
+  where
+    originSymbolAsmSource = T.intercalate "\n" [ "label   ORG   4001H"
+                                               , "        END   label"
+                                               ]
+
+    -- Parse and assemble the duplicate label tests
+    originSymbolAsm  = edasAssemble $ edasParseSequence "originSymbolAsm"  originSymbolAsmSource
+
 -- | Conditional assembly: evaluate the expression for true/false (0,!0)
 condAsmEvalTests :: Test
 condAsmEvalTests = test [ "condEvalAsm1"  ~: (checkAssembly condEvalAsm1 False)             @? asmPassFailed
                         , "condEvalAsm2"  ~: (checkAssembly condEvalAsm2 True)              @? unexpectedAsmPassSucceeded
                         , "condEvalAsm3"  ~: (checkAssembly condEvalAsm3 False)             @? asmPassFailed
                         , "condEvalAsm4"  ~: (checkAssembly condEvalAsm4 False)             @? asmPassFailed
+                        , "condEvalAsm5"  ~: (checkAssembly condEvalAsm5 False)             @? asmPassFailed
+                        , "condEvalAsm6"  ~: (checkAssembly condEvalAsm6 False)             @? asmPassFailed
+                        , "condEvalAsm7"  ~: (checkAssembly condEvalAsm7 True)              @? unexpectedAsmPassSucceeded
                         ]
   where
     condEvalAsmSource1 = T.intercalate "\n" [ "        ORG   4001H"
@@ -463,11 +479,51 @@ condAsmEvalTests = test [ "condEvalAsm1"  ~: (checkAssembly condEvalAsm1 False) 
                                             , "        END   0000H"
                                             ]
 
+    condEvalAsmSource5 = T.intercalate "\n" [ "        IF    0"
+                                            , "          IF    0"
+                                            , "          ELSE"
+                                            , "          ENDIF"
+                                            , "        ENDIF"
+                                            , "        END   0000H"
+                                            ]
+
+    condEvalAsmSource6 = T.intercalate "\n" [ "        IF    0"
+                                            , "          IF    0"
+                                            , "          ENDIF"
+                                            , "          IF    0"
+                                            , "            IF    0"
+                                            , "            ENDIF"
+                                            , "          ELSE"
+                                            , "            IF    0"
+                                            , "            ELSE"
+                                            , "            ENDIF"
+                                            , "          ENDIF"
+                                            , "        ENDIF"
+                                            , "        END   0000H"
+                                            ]
+
+    condEvalAsmSource7 = T.intercalate "\n" [ "        IF    0"
+                                            , "          IF    0            ; this is missing an 'ENDIF'"
+                                            , "          IF    0"
+                                            , "            IF    0"
+                                            , "            ENDIF"
+                                            , "          ELSE"
+                                            , "            IF    0"
+                                            , "            ELSE"
+                                            , "            ENDIF"
+                                            , "          ENDIF"
+                                            , "        ENDIF"
+                                            , "        END   0000H"
+                                            ]
+
     -- Parse and assemble the conditional assembly tests
     condEvalAsm1  = edasAssemble $ edasParseSequence "condEvalAsm1"  condEvalAsmSource1
     condEvalAsm2  = edasAssemble $ edasParseSequence "condEvalAsm2"  condEvalAsmSource2
     condEvalAsm3  = edasAssemble $ edasParseSequence "condEvalAsm3"  condEvalAsmSource3
     condEvalAsm4  = edasAssemble $ edasParseSequence "condEvalAsm4"  condEvalAsmSource4
+    condEvalAsm5  = edasAssemble $ edasParseSequence "condEvalAsm5"  condEvalAsmSource5
+    condEvalAsm6  = edasAssemble $ edasParseSequence "condEvalAsm6"  condEvalAsmSource6
+    condEvalAsm7  = edasAssemble $ edasParseSequence "condEvalAsm7"  condEvalAsmSource7
 
 -- | Check to see if the code assembled correctly.
 checkAssembly :: EDASAsmOutput                          -- ^ The assembler's output

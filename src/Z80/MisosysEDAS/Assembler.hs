@@ -60,7 +60,7 @@ edasAssemble parseResult =
                                                      Left noStartAddr
                                                    else
                                                      Right ( ctx, result )
-                          in  return $ either (\errs -> Left errs)
+                          in  return $ either Left
                                               mkResult
                                               finalctx
                         )
@@ -87,29 +87,20 @@ evalAsmStmt ictx stmt =
                                                          ]
       in  if not atEndOfAsm then
             case stmt of
-              asmStmt@(AsmStmt _ _ _ _ _) ->
-                case asmStmt ^. asmOp of
-                  NoAsmOp       -> ( stmtCtx
-                                   , stmtAddr .~ currentPC $ stmt
-                                   )
-                  InsnEval _isns -> ( stmtCtx, stmt )
-                  Insn _insn    -> ( stmtCtx, stmt)
-                  -- Don't jamb the statement label into the symbol table just yet. EQU and DEFL handle
-                  -- their labels differently.
-                  Pseudo pseudo -> evalPseudo ctx stmt pseudo
-                  AsmSeq _aseq  -> error "How did AsmSeq get used??"
-
-              _condPass@(CondPass _ _ _ _ _) ->
-                ( stmtCtx, stmt )
-
-              _condCmp@(CondCmp _ _ _ _ _ _ _ _) ->
-                ( stmtCtx, stmt )
-
-              _condCmpStr@(CondCmpStr _ _ _ _ _ _ _ _) ->
-                ( stmtCtx, stmt )
-
-              _condEvalAsm@(CondAsmEval _ _ _ _ _ _ _ _ _ _) ->
-                {- trace (show condEvalAsm) $ -} ( stmtCtx, stmt )
+              (AsmStmt _ _ NoAsmOp          _ _ _) -> ( stmtCtx
+                                                   , stmtAddr .~ currentPC $ stmt
+                                                   )
+              (AsmStmt _ _ (InsnEval _insn) _ _ _) -> ( stmtCtx, stmt )
+              (AsmStmt _ _ (Insn     _insn) _ _ _) -> ( stmtCtx, stmt )
+              -- Don't jamb the statement label into the symbol table via stmtCtx just yet. EQU and DEFL handle
+              -- their labels in a special way (EQU ensures that symbols are only equated once, DEFL allows symbol
+              -- redefinition.)
+              (AsmStmt _ _ (Pseudo  pseudo) _ _ _) -> evalPseudo ctx stmt pseudo
+              (AsmStmt _ _ (AsmSeq   _aseq) _ _ _) -> ( Left "AsmSeq referenced", stmt )
+              (CondPass _ _ _ _ _ _)               -> ( stmtCtx, stmt )
+              (CondCmp _ _ _ _ _ _ _ _ _)          -> ( stmtCtx, stmt )
+              (CondCmpStr _ _ _ _ _ _ _ _ _)       -> ( stmtCtx, stmt )
+              (CondAsmEval _ _ _ _ _ _ _ _ _ _ _)  -> evalCondAsmEval stmtCtx stmt
           else
             -- Ignore everything after the 'END' pseudo-operation
             (ictx, stmt)
@@ -120,24 +111,31 @@ evalPseudo :: AsmEvalCtx
            -> EDASPseudo
            -> (IntermediateCtx, AsmStmt)
 evalPseudo ctx stmt pseudo =
-    let stmtCtx              = case stmt ^. symLabel of
+    let theSymLabel          = stmt ^. symLabel
+        stmtCtx              = case theSymLabel of
                                  Nothing    -> defaultCtx
                                  Just label -> if not (existsSymLabel label ctx) then
                                                  Right $ insertSymLabel label (ctx ^. asmPC) ctx
                                                else
-                                                  Left $ T.concat [ "Duplicate assembler/statement label: '"
-                                                                  , label
-                                                                  , "'"
+                                                  Left $ T.concat [ "Duplicate assembler/statement label "
+                                                                  , (T.cons '"' (T.snoc label '"'))
                                                                   ]
         defaultCtx           = Right ctx
         asmDateTime ctx' fmt = ctx' ^. dateTime & formatTime defaultTimeLocale fmt
     in  case pseudo of
           -- Equate uses the original assembler context, statement label is stored in the context's equateTab
           Equate expr     -> (evalEquate (stmt ^. symLabel) expr defaultCtx, stmt)
-          Origin org      -> ( -- Thread 'Either' through multple monadic hoops:
-                               liftM2 (\o ctx' -> asmPC .~ o $ ctx') (evalAsmExpr org stmtCtx) stmtCtx
-                             , stmt 
-                             )
+          Origin orgExpr  -> -- Origin cannot have a statement label
+                             if isJust theSymLabel then
+                               ( Left (T.append (mkSourcePosT (stmt ^. srcPos))
+                                                (T.append ": Illegal ORG label " 
+                                                          (T.cons '"' (T.snoc (fromJust theSymLabel) '"'))))
+                               , stmt
+                               )
+                             else ( -- Thread 'Either' through multple monadic hoops:
+                                   liftM2 (\origin ctx' -> asmPC .~ origin $ ctx') (evalAsmExpr orgExpr stmtCtx) stmtCtx
+                                  , stmt 
+                                  )
           DefB args       -> let cvtDBValue (DBStr str)   = Right $ map charIntegral $ T.unpack str
                                  cvtDBValue (DBExpr expr) = liftM (: []) (evalAsmExprWord8 expr stmtCtx)
                              in  evalDefXXArgs args cvtDBValue stmt stmtCtx
@@ -150,9 +148,9 @@ evalPseudo ctx stmt pseudo =
           DExp expr       -> case liftM word2ByteList (evalAsmExpr expr stmtCtx) of
                                Left issues -> (Left issues, stmt)
                                Right words -> updateCtxStmtBytes stmt (DVU.fromList words) stmtCtx 
-          AsmDate         -> either (\errs -> ( Left errs, stmt))
+          AsmDate         -> either (propagateErrs stmt)
                                     (\ctx' -> emitString (asmDateTime ctx' "%D") stmt stmtCtx) stmtCtx
-          AsmTime         -> either (\errs -> ( Left errs, stmt))
+          AsmTime         -> either (propagateErrs stmt)
                                     (\ctx' -> emitString (asmDateTime ctx' "%T") stmt stmtCtx) stmtCtx
           -- DefL uses the original assembler context, statement label is stored in the context's defLabelTab
           DefL expr       -> (evalDefLabel (stmt ^. symLabel) expr defaultCtx, stmt)
@@ -170,13 +168,10 @@ updateCtxStmtBytes :: AsmStmt
                    -> IntermediateCtx
                    -> (IntermediateCtx, AsmStmt)
 updateCtxStmtBytes stmt byteVec ctx =
-  let propagateErrs errs  = ( Left errs
-                            , stmt
-                            )
-      updateStmt ctx'     = ( Right $ asmPC %~ (+ (fromIntegral . DVU.length) byteVec) $ ctx'
+  let updateStmt ctx'     = ( Right $ asmPC %~ (+ (fromIntegral . DVU.length) byteVec) $ ctx'
                             , stmtAddr .~ (ctx' ^. asmPC) $ bytes .~ byteVec $ stmt
                             )
-  in  either propagateErrs updateStmt ctx
+  in  either (propagateErrs stmt) updateStmt ctx
 
 -- | Evaluate a symbol equate
 evalEquate :: Maybe EDASLabel
@@ -288,20 +283,62 @@ evalStartAddr stmt loc expr ctx =
                               ctx'
                             else
                               appendWarning ctx' (Just loc) (T.append "Start address already set to " (startAddrT ctx'))
-      propagateErrs errs  = ( Left errs
-                            , stmt
-                            )
       updateStartAddr val = ( liftM (\ctx' -> startAddr .~ (Just val) $ (mkReturnCtx ctx')) ctx
                             , stmt
                             )
-  in  either propagateErrs updateStartAddr evalCtx
-    
+  in  either (propagateErrs stmt) updateStartAddr evalCtx
+
+-- | Evaluate a simple conditional assembly expression: IF <expr>, where <expr> == (0/!0)
+evalCondAsmEval :: IntermediateCtx
+                -> AsmStmt
+                -> (IntermediateCtx, AsmStmt)
+evalCondAsmEval ictx
+                stmt@(CondAsmEval _ _ _ _ _ _ _ _ _ _ _) =
+  either (propagateErrs stmt)
+         (\val -> let boolVal       = val /= 0
+                  in annotateEndIfLabel (evalCondStatements ictx (condResult .~ boolVal $ stmt) boolVal)
+         )
+         (evalAsmExpr (stmt ^. evalExp) ictx)
+
+annotateEndIfLabel evalResult@( newCtx, newStmt ) =
+  let theEndifLabel = newStmt ^. endifLabel
+  in  if isJust theEndifLabel then
+        ( liftM (\ctx -> insertSymLabel (fromJust theEndifLabel) (ctx ^. asmPC) ctx) newCtx
+        , newStmt
+        )
+      else
+        evalResult
+
+annotateElseLabel evalResult@( newCtx, newStmt ) =
+  let theElseLabel = newStmt ^. elseLabel
+  in  if isJust theElseLabel then
+        ( liftM (\ctx -> insertSymLabel (fromJust theElseLabel) (ctx ^. asmPC) ctx) newCtx
+        , newStmt
+        )
+      else
+        evalResult
+
+-- | Evaluates the true or false sides of a conditional assembly statement.
+evalCondStatements :: IntermediateCtx
+                   -> AsmStmt
+                   -> Bool
+                   -> (IntermediateCtx, AsmStmt)
+
+evalCondStatements ictx stmt True =
+  let ( trueCtx, stmts' ) = mapAccumL evalAsmStmt ictx (stmt ^. stmtsTrue)
+  in  annotateElseLabel ( trueCtx, (stmtsTrue .~ stmts') $ stmt )
+
+evalCondStatements ictx stmt False =
+  let ( elseCtx,  elseStmt ) = annotateElseLabel (ictx, stmt)
+      ( falseCtx, stmts' ) = mapAccumL evalAsmStmt elseCtx (elseStmt ^. stmtsFalse)
+  in  ( falseCtx, (stmtsFalse .~ stmts') $ stmt )
+
 -- | Evaluate an assembler expression to produce a 'Word16' result, within the current assembler evaluation context
 evalAsmExpr :: EDASExpr
             -> IntermediateCtx
             -> Either T.Text Word16
-evalAsmExpr (Const _srcloc cst) _ctx = Right (fromIntegral cst)
-evalAsmExpr (Var pos v)          ctx = 
+evalAsmExpr (Const _srcloc cst _base) _ctx = Right (fromIntegral cst)
+evalAsmExpr (Var pos v)          ctx       = 
   ctx >>= (\ctx' -> case findAsmSymbol v ctx' of
                       Nothing -> Left (T.concat [ mkSourcePosT pos
                                                 , "Unknown equate or label name: "
@@ -310,31 +347,31 @@ evalAsmExpr (Var pos v)          ctx =
                                       )
                       Just x  -> Right x
           )
-evalAsmExpr CurrentPC ctx            = liftM (\ctx' -> ctx' ^. asmPC) ctx
-evalAsmExpr (AsmChar c) _ctx         = Right (charIntegral c)
-evalAsmExpr (Add l r) ctx            = evalBinOp ctx (+) l r
-evalAsmExpr (Sub l r) ctx            = evalBinOp ctx (-) l r
-evalAsmExpr (Mul l r) ctx            = evalBinOp ctx (*) l r
-evalAsmExpr (Div l r) ctx            = liftM2 (\l' r' -> l' `div` (r' .&. 0xff)) (evalAsmExpr l ctx) (evalAsmExpr r ctx)
-evalAsmExpr (Mod l r) ctx            = liftM2 (\l' r' -> l' `mod` (r' .&. 0xff)) (evalAsmExpr l ctx) (evalAsmExpr r ctx)
-evalAsmExpr (Shift v x) ctx          = liftM2 (\v' x' -> let x'' = (fromIntegral x') :: Int16
+evalAsmExpr CurrentPC ctx    = liftM (\ctx' -> ctx' ^. asmPC) ctx
+evalAsmExpr (AsmChar c) _ctx = Right (charIntegral c)
+evalAsmExpr (Add l r) ctx    = evalBinOp ctx (+) l r
+evalAsmExpr (Sub l r) ctx    = evalBinOp ctx (-) l r
+evalAsmExpr (Mul l r) ctx    = evalBinOp ctx (*) l r
+evalAsmExpr (Div l r) ctx    = liftM2 (\l' r' -> l' `div` (r' .&. 0xff)) (evalAsmExpr l ctx) (evalAsmExpr r ctx)
+evalAsmExpr (Mod l r) ctx    = liftM2 (\l' r' -> l' `mod` (r' .&. 0xff)) (evalAsmExpr l ctx) (evalAsmExpr r ctx)
+evalAsmExpr (Shift v x) ctx  = liftM2 (\v' x' -> let x'' = (fromIntegral x') :: Int16
                                                          in  v' `shift` (fromIntegral x''))
                                               (evalAsmExpr v ctx)
                                               (evalAsmExpr x ctx)
-evalAsmExpr (LogAnd l r) ctx         = evalBinOp ctx (.&.) l r
-evalAsmExpr (LogOr  l r) ctx         = evalBinOp ctx (.|.) l r
-evalAsmExpr (LogXor l r) ctx         = evalBinOp ctx xor l r
-evalAsmExpr (LogNE  l r) ctx         = evalCompare ctx (/=) l r
-evalAsmExpr (LogEQ  l r) ctx         = evalCompare ctx (==) l r
-evalAsmExpr (LogGE  l r) ctx         = evalCompare ctx (>=) l r
-evalAsmExpr (LogGT  l r) ctx         = evalCompare ctx (>)  l r
-evalAsmExpr (LogLE  l r) ctx         = evalCompare ctx (<=) l r
-evalAsmExpr (LogLT  l r) ctx         = evalCompare ctx (<)  l r
-evalAsmExpr (ShiftL v x) ctx         = liftM2 (\v' x' -> v' `shiftL` (fromIntegral x')) (evalAsmExpr v ctx) (evalAsmExpr x ctx)
-evalAsmExpr (ShiftR v x) ctx         = liftM2 (\v' x' -> v' `shiftR` (fromIntegral x')) (evalAsmExpr v ctx) (evalAsmExpr x ctx)
-evalAsmExpr (OnesCpl x)  ctx         = evalUnaryOp ctx complement x
-evalAsmExpr (HighByte x) ctx         = evalUnaryOp ctx (\y -> (y `shiftR` 8) .&. 0xff) x
-evalAsmExpr (LowByte x)  ctx         = evalUnaryOp ctx (\y -> y .&. 0xff) x
+evalAsmExpr (LogAnd l r) ctx = evalBinOp ctx (.&.) l r
+evalAsmExpr (LogOr  l r) ctx = evalBinOp ctx (.|.) l r
+evalAsmExpr (LogXor l r) ctx = evalBinOp ctx xor l r
+evalAsmExpr (LogNE  l r) ctx = evalCompare ctx (/=) l r
+evalAsmExpr (LogEQ  l r) ctx = evalCompare ctx (==) l r
+evalAsmExpr (LogGE  l r) ctx = evalCompare ctx (>=) l r
+evalAsmExpr (LogGT  l r) ctx = evalCompare ctx (>)  l r
+evalAsmExpr (LogLE  l r) ctx = evalCompare ctx (<=) l r
+evalAsmExpr (LogLT  l r) ctx = evalCompare ctx (<)  l r
+evalAsmExpr (ShiftL v x) ctx = liftM2 (\v' x' -> v' `shiftL` (fromIntegral x')) (evalAsmExpr v ctx) (evalAsmExpr x ctx)
+evalAsmExpr (ShiftR v x) ctx = liftM2 (\v' x' -> v' `shiftR` (fromIntegral x')) (evalAsmExpr v ctx) (evalAsmExpr x ctx)
+evalAsmExpr (OnesCpl x)  ctx = evalUnaryOp ctx complement x
+evalAsmExpr (HighByte x) ctx = evalUnaryOp ctx (\y -> (y `shiftR` 8) .&. 0xff) x
+evalAsmExpr (LowByte x)  ctx = evalUnaryOp ctx (\y -> y .&. 0xff) x
 
 -- | Evaluate a unary operator expression
 evalUnaryOp :: IntermediateCtx
@@ -384,13 +421,17 @@ evalAsmExprWord8 expr ctx = either (\errs -> Left errs) rangeCheck (evalAsmExpr 
 -- | Utility function for outputting the source position
 mkSourcePosT :: SourcePos
              -> T.Text
-mkSourcePosT srcpos = T.concat [ (T.pack . sourceName) srcpos
-                               , ", line "
-                               , (T.pack . show . sourceLine) srcpos
-                               , ", col "
-                               , (T.pack . show . sourceColumn) srcpos
-                               , ": "
-                               ]
+mkSourcePosT srcpos = let srcLine = sourceLine srcpos
+                          srcCol  = sourceColumn srcpos
+                          srcFile = sourceName srcpos
+                      in  T.append ( T.append "EDAS " (T.cons '"' (T.snoc (T.pack srcFile) '"')))
+                                   ( T.concat [ " line "
+                                              , (T.pack . show) srcLine
+                                              , ", col "
+                                              , (T.pack . show) srcCol
+                                              , ": "
+                                              ]
+                                   )
 
 -- | Convert 'Char' to an integral word type ('Word16' or 'Word8')
 charIntegral :: (Integral wordType) => Char
@@ -409,3 +450,11 @@ appendWarning :: AsmEvalCtx
               -> T.Text
               -> AsmEvalCtx
 appendWarning ctx loc msg = warnings %~ (++ [T.append (maybe T.empty mkSourcePosT loc) msg]) $ ctx
+
+-- | Helper function for 'Data.Maybe.either'
+propagateErrs :: AsmStmt
+              -> T.Text
+              -> (IntermediateCtx, AsmStmt)
+propagateErrs stmt errs  = ( Left errs
+                           , stmt
+                           )

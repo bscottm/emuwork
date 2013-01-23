@@ -26,25 +26,35 @@ class ShowHex x where
 
   as0xHex :: x -> T.Text        -- ^ Convert value to 0-filled byte string with "0x" prefix.
   as0xHex = (T.append "0x") . asHex
+  {-# INLINE as0xHex #-}
 
   -- | 'asHex' converted to a String, useful in 'Show' instances
   asHexS :: x -> String
   asHexS = T.unpack . asHex
+  {-# INLINE asHexS #-}
 
   -- | 'as0xHex' converted to a String, useful in 'Show' instances
   as0xHexS :: x -> String
   as0xHexS = T.unpack . as0xHex
+  {-# INLINE as0xHexS #-}
 
 instance ShowHex Word8 where
   asHex x = let s = T.pack $ showHex x ""
             in  T.justifyRight 2 '0' s
+  {-# INLINE asHex #-}
 
 instance ShowHex Word16 where
   asHex x = let s = T.pack $ showHex x ""
             in  T.justifyRight 4 '0' s
+  {-# INLINE asHex #-}
+
+instance ShowHex Int16 where
+  asHex x = asHex (fromIntegral x :: Word16)
+  {-# INLINE asHex #-}
 
 instance (ShowHex x) => ShowHex [x] where
   asHex   x = T.append "[" $ asHexList (asHex)   x T.empty
+  {-# INLINE asHex #-}
   as0xHex x = T.append "[" $ asHexList (as0xHex) x T.empty
 
 -- | Helper function for converting lists of things into hex
