@@ -442,13 +442,13 @@ originTests = test [ "originAsm"  ~: (checkAssembly originSymbolAsm True)       
 
 -- | Conditional assembly: evaluate the expression for true/false (0,!0)
 condAsmEvalTests :: Test
-condAsmEvalTests = test [ "condEvalAsm1"  ~: (checkAssembly condEvalAsm1 False)             @? asmPassFailed
-                        , "condEvalAsm2"  ~: (checkAssembly condEvalAsm2 True)              @? unexpectedAsmPassSucceeded
-                        , "condEvalAsm3"  ~: (checkAssembly condEvalAsm3 False)             @? asmPassFailed
-                        , "condEvalAsm4"  ~: (checkAssembly condEvalAsm4 False)             @? asmPassFailed
-                        , "condEvalAsm5"  ~: (checkAssembly condEvalAsm5 False)             @? asmPassFailed
-                        , "condEvalAsm6"  ~: (checkAssembly condEvalAsm6 False)             @? asmPassFailed
-                        , "condEvalAsm7"  ~: (checkAssembly condEvalAsm7 True)              @? unexpectedAsmPassSucceeded
+condAsmEvalTests = test [ "condEvalAsm1"   ~: (checkAssembly condEvalAsm1 False)            @? asmPassFailed
+                        , "condEvalAsm2"   ~: (checkAssembly condEvalAsm2 True)             @? unexpectedAsmPassSucceeded
+                        , "condEvalAsm3"   ~: (checkAssembly condEvalAsm3 False)            @? asmPassFailed
+                        , "condEvalAsm4"   ~: (checkAssembly condEvalAsm4 False)            @? asmPassFailed
+                        , "condEvalAsm5"   ~: (checkAssembly condEvalAsm5 False)            @? asmPassFailed
+                        , "condEvalAsm6"   ~: (checkAssembly condEvalAsm6 False)            @? asmPassFailed
+                        , "condEvalAsm7"   ~: (checkAssembly condEvalAsm7 True)             @? unexpectedAsmPassSucceeded
                         ]
   where
     condEvalAsmSource1 = T.intercalate "\n" [ "        ORG   4001H"

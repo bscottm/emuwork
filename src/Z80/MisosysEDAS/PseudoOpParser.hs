@@ -111,6 +111,7 @@ asmPseudo =
                                        <|> asciiExceptSQuote
                                      )
                         ; _ <- char '\''
+                          <|> fail "Unterminated string in DEFB/DB pseudo-operation"
                         ; return ((DBStr . T.pack) (c1:c2:s1))
                         }
                      <?> "string in DEFB/DB argument list"

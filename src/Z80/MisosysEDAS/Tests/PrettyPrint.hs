@@ -1,12 +1,9 @@
 module Main where
 
-import Control.Monad
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 
-import Z80.MisosysEDAS.AsmPrettyPrinter
-import Z80.MisosysEDAS.Assembler
-import Z80.MisosysEDAS.Parser
+import Z80.MisosysEDAS
 
 main :: IO ()
 main =
@@ -51,11 +48,17 @@ main =
                                          , "nbytes1     equ   mbyte1 - sbyte1"
                                          , "nbytes1a    equ   ebyte1 - sbyte1"
                                          , ""
-                                         , "foo1:   if    1"
-                                         , "        db    'Good'"
-                                         , "        endif"
+                                         , "foo1:       if    1"
+                                         , "            db    'Good'          ; This should output."
+                                         , "            if    0               ; Nested conditional"
+                                         , "            db    00H             ; But not this"
+                                         , "            endif"
+                                         , "            endif"
                                          , ""
-                                         , "        end   1234H"
+                                         , "            ifgt  2,1"
+                                         , "            endif"
+                                         , ""
+                                         , "            end   1234H"
                                          ]
       ; either (\msg -> TIO.putStrLn msg)
                (\(_ctx, stmts) -> do { {- putStrLn (show stmts) -}

@@ -7,12 +7,10 @@ module Z80.MisosysEDAS.AsmPrettyPrinter
   ) where
 
 import Numeric
-import Data.Maybe
 import Data.Char
 import Data.Word
 import Data.Bits
-import Data.List
-import Text.Parsec.Pos
+import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 
@@ -29,52 +27,93 @@ printAsmStmtsPretty stmts = mapM_ TIO.putStrLn (asmStmtsPretty stmts)
 -- as two examples.
 asmStmtsPretty :: [AsmStmt]
                -> [T.Text]
-asmStmtsPretty = concatMap asmStmtPretty
+asmStmtsPretty = concatMap (asmStmtPretty (T.singleton ordinaryStmt))
 
 -- | Assembler statement beautifier.
-asmStmtPretty :: AsmStmt
+asmStmtPretty :: T.Text                             -- ^ Line prefix (usually a space, but conditional code adds more)
+              -> AsmStmt                            -- ^ Statement to beautify
               -> [T.Text]
 
 -- Empty statement
-asmStmtPretty (AsmStmt pos symLab NoAsmOp cmnt _stmtAddr _bytes) =
-  let tSymLabel = maybe T.empty id symLab
+asmStmtPretty lprefix (AsmStmt _pos symLab NoAsmOp cmnt _stmtAddr _bytes) =
+  let tSymLabel = if isJust symLab then
+                    emitSymLabel True symLab
+                  else
+                    T.empty
       -- Try to be somewhat heuristic about label placement on empty lines
       fmtCmnt (Comment srcCol c) =
-        if srcCol == 1 then
-          T.cons ';' c
-        else if T.length tSymLabel == 0 && srcCol < 35 then
-          T.append (T.replicate lenStmtLabel " ") (T.cons ';' c)
-        else
-          T.append (T.replicate (lenStatement - T.length tSymLabel - 1) " ") (T.cons ';' c)
-  in  [T.append tSymLabel (maybe T.empty fmtCmnt cmnt)]
+        let tCmnt = T.cons ';' c
+        in  if srcCol == 1 then
+              tCmnt
+            else if T.length tSymLabel == 0 && srcCol < 35 then
+              T.append (T.replicate lenStmtLabel " ") tCmnt
+            else
+              let lenSoFar = lenStatement - T.length tSymLabel
+              in  T.append (T.replicate lenSoFar " ") tCmnt
+  in  [T.append lprefix (T.append tSymLabel (maybe T.empty fmtCmnt cmnt))]
 
 -- Pseudo operation
-asmStmtPretty (AsmStmt _srcLine symLab (Pseudo pseudo) cmnt _stmtAddr _bytes) =
+asmStmtPretty lprefix (AsmStmt _srcLine symLab (Pseudo pseudo) cmnt _stmtAddr _bytes) =
   let tSymLabel            = emitSymLabel (emitColon pseudo) symLab
       tPseudo              = emitPseudo pseudo
       -- Don't emit ':' for equates; it's visually distracting
       emitColon (Equate _) = False
       emitColon _otherwise = True
-  in  [ T.concat [ tSymLabel
+      lenSoFar             = T.length lprefix + T.length tSymLabel + T.length tPseudo
+  in  [ T.concat [ lprefix
+                 , tSymLabel
                  , tPseudo
-                 , emitComment (T.length tSymLabel + T.length tPseudo) cmnt
+                 , emitComment lenSoFar  cmnt
                  ]
       ]
 
 -- Conditional assembly
-asmStmtPretty (CondPass _srcPos _symLabel _passNo _stmtsTrue _stmtsFalse _comment) = undefined
-asmStmtPretty (CondCmp _srcPos _symLabel _leftExp _rightExp __condF _stmtsTrue _stmtsFalse _comment _condResult) = undefined
-asmStmtPretty (CondCmpStr _srcPos _symLabel _leftExp _rightExp _strcmpF _stmtsTrue _stmtsFalse _comment _condResult) = undefined
-asmStmtPretty (CondAsmEval _srcPos symLab expr cmnt trueStmts elseLab elseCmnt falseStmts endifLab
-                           endifCmnt _condResult) =
-  let tSymLabel            = emitSymLabel False symLab
-      tOpIf                = opWithExpr "if" expr
+asmStmtPretty lprefix (CondPass _srcPos _symLabel _passNo _comment _stmtsTrue _elseLabel _elseComment
+                                _stmtsFalse _endifLabel _endifComment) = undefined
+
+asmStmtPretty lprefix (CondCmp _srcPos symLab cmpOp lExp rExp _condF cmnt trueStmts elseLab elseCmnt
+                               falseStmts endifLab endifCmnt cResult) =
+  let ifOp = T.concat [ formatOpName (T.append "if" (T.toLower cmpOp))
+                      , formatExpr False lExp
+                      , ", "
+                      , formatExpr False rExp
+                      ]
+  in  emitCondStatement lprefix symLab ifOp cmnt trueStmts elseLab elseCmnt falseStmts endifLab endifCmnt cResult
+
+asmStmtPretty lprefix (CondCmpStr _srcPos symLab cmpOp lExp rExp _strcmpF cmnt trueStmts elseLab elseCmnt
+                                  falseStmts endifLab endifCmnt cResult) =
+  let ifOp = T.concat [ formatOpName (T.append "if" (T.toLower cmpOp))
+                      , lExp
+                      , ", "
+                      , rExp
+                      ]
+  in  emitCondStatement lprefix symLab ifOp cmnt trueStmts elseLab elseCmnt falseStmts endifLab endifCmnt cResult
+
+asmStmtPretty lprefix (CondAsmEval _srcPos symLab expr cmnt trueStmts elseLab elseCmnt falseStmts endifLab
+                           endifCmnt cResult) =
+  emitCondStatement lprefix symLab (opWithExpr "if" expr) cmnt trueStmts elseLab elseCmnt falseStmts endifLab endifCmnt cResult
+
+emitCondStatement :: T.Text
+                     -> Maybe EDASLabel
+                     -> T.Text
+                     -> Maybe Comment
+                     -> [AsmStmt]
+                     -> Maybe EDASLabel
+                     -> Maybe Comment
+                     -> [AsmStmt]
+                     -> Maybe EDASLabel
+                     -> Maybe Comment
+                     -> Bool
+                     -> [T.Text]
+emitCondStatement lprefix symLab ifOp cmnt trueStmts elseLab elseCmnt falseStmts endifLab endifCmnt cResult =
+  let lprefix'             = T.snoc (T.init lprefix) condStmt
+      tSymLabel            = T.append lprefix' (emitSymLabel True symLab)
       tIfStmt              = T.concat [ tSymLabel
-                                      , tOpIf
-                                      , emitComment (T.length tSymLabel + T.length tOpIf) cmnt
+                                      , ifOp
+                                      , emitComment (T.length tSymLabel + T.length ifOp) cmnt
                                       ]
-      tTrueStmts           = concatMap asmStmtPretty trueStmts
-      tElseLabel           = emitSymLabel False elseLab
+      tTrueStmts           = concatMap (asmStmtPretty (condPrefix cResult)) trueStmts
+      tElseLabel           = T.append lprefix' (emitSymLabel True elseLab)
       tOpElse              = formatOpName "else"
       tElseStmt            = if (not . null) falseStmts then
                               [ T.concat [ tElseLabel
@@ -85,16 +124,29 @@ asmStmtPretty (CondAsmEval _srcPos symLab expr cmnt trueStmts elseLab elseCmnt f
                              else
                               []
       tElseStmts           = if (not . null) falseStmts then
-                               concatMap asmStmtPretty falseStmts
+                               concatMap (asmStmtPretty (condPrefix (not cResult))) falseStmts
                              else
                                []
-      tEndIfLabel          = emitSymLabel False endifLab
+      tEndIfLabel          = T.append lprefix' (emitSymLabel True endifLab)
       tOpEndif             = formatOpName "endif"
       tEndifStmt           = T.concat [ tEndIfLabel
                                       , tOpEndif
                                       , emitComment (T.length tEndIfLabel + T.length tOpEndif) endifCmnt
                                       ]
+      condPrefix cond      = T.snoc (T.snoc (T.init lprefix) $ if cond then condUsed else condStmt) ordinaryStmt
   in  (tIfStmt : tTrueStmts) ++ tElseStmt ++ tElseStmts ++ [tEndifStmt]
+
+-- | Ordinary statement line prefix
+ordinaryStmt :: Char
+ordinaryStmt = ' '
+
+-- | Line prefix mark for conditional code
+condStmt :: Char
+condStmt = '|'
+
+-- | Line prefix mark for conditional code for which code was generated
+condUsed :: Char
+condUsed = '+'
 
 -- | Length of the statement label's output column
 lenStmtLabel :: Int

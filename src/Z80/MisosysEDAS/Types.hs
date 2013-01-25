@@ -325,33 +325,47 @@ data AsmStmt where
                  , _bytes      :: Vector Z80word    -- The bytes corresponding to this statement
                  } -> AsmStmt
   -- Conditional assembly depending on pass number (1 = symbol evaluation, 2 = listing, 3 = object code generation)
-  CondPass    :: { _srcPos     :: SourcePos
-                 , _symLabel   :: Maybe EDASLabel
-                 , _passNo     :: Int
-                 , _stmtsTrue  :: [AsmStmt]
-                 , _stmtsFalse :: [AsmStmt]
-                 , _comment    :: Maybe Comment
+  CondPass    :: { _srcPos       :: SourcePos
+                 , _symLabel     :: Maybe EDASLabel
+                 , _passNo       :: Int
+                 , _comment      :: Maybe Comment
+                 , _stmtsTrue    :: [AsmStmt]
+                 , _elseLabel    :: Maybe EDASLabel
+                 , _elseComment  :: Maybe Comment
+                 , _stmtsFalse   :: [AsmStmt]
+                 , _endifLabel   :: Maybe EDASLabel
+                 , _endifComment :: Maybe Comment
                  } -> AsmStmt
   -- Conditional assembly depending on EQ, LT, GT or NE comparison
-  CondCmp     :: { _srcPos     :: SourcePos
-                 , _symLabel   :: Maybe EDASLabel
-                 , _leftExp    :: EDASExpr
-                 , _rightExp   :: EDASExpr
-                 , _condF      :: (Word16 -> Word16 -> Bool)
-                 , _stmtsTrue  :: [AsmStmt]
-                 , _stmtsFalse :: [AsmStmt]
-                 , _comment    :: Maybe Comment
+  CondCmp     :: { _srcPos       :: SourcePos
+                 , _symLabel     :: Maybe EDASLabel
+                 , _cmpName      :: T.Text
+                 , _leftExp      :: EDASExpr
+                 , _rightExp     :: EDASExpr
+                 , _condF        :: (IntermediateCtx -> Either T.Text Bool)
+                 , _comment      :: Maybe Comment
+                 , _stmtsTrue    :: [AsmStmt]
+                 , _elseLabel    :: Maybe EDASLabel
+                 , _elseComment  :: Maybe Comment
+                 , _stmtsFalse   :: [AsmStmt]
+                 , _endifLabel   :: Maybe EDASLabel
+                 , _endifComment :: Maybe Comment
                  , _condResult   :: Bool
                  } -> AsmStmt
   -- Conditional assembly depending on EQ, LT, GT or NE string comparison
-  CondCmpStr  :: { _srcPos     :: SourcePos
-                 , _symLabel   :: Maybe EDASLabel
-                 , _leftExp    :: EDASExpr
-                 , _rightExp   :: EDASExpr
-                 , _strcmpF    :: (T.Text -> T.Text -> Bool)
-                 , _stmtsTrue  :: [AsmStmt]
-                 , _stmtsFalse :: [AsmStmt]
-                 , _comment    :: Maybe Comment
+  CondCmpStr :: { _srcPos        :: SourcePos
+                 , _symLabel     :: Maybe EDASLabel
+                 , _cmpName      :: T.Text
+                 , _leftStr      :: T.Text
+                 , _rightStr     :: T.Text
+                 , _strcmpF      :: (IntermediateCtx -> Either T.Text Bool)
+                 , _comment      :: Maybe Comment
+                 , _stmtsTrue    :: [AsmStmt]
+                 , _elseLabel    :: Maybe EDASLabel
+                 , _elseComment  :: Maybe Comment
+                 , _stmtsFalse   :: [AsmStmt]
+                 , _endifLabel   :: Maybe EDASLabel
+                 , _endifComment :: Maybe Comment
                  , _condResult   :: Bool
                  } -> AsmStmt
   -- Conditional assembly depending on the value of an expression
@@ -383,42 +397,59 @@ instance Show AsmStmt where
                        , ")"
                        ])
 
-  show (CondPass srcPos symLabel passNo stmtsTrue stmtsFalse comment) =
+  show (CondPass srcPos symLabel passNo comment stmtsTrue elseLabel elseComment 
+                 stmtsFalse endifLabel endifComment ) =
     T.unpack (T.concat [ "CondPass("
                        , T.intercalate ", " [ sourcePosText srcPos
                                             , textShow symLabel
                                             , textShow passNo
-                                            , textShow stmtsTrue
-                                            , textShow stmtsFalse
                                             , textShow comment
+                                            , textShow stmtsTrue
+                                            , textShow elseLabel
+                                            , textShow elseComment
+                                            , textShow stmtsFalse
+                                            , textShow endifLabel
+                                            , textShow endifComment
                                             ]
                        , ")"
                        ])
 
-  show (CondCmp srcPos symLabel leftExp rightExp _condF stmtsTrue stmtsFalse comment condResult) =
+  show (CondCmp srcPos symLabel cmpName leftExp rightExp _condF comment stmtsTrue elseLabel elseComment 
+                stmtsFalse endifLabel endifComment condResult) =
     T.unpack (T.concat [ "CondCmp("
                        , T.intercalate ", " [ sourcePosText srcPos
                                             , textShow symLabel
+                                            , cmpName
                                             , textShow leftExp
                                             , textShow rightExp
-                                            , textShow stmtsTrue
-                                            , textShow stmtsFalse
                                             , textShow comment
+                                            , textShow stmtsTrue
+                                            , textShow elseLabel
+                                            , textShow elseComment
+                                            , textShow stmtsFalse
+                                            , textShow endifLabel
+                                            , textShow endifComment
                                             , textShow condResult
                                             ]
                        , ")"
                        ])
 
   -- Conditional assembly depending on EQ, LT, GT or NE string comparison
-  show (CondCmpStr srcPos symLabel leftExp rightExp _strcmpF stmtsTrue stmtsFalse comment condResult) =
+  show (CondCmpStr srcPos symLabel cmpName leftExp rightExp _strcmpF comment stmtsTrue elseLabel elseComment
+                   stmtsFalse endifLabel endifComment condResult) =
     T.unpack (T.concat [ "CondCmpStr("
                        , T.intercalate ", " [ sourcePosText srcPos
                                             , textShow symLabel
+                                            , cmpName
                                             , textShow leftExp
                                             , textShow rightExp
-                                            , textShow stmtsTrue
-                                            , textShow stmtsFalse
                                             , textShow comment
+                                            , textShow stmtsTrue
+                                            , textShow elseLabel
+                                            , textShow elseComment
+                                            , textShow stmtsFalse
+                                            , textShow endifLabel
+                                            , textShow endifComment
                                             , textShow condResult
                                             ]
                        , ")"

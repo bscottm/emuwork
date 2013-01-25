@@ -150,3 +150,26 @@ executable edas-tests
                         TemplateHaskell,
                         TypeSynonymInstances,
                         FlexibleInstances
+
+executable edas-pptest
+  default-language:     Haskell2010
+  hs-source-dirs:       src/Z80/MisosysEDAS/Tests
+  Main-Is:              PrettyPrint.hs
+  Build-Depends:        base >= 4,
+                        containers >= 0.4,
+                        bytestring >= 0.9,
+                        text >= 0.11,
+                        binary >= 0.5,
+                        lens,
+                        vector >= 0.10,
+                        deepseq,
+                        transformers,
+                        parsec,
+                        emuwork
+  ghc-options:          -Wall -O2
+  default-extensions:   GADTs,
+                        MultiParamTypeClasses,
+                        OverloadedStrings,
+                        TemplateHaskell,
+                        TypeSynonymInstances,
+                        FlexibleInstances

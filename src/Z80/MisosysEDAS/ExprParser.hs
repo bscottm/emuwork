@@ -44,6 +44,7 @@ asmExpr =
                                          <|> unaryOp "low" LowByte
                                        )
                                <|> try ( liftM AsmChar (between (char '\'') (char '\'') asciiChar) )
+                               <|> fail "Invalid primary expression (constant, symbolic label, '$', '.not.', '.high.' or '.low.')"
                    )
 
     -- Thankfully, EDAS makes parsing unary operations easy by putting them between '.'s:

@@ -87,20 +87,20 @@ evalAsmStmt ictx stmt =
                                                          ]
       in  if not atEndOfAsm then
             case stmt of
-              (AsmStmt _ _ NoAsmOp          _ _ _) -> ( stmtCtx
-                                                   , stmtAddr .~ currentPC $ stmt
-                                                   )
-              (AsmStmt _ _ (InsnEval _insn) _ _ _) -> ( stmtCtx, stmt )
-              (AsmStmt _ _ (Insn     _insn) _ _ _) -> ( stmtCtx, stmt )
+              (AsmStmt _ _ NoAsmOp          _ _ _)     -> ( stmtCtx
+                                                          , stmtAddr .~ currentPC $ stmt
+                                                          )
+              (AsmStmt _ _ (InsnEval _insn) _ _ _)     -> ( stmtCtx, stmt )
+              (AsmStmt _ _ (Insn     _insn) _ _ _)     -> ( stmtCtx, stmt )
               -- Don't jamb the statement label into the symbol table via stmtCtx just yet. EQU and DEFL handle
               -- their labels in a special way (EQU ensures that symbols are only equated once, DEFL allows symbol
               -- redefinition.)
-              (AsmStmt _ _ (Pseudo  pseudo) _ _ _) -> evalPseudo ctx stmt pseudo
-              (AsmStmt _ _ (AsmSeq   _aseq) _ _ _) -> ( Left "AsmSeq referenced", stmt )
-              (CondPass _ _ _ _ _ _)               -> ( stmtCtx, stmt )
-              (CondCmp _ _ _ _ _ _ _ _ _)          -> ( stmtCtx, stmt )
-              (CondCmpStr _ _ _ _ _ _ _ _ _)       -> ( stmtCtx, stmt )
-              (CondAsmEval _ _ _ _ _ _ _ _ _ _ _)  -> evalCondAsmEval stmtCtx stmt
+              (AsmStmt _ _ (Pseudo  pseudo) _ _ _)     -> evalPseudo ctx stmt pseudo
+              (AsmStmt _ _ (AsmSeq   _aseq) _ _ _)     -> ( Left "AsmSeq referenced", stmt )
+              (CondPass _ _ _ _ _ _ _ _ _ _)           -> ( stmtCtx, stmt )
+              (CondCmp _ _ _ _ _ _ _ _ _ _ _ _ _ _)    -> ( stmtCtx, stmt )
+              (CondCmpStr _ _ _ _ _ _ _ _ _ _ _ _ _ _) -> ( stmtCtx, stmt )
+              (CondAsmEval _ _ _ _ _ _ _ _ _ _ _)      -> evalCondAsmEval stmtCtx stmt
           else
             -- Ignore everything after the 'END' pseudo-operation
             (ictx, stmt)
@@ -292,6 +292,18 @@ evalStartAddr stmt loc expr ctx =
 evalCondAsmEval :: IntermediateCtx
                 -> AsmStmt
                 -> (IntermediateCtx, AsmStmt)
+evalCondAsmEval _ictx
+                _stmt@(AsmStmt _ _ _ _ _ _)                = error "evalCondAsmEval should not evaluate AsmStmt"
+
+evalCondAsmEval _ictx
+                _stmt@(CondPass _ _ _ _ _ _ _ _ _ _)               = undefined
+
+evalCondAsmEval _ictx
+                _stmt@(CondCmp _ _ _ _ _ _ _ _ _ _ _ _ _ _)        = undefined
+
+evalCondAsmEval _ictx
+                _stmt@(CondCmpStr _ _ _ _ _ _ _ _ _ _ _ _ _ _)     = undefined
+
 evalCondAsmEval ictx
                 stmt@(CondAsmEval _ _ _ _ _ _ _ _ _ _ _) =
   either (propagateErrs stmt)
@@ -300,6 +312,9 @@ evalCondAsmEval ictx
          )
          (evalAsmExpr (stmt ^. evalExp) ictx)
 
+-- | Annotate address of a label assocated with the 'ENDIF' in a conditional
+annotateEndIfLabel :: (IntermediateCtx, AsmStmt)
+                   -> (IntermediateCtx, AsmStmt)
 annotateEndIfLabel evalResult@( newCtx, newStmt ) =
   let theEndifLabel = newStmt ^. endifLabel
   in  if isJust theEndifLabel then
@@ -309,6 +324,9 @@ annotateEndIfLabel evalResult@( newCtx, newStmt ) =
       else
         evalResult
 
+-- | Annotate address of a label assocated with the 'ELSE' in a conditional
+annotateElseLabel :: (IntermediateCtx, AsmStmt)
+                  -> (IntermediateCtx, AsmStmt)
 annotateElseLabel evalResult@( newCtx, newStmt ) =
   let theElseLabel = newStmt ^. elseLabel
   in  if isJust theElseLabel then
@@ -337,6 +355,7 @@ evalCondStatements ictx stmt False =
 evalAsmExpr :: EDASExpr
             -> IntermediateCtx
             -> Either T.Text Word16
+evalAsmExpr EmptyExpr _                    = error "evalAsmExpr should not evaluate EmptyExpr"
 evalAsmExpr (Const _srcloc cst _base) _ctx = Right (fromIntegral cst)
 evalAsmExpr (Var pos v)          ctx       = 
   ctx >>= (\ctx' -> case findAsmSymbol v ctx' of
