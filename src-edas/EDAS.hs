@@ -9,7 +9,7 @@ import Control.Monad
 import qualified Data.Foldable as Foldable
 import qualified Data.Text.IO as TIO
 
-import Z80.MisosysEDAS
+import MisosysEDAS
 
 data EDASOptions =
   EDASOptions
