@@ -17,7 +17,7 @@ import Data.Char
 import Data.Tuple
 import Data.Generics.Aliases
 import Data.Generics.Schemes
-import Control.Lens
+import Control.Lens hiding ((<|), (|>))
 import qualified Data.Foldable as Foldable
 import Data.Sequence (Seq, (|>), (<|), (><))
 import qualified Data.Sequence as Seq
@@ -41,9 +41,9 @@ z80AnalyticDisassembly :: Z80disassembly
 z80AnalyticDisassembly dstate =
   -- Append the symbol table to the formatted instruction sequence
   -- Unfortunately (maybe not...?) the foldl results in the concatenation of many singletons.
-  dstate ^. symbolTab ^& formatSymTab $ formattedDisSeq dstate
+  dstate ^. symbolTab & formatSymTab $ formattedDisSeq dstate
   where
-    formattedDisSeq z80dstate = (fixupSymbols z80dstate) ^. disasmSeq ^& Foldable.foldl formatElem Seq.empty
+    formattedDisSeq z80dstate = (fixupSymbols z80dstate) ^. disasmSeq & Foldable.foldl formatElem Seq.empty
     formatElem accSeq (DisasmInsn addr bytes ins cmnt) = accSeq >< formatLinePrefix bytes addr (formatIns ins cmnt)
     formatElem accSeq pseudo                           = accSeq >< formatPseudo pseudo
 
@@ -350,7 +350,10 @@ instance DisOperandFormat OperLD where
   formatOperand (Reg8Imm r imm)           = T.append (formatOperand r) (T.append ", " (formatOperand imm))
   formatOperand AccBCIndirect             = "A, (BC)"
   formatOperand AccDEIndirect             = "A, (DE)"
-  formatOperand (AccImm16Indirect addr)   = T.append "A, " (formatOperand addr)
+  formatOperand (AccImm16Indirect addr)   = T.concat [ "A, ("
+                                                     , (formatOperand addr)
+                                                     , ")"
+                                                     ]
   formatOperand AccIReg                   = "A, I"
   formatOperand AccRReg                   = "A, R"
   formatOperand BCIndirectStore           = "(BC), A"

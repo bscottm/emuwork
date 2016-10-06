@@ -6,12 +6,10 @@ module Z80.MisosysEDAS.Types where
 -- import Debug.Trace
 
 import Control.Lens
-import Data.Functor.Identity
 import Data.Word
 import Data.Int
 import Data.Time
 import Data.Maybe
-import Data.Monoid
 import Text.Parsec
 import qualified Data.Text as T
 import Data.Map (Map)
@@ -168,7 +166,7 @@ data DWValue where
 -- | EDAS expression data constructors.
 data EDASExpr where
   EmptyExpr :: EDASExpr         -- The null expression
-  Const     :: SourcePos        -- 16-bit integer constant, truncated to 8 bits when needed
+  Const16   :: SourcePos        -- 16-bit integer constant, truncated to 8 bits when needed
             -> Int16            -- Constant's value
             -> Char             -- Constant's original base
             -> EDASExpr
@@ -442,6 +440,11 @@ instance Show AsmStmt where
                                             ]
                        , ")"
                        ])
+
+-- 'Monoid Word16' instance where it's used; still creates an orphan instance warning... :-(
+instance Monoid Word16 where
+  mempty = (0 :: Word16)
+  mappend = (+)
 
 -- | Shorthand (not exported) converter
 textShow :: (Show thingType) =>

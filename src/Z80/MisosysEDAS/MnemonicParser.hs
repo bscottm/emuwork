@@ -146,9 +146,9 @@ asmMnemonic =
     parseDisplacement = do { srcpos <- getPosition
                            ; c <- constExpr True srcpos
                            ; case c of
-                               Const _srcloc disp _base -> if disp >= -128 && disp <= 127 then
-                                                             return disp
-                                                           else
-                                                             fail "index displacement out of bounds"
+                               Const16 _srcloc disp _base -> if disp >= -128 && disp <= 127 then
+                                                               return disp
+                                                             else
+                                                               fail "index displacement out of bounds"
                                _otherwise  -> fail "index register displacement"
                             }

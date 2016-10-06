@@ -13,14 +13,9 @@ module Z80.MisosysEDAS.Assembler
 
 -- import Debug.Trace
 
-#ifdef mingw32_HOST_OS
-import Control.Lens hiding (value, op)
-#else
-import Control.Lens hiding (value)
-#endif
-
 import Prelude hiding (words)
 import Control.Monad
+import Control.Lens hiding (op)
 import Data.Either
 import Data.Maybe
 import Data.Word
@@ -28,7 +23,7 @@ import Data.Int
 import Data.List hiding (words)
 import Data.Bits
 import Data.Time
-import System.Locale
+-- import System.Locale
 -- import Data.Time.Format
 import Text.Parsec.Pos
 import qualified Data.Char as C
@@ -300,6 +295,9 @@ evalCondAsmEval ictx
          )
          (evalAsmExpr (stmt ^. evalExp) ictx)
 
+annotateEndIfLabel :: Monad m
+                   => (m AsmEvalCtx, AsmStmt)
+                   -> (m AsmEvalCtx, AsmStmt)
 annotateEndIfLabel evalResult@( newCtx, newStmt ) =
   let theEndifLabel = newStmt ^. endifLabel
   in  if isJust theEndifLabel then
@@ -309,6 +307,9 @@ annotateEndIfLabel evalResult@( newCtx, newStmt ) =
       else
         evalResult
 
+annotateElseLabel :: Monad m
+                  => (m AsmEvalCtx, AsmStmt)
+                  -> (m AsmEvalCtx, AsmStmt)
 annotateElseLabel evalResult@( newCtx, newStmt ) =
   let theElseLabel = newStmt ^. elseLabel
   in  if isJust theElseLabel then
@@ -337,7 +338,7 @@ evalCondStatements ictx stmt False =
 evalAsmExpr :: EDASExpr
             -> IntermediateCtx
             -> Either T.Text Word16
-evalAsmExpr (Const _srcloc cst _base) _ctx = Right (fromIntegral cst)
+evalAsmExpr (Const16 _srcloc cst _base) _ctx = Right (fromIntegral cst)
 evalAsmExpr (Var pos v)          ctx       = 
   ctx >>= (\ctx' -> case findAsmSymbol v ctx' of
                       Nothing -> Left (T.concat [ mkSourcePosT pos

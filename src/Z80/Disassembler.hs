@@ -25,7 +25,7 @@ module Z80.Disassembler
   ) where
 
 import Data.Data
-import Control.Lens
+import Control.Lens hiding ((|>))
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Sequence (Seq, (|>))
@@ -122,7 +122,8 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
             -- symbol translation pass:
             curDState'             =
               case insn of
-                LD (RPair16ImmLoad _rp (AbsAddr addr))  -> collectSymtab curDState addr "M"
+                -- Somewhat dubious:
+                -- LD (RPair16ImmLoad _rp (AbsAddr addr))  -> collectSymtab curDState addr "M"
                 LD (HLIndirectStore (AbsAddr addr))     -> collectSymtab curDState addr "M"
                 LD (HLIndirectLoad  (AbsAddr addr))     -> collectSymtab curDState addr "M"
                 LD (RPIndirectLoad _rp (AbsAddr addr))  -> collectSymtab curDState addr "M"
