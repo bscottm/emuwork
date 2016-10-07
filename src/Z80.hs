@@ -27,6 +27,7 @@ import Z80.DisasmOutput
 import Z80.InsnDecode
 
 -- | Z80 processor.
+z80processor :: EmulatedProcessor Z80state Word16 Z80instruction
 z80processor = EmulatedProcessor
                { _procPrettyName = "Zilog Z80"
                , _internals      = z80initialState

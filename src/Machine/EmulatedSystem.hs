@@ -12,9 +12,7 @@ import Machine.Utils
 
 -- | Generic program counter
 data ProgramCounter addrType where
-  PC :: ( Integral addrType 
-        ) =>
-        addrType
+  PC :: (Integral addrType) => addrType
      -> ProgramCounter addrType
 
 -- | Make program counters behave like numeric types

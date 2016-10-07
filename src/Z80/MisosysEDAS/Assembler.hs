@@ -294,6 +294,8 @@ evalCondAsmEval ictx
                   in annotateEndIfLabel (evalCondStatements ictx (condResult .~ boolVal $ stmt) boolVal)
          )
          (evalAsmExpr (stmt ^. evalExp) ictx)
+{- Catch all for pattern matching. -}
+evalCondAsmEval _ _ = undefined
 
 annotateEndIfLabel :: Monad m
                    => (m AsmEvalCtx, AsmStmt)
@@ -373,6 +375,7 @@ evalAsmExpr (ShiftR v x) ctx = liftM2 (\v' x' -> v' `shiftR` (fromIntegral x')) 
 evalAsmExpr (OnesCpl x)  ctx = evalUnaryOp ctx complement x
 evalAsmExpr (HighByte x) ctx = evalUnaryOp ctx (\y -> (y `shiftR` 8) .&. 0xff) x
 evalAsmExpr (LowByte x)  ctx = evalUnaryOp ctx (\y -> y .&. 0xff) x
+evalAsmExpr EmptyExpr    _   = Left "Empty expression attempted."
 
 -- | Evaluate a unary operator expression
 evalUnaryOp :: IntermediateCtx

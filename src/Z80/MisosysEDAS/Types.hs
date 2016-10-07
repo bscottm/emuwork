@@ -441,7 +441,6 @@ instance Show AsmStmt where
                        , ")"
                        ])
 
--- 'Monoid Word16' instance where it's used; still creates an orphan instance warning... :-(
 instance Monoid Word16 where
   mempty = (0 :: Word16)
   mappend = (+)

@@ -36,7 +36,7 @@ asmStmtPretty :: AsmStmt
               -> [T.Text]
 
 -- Empty statement
-asmStmtPretty (AsmStmt pos symLab NoAsmOp cmnt _stmtAddr _bytes) =
+asmStmtPretty (AsmStmt _pos symLab NoAsmOp cmnt _stmtAddr _bytes) =
   let tSymLabel = maybe T.empty id symLab
       -- Try to be somewhat heuristic about label placement on empty lines
       fmtCmnt (Comment srcCol c) =
