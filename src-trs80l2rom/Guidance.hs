@@ -1,8 +1,11 @@
 module Guidance where
 
 import qualified Data.Text as T
+import qualified Data.Yaml
+import           Data.Aeson.Types
 
 import Z80
+import Machine.Utils
 
 -- | Disassembler "guidance": When to disassemble, when to dump bytes, ... basically guidance to the drive
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
@@ -71,6 +74,7 @@ actions = [ SetOrigin 0x0000
           , SymEquate "HIFH" 0x404a
           , Comment "4080 - 41FF: Basic reserved area. L2INIRESRVD initializes this area"
           , SymEquate "BASICRESV" 0x4080
+          , Comment "USR function pointer"
           , SymEquate "USRFNPTR" 0x408e
           , Comment "INKEY$ storage"
           , SymEquate "INKEYSTO" 0x4099
@@ -135,7 +139,6 @@ actions = [ SetOrigin 0x0000
           -- These are the locations where the BASIC CLOAD and SYSTEM "*"'s flicker.
           , SymEquate "VIDLINE0RIGHT1" 0x3c3e
           , SymEquate "VIDLINE0RIGHT2" 0x3c32
-          , Comment "USR function pointer"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "TRS-80 Model I Level II ROM disassembly:"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
@@ -436,3 +439,41 @@ actions = [ SetOrigin 0x0000
           ]
   where
     nextSeg sAddr eAddr = DoDisasm sAddr (fromIntegral (eAddr - sAddr) :: Z80disp)
+
+instance ToJSON Guidance where
+  {- Oh, yuck! You'd think that one instance function would be enough... -}
+  toJSON (SetOrigin addr) = object ["origin" .= addr]
+  toJSON (SymEquate sym addr) = object ["equate" .= object [sym .= as0xHex addr]]
+  toJSON (Comment comment) = object ["comment" .= comment]
+  toJSON (DoDisasm addr disp) = object ["disasm" .= object [ "start" .= as0xHex addr
+                                                           , "nbytes" .= as0xHex disp]
+                                       ]
+  toJSON (GrabBytes addr disp) = object ["bytes" .= object [ "addr" .= as0xHex addr
+                                                           , "nbytes" .= as0xHex disp
+                                                           ]
+                                        ]
+  toJSON (GrabAsciiZ addr) = object ["asciiz" .= addr]
+  toJSON (GrabAscii addr disp) = object ["ascii" .= object [ "addr" .= as0xHex addr
+                                                           , "len" .= as0xHex disp
+                                                           ]
+                                        ]
+  toJSON (HighBitTable addr disp) = object ["highbits" .= object [ "addr" .= as0xHex addr
+                                                                 , "nbytes" .= as0xHex disp
+                                                                 ]
+                                           ]
+  toJSON (JumpTable addr disp) = object ["jumptable" .= object ["addr" .= as0xHex addr
+                                                               , "nbytes" .= as0xHex disp
+                                                               ]
+                                        ]
+
+{-
+  toEncoding (SetOrigin addr) = pairs ("addr" .= addr)
+  toEncoding (SymEquate sym addr) = pairs ("equate" .= object [sym .= addr])
+  toEncoding (Comment comment) = pairs ("comment" .= comment)
+  toEncoding (DoDisasm addr disp) = pairs ("disasm" .= object ["start" .= addr, "nbytes" .= disp])
+  toEncoding (GrabBytes addr disp) = pairs ("bytes" .= object ["addr" .= addr, "nbytes" .= disp])
+  toEncoding (GrabAsciiZ addr) = pairs ("asciiz" .= addr)
+  toEncoding (GrabAscii addr disp) = pairs ("ascii" .= object ["addr" .= addr, "len" .= disp])
+  toEncoding (HighBitTable addr disp) = pairs ("highbits" .= object ["addr" .= addr, "nbytes" .= disp])
+  toEncoding (JumpTable addr disp) = pairs ("jumptable" .= object ["addr" .= addr, "nbytes" .= disp])
+-}

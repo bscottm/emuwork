@@ -27,7 +27,9 @@ library
                         lens,
                         transformers,
                         syb,
-                        parsec >= 3
+                        parsec >= 3,
+                        aeson,
+                        yaml
   ghc-options:          -Wall -O2
   default-extensions:   GADTs,
                         MultiParamTypeClasses,
