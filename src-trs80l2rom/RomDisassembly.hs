@@ -30,8 +30,8 @@ import Reader
 import Machine
 import Z80
 
-import Guidance
-import KnownSymbols
+import Disasm.Guidance
+import Disasm.KnownSymbols
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 

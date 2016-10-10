@@ -1,8 +1,10 @@
-module Guidance where
+module Disasm.Guidance where
 
+import           Data.Maybe
 import qualified Data.Text as T
-import qualified Data.Yaml
-import           Data.Aeson.Types
+import qualified Data.Yaml as Y
+import           Data.Yaml (FromJSON(..), ToJSON(..), (.=))
+import qualified Data.HashMap.Strict as H
 
 import Z80
 import Machine.Utils
@@ -442,29 +444,29 @@ actions = [ SetOrigin 0x0000
 
 instance ToJSON Guidance where
   {- Oh, yuck! You'd think that one instance function would be enough... -}
-  toJSON (SetOrigin addr) = object ["origin" .= addr]
-  toJSON (SymEquate sym addr) = object ["equate" .= object [sym .= as0xHex addr]]
-  toJSON (Comment comment) = object ["comment" .= comment]
-  toJSON (DoDisasm addr disp) = object ["disasm" .= object [ "start" .= as0xHex addr
-                                                           , "nbytes" .= as0xHex disp]
-                                       ]
-  toJSON (GrabBytes addr disp) = object ["bytes" .= object [ "addr" .= as0xHex addr
-                                                           , "nbytes" .= as0xHex disp
-                                                           ]
-                                        ]
-  toJSON (GrabAsciiZ addr) = object ["asciiz" .= addr]
-  toJSON (GrabAscii addr disp) = object ["ascii" .= object [ "addr" .= as0xHex addr
-                                                           , "len" .= as0xHex disp
-                                                           ]
-                                        ]
-  toJSON (HighBitTable addr disp) = object ["highbits" .= object [ "addr" .= as0xHex addr
-                                                                 , "nbytes" .= as0xHex disp
-                                                                 ]
-                                           ]
-  toJSON (JumpTable addr disp) = object ["jumptable" .= object ["addr" .= as0xHex addr
-                                                               , "nbytes" .= as0xHex disp
-                                                               ]
-                                        ]
+  toJSON (SetOrigin addr)         = Y.object ["origin" .= addr]
+  toJSON (SymEquate sym addr)     = Y.object ["equate" .= Y.object [sym .= as0xHex addr]]
+  toJSON (Comment comment)        = Y.object ["comment" .= comment]
+  toJSON (DoDisasm addr disp)     = Y.object ["disasm" .= Y.object [ "start" .= as0xHex addr
+                                                                   , "nbytes" .= as0xHex disp]
+                                             ]
+  toJSON (GrabBytes addr disp)    = Y.object ["bytes" .= Y.object [ "addr" .= as0xHex addr
+                                                                  , "nbytes" .= as0xHex disp
+                                                                  ]
+                                             ]
+  toJSON (GrabAsciiZ addr)        = Y.object ["asciiz" .= addr]
+  toJSON (GrabAscii addr disp)    = Y.object ["ascii" .= Y.object [ "addr" .= as0xHex addr
+                                                                  , "len" .= as0xHex disp
+                                                                  ]
+                                             ]
+  toJSON (HighBitTable addr disp) = Y.object ["highbits" .= Y.object [ "addr" .= as0xHex addr
+                                                                     , "nbytes" .= as0xHex disp
+                                                                     ]
+                                             ]
+  toJSON (JumpTable addr disp)    = Y.object ["jumptable" .= Y.object ["addr" .= as0xHex addr
+                                                                      , "nbytes" .= as0xHex disp
+                                                                      ]
+                                             ]
 
 {-
   toEncoding (SetOrigin addr) = pairs ("addr" .= addr)
@@ -477,3 +479,22 @@ instance ToJSON Guidance where
   toEncoding (HighBitTable addr disp) = pairs ("highbits" .= object ["addr" .= addr, "nbytes" .= disp])
   toEncoding (JumpTable addr disp) = pairs ("jumptable" .= object ["addr" .= addr, "nbytes" .= disp])
 -}
+
+instance FromJSON Guidance where
+  parseJSON (Y.Object o)
+    | v <- H.lookup "origin" o
+    , isJust v
+    = return $ SetOrigin (numArg v)
+    | v <- H.lookup "comment" o
+    , isJust v
+    = return $ Comment $ textArg v
+    where
+      numArg v      = let s = fromJust v
+                      in case s of
+                           Y.String s' -> (read . T.unpack) s'
+                           -- Y.Number n  -> n
+                           _otherwise  -> undefined
+                           -- _otherwise  -> fail "Expected a string value ."
+      textArg v     = let s = fromJust v
+                      in case s of
+                           Y.String s' -> s'
