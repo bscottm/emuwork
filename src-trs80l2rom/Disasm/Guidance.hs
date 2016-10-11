@@ -1,13 +1,18 @@
+
 module Disasm.Guidance where
 
 import           Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Yaml as Y
-import           Data.Yaml (FromJSON(..), ToJSON(..), (.=))
+import qualified Data.Aeson.Types as AT
+import qualified Data.Scientific as S
+import           Data.Yaml (FromJSON(..), ToJSON(..), (.=), (.:))
 import qualified Data.HashMap.Strict as H
 
 import Z80
 import Machine.Utils
+
+-- import Debug.Trace
 
 -- | Disassembler "guidance": When to disassemble, when to dump bytes, ... basically guidance to the drive
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
@@ -445,7 +450,9 @@ actions = [ SetOrigin 0x0000
 instance ToJSON Guidance where
   {- Oh, yuck! You'd think that one instance function would be enough... -}
   toJSON (SetOrigin addr)         = Y.object ["origin" .= addr]
-  toJSON (SymEquate sym addr)     = Y.object ["equate" .= Y.object [sym .= as0xHex addr]]
+  toJSON (SymEquate sym addr)     = Y.object ["equate" .= Y.object [ "name" .= sym
+                                                                   , "value" .= as0xHex addr]
+                                             ]
   toJSON (Comment comment)        = Y.object ["comment" .= comment]
   toJSON (DoDisasm addr disp)     = Y.object ["disasm" .= Y.object [ "start" .= as0xHex addr
                                                                    , "nbytes" .= as0xHex disp]
@@ -482,19 +489,39 @@ instance ToJSON Guidance where
 
 instance FromJSON Guidance where
   parseJSON (Y.Object o)
-    | v <- H.lookup "origin" o
-    , isJust v
-    = return $ SetOrigin (numArg v)
-    | v <- H.lookup "comment" o
-    , isJust v
-    = return $ Comment $ textArg v
+    -- | trace ("FromJSON object: " ++ (show o)) False = undefined
+    | (v, exists) <- probe "origin" o
+    , exists
+    -- , trace ("origin: v = " ++ (show v)) True
+    = mkOrigin v
+    | (v, exists) <- probe "comment" o
+    , exists
+    -- , trace ("comment: v = " ++ (show v)) True
+    = mkComment v
+    | (v, exists) <- probe "equate" o
+    -- , trace ("comment: v = " ++ (show v)) True
+    , exists
+    = mkEquate v
+    | otherwise
+    = fail ("Guidance type expected, got: " ++ (show o))
     where
-      numArg v      = let s = fromJust v
-                      in case s of
-                           Y.String s' -> (read . T.unpack) s'
-                           -- Y.Number n  -> n
-                           _otherwise  -> undefined
-                           -- _otherwise  -> fail "Expected a string value ."
-      textArg v     = let s = fromJust v
-                      in case s of
-                           Y.String s' -> s'
+      probe k h   = let v = H.lookup k h
+                    in  (v, isJust v)
+      mkOrigin v  = let s = fromJust v
+                    in case s of
+                         Y.String s' -> return $ SetOrigin $ (read . T.unpack) s'
+                         Y.Number n  -> case S.toBoundedInteger n of
+                                          Just n' -> return $ SetOrigin n'
+                                          Nothing -> fail ("Numeric constant out of range: " ++ (show n))
+                         _otherwise  -> fail ("origin expected a string value, got " ++ (show s))
+      mkComment v  = let s = fromJust v
+                     in case s of
+                           Y.String s' -> return $ Comment s'
+                           _otherwise  -> fail "comment guidance expects a string."
+      mkEquate v   = let s = fromJust v in
+                       case s of
+                         Y.Object o' -> SymEquate <$> o' .: "name" <*> pure 0
+                         _otherwise  -> fail "equate guidance expects a dictionary (name, value)."
+
+  {- Catchall -}
+  parseJSON invalid = AT.typeMismatch "Guidance" invalid
