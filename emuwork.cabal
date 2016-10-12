@@ -27,7 +27,9 @@ library
                         lens,
                         transformers,
                         syb,
-                        parsec >= 3
+                        parsec >= 3,
+                        aeson,
+                        yaml
   ghc-options:          -Wall -O2
   default-extensions:   GADTs,
                         MultiParamTypeClasses,
@@ -36,6 +38,7 @@ library
                         TypeSynonymInstances,
                         FlexibleInstances
   exposed-modules:      Machine,
+                        Machine.Utils,
                         Reader,
                         Z80,
                         Z80.MisosysEDAS,
@@ -44,7 +47,6 @@ library
   other-modules:        Machine.DisassemblerTypes,
                         Machine.EmulatedSystem,
                         Machine.NullProcessor,
-                        Machine.Utils,
                         Reader.RawFormat,
                         Reader.IntelHex,
                         Reader.ErrorHandling,
@@ -81,31 +83,7 @@ executable emuwork
                         TemplateHaskell,
                         TypeSynonymInstances,
                         FlexibleInstances
-
-executable trs80l2rom
-  default-language:     Haskell2010
-  hs-source-dirs:       src-trs80l2rom
-  Main-Is:              RomDisassembly.hs
-  Build-Depends:        base >= 4,
-                        containers >= 0.4,
-                        bytestring >= 0.9,
-                        text >= 0.11,
-                        binary >= 0.5,
-                        lens,
-                        vector >= 0.10,
-                        deepseq,
-                        pureMD5,
-                        emuwork
-  ghc-options:          -Wall -O2
-  other-modules:        Guidance,
-                        KnownSymbols
-  default-extensions:   GADTs,
-                        MultiParamTypeClasses,
-                        OverloadedStrings,
-                        TemplateHaskell,
-                        TypeSynonymInstances,
-                        FlexibleInstances
-
+                        
 executable edas
   default-language:     Haskell2010
   hs-source-dirs:       src-edas

@@ -5,16 +5,14 @@ module Machine.EmulatedSystem where
 
 import Data.Data
 import Control.Lens
-import Data.Vector.Unboxed (Vector, Unbox)
+import Data.Vector.Unboxed (Vector)
 import qualified Data.Text as T
 
 import Machine.Utils
 
 -- | Generic program counter
 data ProgramCounter addrType where
-  PC :: ( Integral addrType 
-        ) =>
-        addrType
+  PC :: (Integral addrType) => addrType
      -> ProgramCounter addrType
 
 -- | Make program counters behave like numeric types
@@ -22,8 +20,8 @@ instance (Integral addrType) => Num (ProgramCounter addrType) where
   (PC a) + (PC b) = PC (a + b)
   (PC a) - (PC b) = PC (a - b)
   (PC a) * (PC b) = PC (a * b)
-  abs (PC a)      = PC . abs $ a
-  signum (PC a)   = PC . signum $ a
+  abs (PC a)      = PC (abs a)
+  signum (PC a)   = PC (signum a)
   fromInteger a   = PC (fromInteger a)
 
 -- | Make program counters comparable
@@ -77,7 +75,6 @@ class GenericPC pcThing where
 data EmulatedProcessor procInternals addrType instructionSet =
   EmulatedProcessor
   { _procPrettyName :: String                   -- ^ Pretty name for the emulated processor
-  , _procAliases    :: [String]                 -- ^ Other names by which this processor is known
   , _internals      :: procInternals            -- ^ Processor-specific internal data.
   }
 
@@ -129,13 +126,17 @@ type InsnDecodeF instructionSet addrType wordType memInternals =
 -- | 'EmulatedSystem' encapsulates the various parts required to emulate a system (processor, memory, ...)
 data EmulatedSystem procInternals memInternals addrType wordType instructionSet =
   EmulatedSystem
-  { _processor :: EmulatedProcessor procInternals addrType instructionSet
+  { _processor  :: EmulatedProcessor procInternals addrType instructionSet
                                                 -- ^ System processor
-  , _memory    :: MemorySystem addrType wordType memInternals
+  , _memory     :: MemorySystem addrType wordType memInternals
                                                 -- ^ System memory
-  , _idecode   :: InsnDecodeF instructionSet addrType wordType memInternals
+  , _idecode    :: InsnDecodeF instructionSet addrType wordType memInternals
                                                 -- ^ Instruction decoding function. Used to disassemble instructions as well
                                                 -- as execute them.
+  , _sysName    :: String
+                                                -- ^ System pretty-printed name
+  , _sysAliases :: [String]
+                                                -- ^ Aliases for the system
   }
 
 makeLenses ''EmulatedSystem
@@ -165,11 +166,12 @@ class EmuCommandLineDispatch procInternals addrType instructionSet where
                  -> IO ()
 
 -- !! FIXME !! this should really identify a system, not a processor.
--- | Identify this emulated processor by matching the requsted processor name to the processor's name and aliases
-procIdentify :: EmulatedProcessor procInternals addrType instructionSet         -- ^ The emulated system
-             -> String                                                          -- ^ The emulator name
-             -> Bool                                                            -- ^ 'True' if matched.
-procIdentify theProc name = theProc ^.  procAliases ^& (name `elem`)
+-- | Identify this emulated system by matching the requsted processor name to the system's name and aliases. Usually,
+-- the match will occur in the alises, since the system's name is used for pretty printing.
+sysIdentify :: EmulatedSystem procInternals memInternals addrType wordType instructionSet -- ^ The emulated system
+            -> String                                                          -- ^ The requested name
+            -> Bool                                                            -- ^ 'True' if matched.
+sysIdentify theSystem name = any (== name) (theSystem ^. sysAliases) || (name == (theSystem ^. sysName))
 
 -- | Get a program counter's actual (internal) value
 getPCvalue :: ProgramCounter addrType
@@ -177,8 +179,7 @@ getPCvalue :: ProgramCounter addrType
 getPCvalue (PC pc) = pc
 
 -- | Fetch from memory and increment a program counter
-memFetchAndIncPC :: (Unbox wordType) => 
-                    MemorySystem addrType wordType memSys       -- ^ System memory interface
+memFetchAndIncPC :: MemorySystem addrType wordType memSys       -- ^ System memory interface
                  -> ProgramCounter addrType                     -- ^ Current Z80 state
                  -> (ProgramCounter addrType, wordType)         -- ^ New Z80 state and fetched byte
 memFetchAndIncPC mem pc = let mFetchF = mem ^. mfetch
@@ -186,8 +187,7 @@ memFetchAndIncPC mem pc = let mFetchF = mem ^. mfetch
                           in  (pcInc pc, mFetchF thePC)
 
 -- | Fetch from memory and increment a program counter
-memIncPCAndFetch :: (Unbox wordType) => 
-                    MemorySystem addrType wordType memSys       -- ^ System memory interface
+memIncPCAndFetch :: MemorySystem addrType wordType memSys       -- ^ System memory interface
                  -> ProgramCounter addrType                     -- ^ Current Z80 state
                  -> (ProgramCounter addrType, wordType)         -- ^ New Z80 state and fetched byte
 memIncPCAndFetch mem pc = let mFetchF = mem ^. mfetch

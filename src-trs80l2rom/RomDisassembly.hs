@@ -7,7 +7,7 @@ import System.IO (stdout, stderr, hPutStrLn)
 import System.Environment
 import System.Console.GetOpt
 import System.Exit
-import Control.Lens
+import Control.Lens hiding ((|>))
 import Control.Monad
 import Data.Digest.Pure.MD5
 import Data.Binary
@@ -30,17 +30,19 @@ import Reader
 import Machine
 import Z80
 
-import Guidance
-import KnownSymbols
+import Disasm.Guidance
+import Disasm.KnownSymbols
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 trs80system :: Vector Z80word
             -> Z80system (Vector Z80word)
 trs80system romImage = EmulatedSystem
-                       { _processor = z80processor
-                       , _memory    = romMemory romImage
-                       , _idecode   = z80insnDecode
+                       { _processor  = z80processor
+                       , _memory     = romMemory romImage
+                       , _idecode    = z80insnDecode
+                       , _sysName    = "TRS-80 Model II rom image disassembler"
+                       , _sysAliases = ["trs80-disasm"]
                        }
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -230,7 +232,7 @@ romMemory imgdata =
 checkAddrContinuity :: Z80disassembly
                     -> IO ()
 checkAddrContinuity dis =
-  let insOnly   = dis ^. disasmSeq ^& (Seq.filter isZ80AddrIns)
+  let insOnly   = dis ^. disasmSeq & (Seq.filter isZ80AddrIns)
       insAddrs  = fmap z80InsAddr insOnly
       nextAddrs = Seq.zipWith (+) (fmap (fromIntegral . z80InsLength) insOnly) insAddrs
       nextAddrs'  = (Seq.drop 1 insAddrs) |> (fromIntegral $ Seq.index nextAddrs (Seq.length nextAddrs - 1))

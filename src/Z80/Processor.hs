@@ -17,23 +17,23 @@ module Z80.Processor
   , memFetchAndIncPC
 
     -- * Lens functions
-    , regs
-    , z80pc
-    , primes
-    , ix
-    , iy
-    , sp
-    , ipage
-    , refresh
-    , iff1
-    , iff2
-    , intmode
+  , regs
+  , z80pc
+  , primes
+  , ix
+  , iy
+  , sp
+  , ipage
+  , refresh
+  , iff1
+  , iff2
+  , intmode
   ) where
 
 import Prelude hiding (replicate)
 import Data.Word
 import Data.Int
-import Control.Lens
+import Control.Lens hiding (ix)
 
 import Machine.EmulatedSystem
 

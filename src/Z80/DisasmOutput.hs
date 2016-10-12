@@ -12,26 +12,26 @@ module Z80.DisasmOutput
 
 -- import Debug.Trace
 
-import System.IO
-import Data.Char
-import Data.Tuple
-import Data.Generics.Aliases
-import Data.Generics.Schemes
-import Control.Lens
+import           Control.Lens hiding ((<|), (|>))
+import           Data.Char
 import qualified Data.Foldable as Foldable
-import Data.Sequence (Seq, (|>), (<|), (><))
+import           Data.Generics.Aliases
+import           Data.Generics.Schemes
+import           Data.Map (Map)
+import qualified Data.Map as Map
+import           Data.Sequence (Seq, (|>), (<|), (><))
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Data.Map (Map)
-import qualified Data.Map as Map
-import Data.Vector.Unboxed (Vector)
+import           Data.Tuple
+import           Data.Vector.Unboxed (Vector)
 import qualified Data.Vector.Unboxed as DVU
+import           System.IO
 
-import Machine
-import Z80.InstructionSet
-import Z80.Processor
-import Z80.Disassembler
+import           Machine
+import           Z80.InstructionSet
+import           Z80.Processor
+import           Z80.Disassembler
 
 -- | Format the "analytic" version of the disassembled Z80 sequence as a 'Text'
 -- sequence. This outputs the address, opcode bytes, the opcodes as ASCII,
@@ -41,9 +41,9 @@ z80AnalyticDisassembly :: Z80disassembly
 z80AnalyticDisassembly dstate =
   -- Append the symbol table to the formatted instruction sequence
   -- Unfortunately (maybe not...?) the foldl results in the concatenation of many singletons.
-  dstate ^. symbolTab ^& formatSymTab $ formattedDisSeq dstate
+  dstate ^. symbolTab & formatSymTab $ formattedDisSeq dstate
   where
-    formattedDisSeq z80dstate = (fixupSymbols z80dstate) ^. disasmSeq ^& Foldable.foldl formatElem Seq.empty
+    formattedDisSeq z80dstate = (fixupSymbols z80dstate) ^. disasmSeq & Foldable.foldl formatElem Seq.empty
     formatElem accSeq (DisasmInsn addr bytes ins cmnt) = accSeq >< formatLinePrefix bytes addr (formatIns ins cmnt)
     formatElem accSeq pseudo                           = accSeq >< formatPseudo pseudo
 
@@ -232,7 +232,7 @@ formatInstruction (EXC DEHL)              = ("EX", "DE, HL")
 formatInstruction DI                      = zeroOperands "DI"
 formatInstruction EI                      = zeroOperands "EI"
 formatInstruction (EXC Primes)            = zeroOperands "EXX"
-formatInstruction JPHL                    = ("JP", "HL")
+formatInstruction JPHL                    = ("JP", "(HL)")
 formatInstruction LDSPHL                  = ("LD", "SP, HL")
 formatInstruction RLCA                    = zeroOperands "RLCA"
 formatInstruction RRCA                    = zeroOperands "RRCA"
@@ -350,7 +350,10 @@ instance DisOperandFormat OperLD where
   formatOperand (Reg8Imm r imm)           = T.append (formatOperand r) (T.append ", " (formatOperand imm))
   formatOperand AccBCIndirect             = "A, (BC)"
   formatOperand AccDEIndirect             = "A, (DE)"
-  formatOperand (AccImm16Indirect addr)   = T.append "A, " (formatOperand addr)
+  formatOperand (AccImm16Indirect addr)   = T.concat [ "A, ("
+                                                     , (formatOperand addr)
+                                                     , ")"
+                                                     ]
   formatOperand AccIReg                   = "A, I"
   formatOperand AccRReg                   = "A, R"
   formatOperand BCIndirectStore           = "(BC), A"

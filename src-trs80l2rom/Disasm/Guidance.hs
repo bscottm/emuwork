@@ -1,8 +1,18 @@
-module Guidance where
 
+module Disasm.Guidance where
+
+import           Data.Maybe
 import qualified Data.Text as T
+import qualified Data.Yaml as Y
+import qualified Data.Aeson.Types as AT
+import qualified Data.Scientific as S
+import           Data.Yaml (FromJSON(..), ToJSON(..), (.=), (.:))
+import qualified Data.HashMap.Strict as H
 
 import Z80
+import Machine.Utils
+
+-- import Debug.Trace
 
 -- | Disassembler "guidance": When to disassemble, when to dump bytes, ... basically guidance to the drive
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
@@ -71,6 +81,7 @@ actions = [ SetOrigin 0x0000
           , SymEquate "HIFH" 0x404a
           , Comment "4080 - 41FF: Basic reserved area. L2INIRESRVD initializes this area"
           , SymEquate "BASICRESV" 0x4080
+          , Comment "USR function pointer"
           , SymEquate "USRFNPTR" 0x408e
           , Comment "INKEY$ storage"
           , SymEquate "INKEYSTO" 0x4099
@@ -135,7 +146,6 @@ actions = [ SetOrigin 0x0000
           -- These are the locations where the BASIC CLOAD and SYSTEM "*"'s flicker.
           , SymEquate "VIDLINE0RIGHT1" 0x3c3e
           , SymEquate "VIDLINE0RIGHT2" 0x3c32
-          , Comment "USR function pointer"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "TRS-80 Model I Level II ROM disassembly:"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
@@ -436,3 +446,82 @@ actions = [ SetOrigin 0x0000
           ]
   where
     nextSeg sAddr eAddr = DoDisasm sAddr (fromIntegral (eAddr - sAddr) :: Z80disp)
+
+instance ToJSON Guidance where
+  {- Oh, yuck! You'd think that one instance function would be enough... -}
+  toJSON (SetOrigin addr)         = Y.object ["origin" .= addr]
+  toJSON (SymEquate sym addr)     = Y.object ["equate" .= Y.object [ "name" .= sym
+                                                                   , "value" .= as0xHex addr]
+                                             ]
+  toJSON (Comment comment)        = Y.object ["comment" .= comment]
+  toJSON (DoDisasm addr disp)     = Y.object ["disasm" .= Y.object [ "start" .= as0xHex addr
+                                                                   , "nbytes" .= as0xHex disp]
+                                             ]
+  toJSON (GrabBytes addr disp)    = Y.object ["bytes" .= Y.object [ "addr" .= as0xHex addr
+                                                                  , "nbytes" .= as0xHex disp
+                                                                  ]
+                                             ]
+  toJSON (GrabAsciiZ addr)        = Y.object ["asciiz" .= addr]
+  toJSON (GrabAscii addr disp)    = Y.object ["ascii" .= Y.object [ "addr" .= as0xHex addr
+                                                                  , "len" .= as0xHex disp
+                                                                  ]
+                                             ]
+  toJSON (HighBitTable addr disp) = Y.object ["highbits" .= Y.object [ "addr" .= as0xHex addr
+                                                                     , "nbytes" .= as0xHex disp
+                                                                     ]
+                                             ]
+  toJSON (JumpTable addr disp)    = Y.object ["jumptable" .= Y.object ["addr" .= as0xHex addr
+                                                                      , "nbytes" .= as0xHex disp
+                                                                      ]
+                                             ]
+
+{-
+  toEncoding (SetOrigin addr) = pairs ("addr" .= addr)
+  toEncoding (SymEquate sym addr) = pairs ("equate" .= object [sym .= addr])
+  toEncoding (Comment comment) = pairs ("comment" .= comment)
+  toEncoding (DoDisasm addr disp) = pairs ("disasm" .= object ["start" .= addr, "nbytes" .= disp])
+  toEncoding (GrabBytes addr disp) = pairs ("bytes" .= object ["addr" .= addr, "nbytes" .= disp])
+  toEncoding (GrabAsciiZ addr) = pairs ("asciiz" .= addr)
+  toEncoding (GrabAscii addr disp) = pairs ("ascii" .= object ["addr" .= addr, "len" .= disp])
+  toEncoding (HighBitTable addr disp) = pairs ("highbits" .= object ["addr" .= addr, "nbytes" .= disp])
+  toEncoding (JumpTable addr disp) = pairs ("jumptable" .= object ["addr" .= addr, "nbytes" .= disp])
+-}
+
+instance FromJSON Guidance where
+  parseJSON (Y.Object o)
+    -- | trace ("FromJSON object: " ++ (show o)) False = undefined
+    | (v, exists) <- probe "origin" o
+    , exists
+    -- , trace ("origin: v = " ++ (show v)) True
+    = mkOrigin v
+    | (v, exists) <- probe "comment" o
+    , exists
+    -- , trace ("comment: v = " ++ (show v)) True
+    = mkComment v
+    | (v, exists) <- probe "equate" o
+    -- , trace ("comment: v = " ++ (show v)) True
+    , exists
+    = mkEquate v
+    | otherwise
+    = fail ("Guidance type expected, got: " ++ (show o))
+    where
+      probe k h   = let v = H.lookup k h
+                    in  (v, isJust v)
+      mkOrigin v  = let s = fromJust v
+                    in case s of
+                         Y.String s' -> return $ SetOrigin $ (read . T.unpack) s'
+                         Y.Number n  -> case S.toBoundedInteger n of
+                                          Just n' -> return $ SetOrigin n'
+                                          Nothing -> fail ("Numeric constant out of range: " ++ (show n))
+                         _otherwise  -> fail ("origin expected a string value, got " ++ (show s))
+      mkComment v  = let s = fromJust v
+                     in case s of
+                           Y.String s' -> return $ Comment s'
+                           _otherwise  -> fail "comment guidance expects a string."
+      mkEquate v   = let s = fromJust v in
+                       case s of
+                         Y.Object o' -> SymEquate <$> o' .: "name" <*> pure 0
+                         _otherwise  -> fail "equate guidance expects a dictionary (name, value)."
+
+  {- Catchall -}
+  parseJSON invalid = AT.typeMismatch "Guidance" invalid

@@ -1,0 +1,671 @@
+- origin: 0
+- comment: Restart vector redirections. These are 'JP' instructions
+- equate:
+    name: RST08VEC
+    value: 0x4000
+- equate:
+    name: RST10VEC
+    value: 0x4003
+- equate:
+    name: RST18VEC
+    value: 0x4006
+- equate:
+    name: RST20VEC
+    value: 0x4009
+- equate:
+    name: RST28VEC
+    value: 0x400c
+- equate:
+    name: RST30VEC
+    value: 0x400f
+- equate:
+    name: RST38VEC
+    value: 0x4012
+- equate:
+    name: KIDCB
+    value: 0x4015
+- equate:
+    name: CURSBLINK
+    value: 0x401c
+- comment: Video device control block
+- equate:
+    name: DODCB
+    value: 0x401d
+- comment: Cursor position (2 bytes, LSB/MSB)
+- equate:
+    name: CSRPOS
+    value: 0x4020
+- comment: Line printer device control block
+- equate:
+    name: PRDCB
+    value: 0x4025
+- comment: Bad DCB vector, used by OUTDCB
+- equate:
+    name: BADDCBVEC
+    value: 0x4033
+- comment: Cassette port and line printer width control byte
+- comment: 0=64 char, 8=32 char.
+- equate:
+    name: CASPLPRT
+    value: 0x403d
+- comment: ! 'OSVER$: DOS version number'
+- equate:
+    name: DOSVER
+    value: 0x403e
+- comment: 25 millisecond clock count
+- equate:
+    name: CLKTICK
+    value: 0x4040
+- comment: ! 'TIME$: Time of day (seconds, minutes, hours)'
+- equate:
+    name: SYSTIME
+    value: 0x4041
+- comment: ! 'DATE$: Day of year (year, month, day)'
+- equate:
+    name: SYSDATE
+    value: 0x4044
+- comment: ! 'HIFH$: DOS highest unused RAM address'
+- equate:
+    name: HIFH
+    value: 0x404a
+- comment: ! '4080 - 41FF: Basic reserved area. L2INIRESRVD initializes this area'
+- equate:
+    name: BASICRESV
+    value: 0x4080
+- comment: USR function pointer
+- equate:
+    name: USRFNPTR
+    value: 0x408e
+- comment: INKEY$ storage
+- equate:
+    name: INKEYSTO
+    value: 0x4099
+- comment: Error code for RESUME
+- equate:
+    name: RESUMEERC
+    value: 0x409a
+- comment: Printer carriage position
+- equate:
+    name: PRCURPOS
+    value: 0x409b
+- comment: ! 'Device type flag: -1 = tape, 0 = video, 1 = line printer'
+- equate:
+    name: DEVTYPEFLAG
+    value: 0x409c
+- comment: PRINT# scratch space
+- equate:
+    name: PRNUMWORK
+    value: 0x409d
+- comment: Pointer to lowest address available for string storage
+- equate:
+    name: STRINGLO
+    value: 0x40a0
+- comment: BASIC program line number counter, current line being processed
+- equate:
+    name: BASLINENO
+    value: 0x40a2
+- comment: Start of BASIC program pointer, first byte where BASIC programs are stored
+- equate:
+    name: BASPRGSTART
+    value: 0x40a4
+- comment: Line cursor position
+- equate:
+    name: LINECSRPOS
+    value: 0x40a6
+- comment: Input buffer pointer
+- equate:
+    name: INPBUFPTR
+    value: 0x40a7
+- comment: RND seed
+- equate:
+    name: RNDSEED
+    value: 0x40aa
+- comment: ! 'NTF: Numberic Type Flag'
+- comment: ! '2: Integer'
+- comment: ! '3: String'
+- comment: ! '4: Single precision floating point'
+- comment: ! '8: Double precision floating point'
+- comment: (see CPDE2HL)
+- equate:
+    name: NTF
+    value: 0x40af
+- comment: Top of memory/highest memory address available for string
+- comment: storage. Memory above this address pointer is 'reserved'.
+- equate:
+    name: MEMTOP
+    value: 0x40b1
+- comment: ! 'STRWORKPTR: String work area pointer'
+- equate:
+    name: STRWORKPTR
+    value: 0x40b3
+- comment: String work area (0x40b5 - 0x40d5
+- equate:
+    name: STRWORKAREA
+    value: 0x40b5
+- comment: Pointer to next byte of string storage
+- equate:
+    name: NEXTSTRPTR
+    value: 0x40d6
+- comment: ! 'Double precision accumulator: LSB, LSB, LSB, LSB, LSB, LSB, MSB, EXP'
+- equate:
+    name: DACC
+    value: 0x411d
+- comment: ! 'Integer accumulator: LSB, MSB'
+- comment: Single precision accumulator, LSB, LSB, MSB, EXP
+- equate:
+    name: IACC
+    value: 0x4121
+- comment: ! '"Hex" accumulator: integer, single, double precision aligned at'
+- comment: the same location.
+- equate:
+    name: HEXACC
+    value: 0x4127
+- comment: TRSDOS command vector redirections. These are also 'JP' instructions
+- equate:
+    name: DOSVECCMD
+    value: 0x4173
+- comment: |
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    Memory mapped I/O addresses
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+- equate:
+    name: LPPORT
+    value: 0x37e8
+- equate:
+    name: DSKCMDSTATUS
+    value: 0x37ec
+- equate:
+    name: DSKTRKSEL
+    value: 0x37ed
+- equate:
+    name: DSKSECSEL
+    value: 0x37ee
+- equate:
+    name: DSKDATA
+    value: 0x37ef
+- equate:
+    name: KBDLINE0
+    value: 0x3801
+- equate:
+    name: KBDLINEFNKEYS
+    value: 0x3840
+- equate:
+    name: KBDLINESHIFTS
+    value: 0x3880
+- equate:
+    name: VIDRAM
+    value: 0x3c00
+- equate:
+    name: VIDLINE0RIGHT1
+    value: 0x3c3e
+- equate:
+    name: VIDLINE0RIGHT2
+    value: 0x3c32
+- comment: |
+    
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    TRS-80 Model I Level II ROM disassembly:
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    
+- disasm:
+    nbytes: 0x004f
+    start: 0x0000
+- bytes:
+    nbytes: 0x0010
+    addr: 0x0050
+- disasm:
+    nbytes: 0x00a4
+    start: 0x0060
+- ascii:
+    addr: 0x0105
+    len: 0x000b
+- bytes:
+    nbytes: 0x0001
+    addr: 0x0110
+- ascii:
+    addr: 0x0111
+    len: 0x001a
+- bytes:
+    nbytes: 0x0002
+    addr: 0x012b
+- disasm:
+    nbytes: 0x020c
+    start: 0x012d
+- comment:  |
+    This is an alternate entry point into CHARPRINT, which preserves
+    DE. Note that CHARPRINT will load DE with the DO DCB.
+- disasm:
+    nbytes: 0x0087
+    start: 0x033a
+- comment: |
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    Output character to a device, device control block is pointed to
+    by DE, which is eventually transferred into IX. IX+1 -> L, IX + 2 -> H
+    which is the device's output function. 0x3dd is also pushed onto
+    the stack so that when the output function returns, registers are
+    restored.
+    
+    Stack looks like:
+    BC
+    HL
+    IX
+    DE
+    
+    On entry, A has the character to be output. When control is transferred
+    to the DCB's function, C has the character to be output.
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    
+     _______________________________________ 
+    | | | | | | | | |      |         |      |
+    |    T Y P E    |VECTOR| SYSDATA | NAME |
+    |_|_|_|_|_|_|_|_|______|_________|______|
+     7 6 5 4 3 2 1 0 15   0 23      0 15   0 
+    
+    The DCB follows a strict format that defines the utilization of all four
+    fields. The programmer need be concerned only with the TYPE and VECTOR
+    fields. The system requires sole use of the SYSDATA field. It also maintains
+    the NAME field thus usually necessitating no programmer intervention. The DCB
+    format must be followed in all Device Control Blocks established by the user.
+    
+    The following information provides specifications for each field of the DCB.
+
+    TYPE Field - <Byte 0>
+    ---------------------
+    
+        Bit 7  => This bit specifies that the Control Block is actually a
+                  File Control Block (FCB) with the file in an OPEN
+                  condition. Since there is a great deal of similarity
+                  between DCBs and FCBs, and devices may be routed to
+                  files, tracing a path through a device chain may reveal
+                  a "device" with this bit set, indicating a routing to a
+                  file.
+    
+        Bit 6  => This bit specifies that the DCB is associated with a
+                  FILTER module. The VECTOR field then contains the entry
+                  point of the filter. A filter initializer must set this
+                  bit when the module is assigned to the DCB.
+    
+        Bit 5  => This bit specifies that the DCB (say device AA) is linked
+                  to another device associated with a DCB (say device BB).
+                  The VECTOR field of AA will point to a dummy LINK DCB (say
+                  device LK) which was established by the system when the
+                  LINK library command was invoked. The VECTOR field of LK
+                  then will point to the original VECTOR contents of AA
+                  while the SYSDATA field will contain a pointer to the BB
+                  DCB. A picture is said to be worth a thousand words.  The
+                  device chain linkage will be illustrated later.
+    
+        Bit 4  => This bit specifies that the device defined by the DCB is
+                  routed to another character-oriented device or file.  The
+                  VECTOR field will either point to a DCB if the route
+                  destination is a device or it will contain a pointer to
+                  the file''s FCB field contained in the route module
+                  established by the system''s ROUTE library command.
+    
+        Bit 3  => This bit specifies that the device defined by the DCB is
+                  a NIL device. Any output directed to the device will be
+                  discarded. Any input request will be satisfied with a
+                  ZERO return condition.
+    
+        Bit 2  => This bit specifies that the device defined by the DCB is
+                  capable of handling requests generated by the @CTL Super-
+                  Visor Call.
+    
+        Bit 1  => This bit specifies that the device defined by the DCB is
+                  capable of handling output requests which come from the
+                  @PUT SuperVisor Call.
+    
+        Bit 0  => This bit specifies that the device defined by the DCB is
+                  capable of handling requests for input which come from
+                  the @GET SuperVisor Call.
+    
+    VECTOR Field - <Bytes 1 - 2>
+    ----------------------------
+    
+    This field initially will contain the address of the driver routine that
+    supports the device hardware associated with the DCB. In the case of
+    programmer-installed drivers, the driver initialization code must load the
+    driver's entry point into the VECTOR field of its respective DCB. Likewise,
+    when a filter module is established (via the SET library command), its entry
+    point is placed into the VECTOR field. Once established by either the system
+    or the driver/module initialization code to point to the module's entry
+    point, the VECTOR field is then maintained by the system to effect routing,
+    linking, and filtering.
+      
+    SYSDATA Field - <Bytes 3-5>
+    ---------------------------
+    
+    These three bytes are used by the system for routing and linking and are
+    unavailable for any other purpose.
+
+    NAME Field - <Bytes 6 - 7>
+    --------------------------
+    
+    Byte 6 of this field contains the first character and byte 7 the second
+    character of the device specification name. The system uses the device
+    name field as a reference in searching the Device Control Block tables.
+    When a DCB is assigned by the system during a SET or ROUTE command, this
+    device name field will be loaded by the system with the device
+    specification name passed in the command invocation. Programs requesting a
+    spare DCB via the @GTDCB SuperVisor Call (and a binary ZERO name), are
+    responsible for loading this name field.
+     
+    If the device has been routed to a file and a search of the device chain
+    shows a TYPE byte with bit-7 set, then the respective control block is
+    an FCB. In this case, byte 6 of the field will contain the DRIVE number
+    of the drive containing the file and byte 7 will contain the Directory
+    Entry Code (DEC) of the file.
+     
+    
+- disasm:
+    nbytes: 0x0020
+    start: 0x03c2
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: Read the keyboard's memory locations, determining if a key has
+- comment: been pressed. The scan starts as KBDLINE0, with the C register
+- comment: multiplied by 2 (3801, 3802, 3804, ...) via a rotate left until
+- comment: location 3880 is reached.
+- comment: ''
+- comment: Address    |0 0x01|1 0x02|2 0x04|3 0x08|4 0x10|5 0x20|6 0x40|7 0x80|
+- comment: '-----------+------+------+------+------+------+------+------+-------'
+- comment: 3B01       |A     |B     |C     |D     |E     |F     |G     |      |
+- comment: 3B02       |H     |I     |J     |K     |L     |M     |N     |O     |
+- comment: 3B04       |P     |Q     |R     |S     |T     |U     |V     |W     |
+- comment: 3B08       |X     |Y     |Z     |      |      |      |      |      |
+- comment: 3B10       |0     |1     |2     |3     |4     |5     |6     |7     |
+- comment: ! '3B20       |8     |9     |:     |;     |,     |-     |.     |/     |'
+- comment: 3B40       |ENTER |CLR   |UP-ARW|DN-ARW|L-ARW |R-ARW |SPACE |      |
+- comment: 3B80       |RTSHFT|LTSHFT|      |      |      |      |      |      |
+- comment: '-----------+------+------+------+------+------+------+------+-------'
+- comment: ''
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- disasm:
+    nbytes: 0x0074
+    start: 0x03e3
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: DO (display output) DCB function
+- comment: ''
+- comment: C has the character to be output on entry.
+- comment: ! '(IX + 3), (IX + 4): Current memory location in VIDRAM where the'
+- comment: character is output (DCB SYSINFO bytes 1 and 2).
+- comment: ! '(IX + 5): If non-zero, don''t actually output the character, but'
+- comment: do the rest of the character processing.
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- disasm:
+    nbytes: 0x0134
+    start: 0x0458
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: PR (line printer output) DCB function
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- disasm:
+    nbytes: 0x00e6
+    start: 0x058d
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: Initialize the restart vector table, located at RST08VEC
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- disasm:
+    nbytes: 0x005d
+    start: 0x0674
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: Restart vector initialization table. Yes, this is code that is
+- comment: copied into RAM.
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: 0x4000 -> RST08 redirect
+- disasm:
+    nbytes: 0x0002
+    start: 0x06d2
+- comment: 0x4003 -> RST10 redirect
+- disasm:
+    nbytes: 0x0002
+    start: 0x06d5
+- comment: 0x4006 -> RST18 redirect
+- disasm:
+    nbytes: 0x0002
+    start: 0x06d8
+- comment: 0x4009 -> RST20 redirect
+- disasm:
+    nbytes: 0x0002
+    start: 0x06db
+- comment: 0x400c -> RST28 redirect
+- disasm:
+    nbytes: 0x0002
+    start: 0x06de
+- comment: 0x400f -> RST30 redirect
+- disasm:
+    nbytes: 0x0002
+    start: 0x06e1
+- comment: 0x4012 -> RST38 redirect
+- disasm:
+    nbytes: 0x0002
+    start: 0x06e4
+- comment: ! '0x4015: KI (keyboard) device control block'
+- bytes:
+    nbytes: 0x0001
+    addr: 0x06e7
+- jumptable:
+    nbytes: 0x0002
+    addr: 0x06e8
+- bytes:
+    nbytes: 0x0003
+    addr: 0x06ea
+- ascii:
+    addr: 0x06ed
+    len: 0x0002
+- comment: ! '0x401d: DO (display output) device control block'
+- bytes:
+    nbytes: 0x0001
+    addr: 0x06ef
+- jumptable:
+    nbytes: 0x0002
+    addr: 0x06f0
+- bytes:
+    nbytes: 0x0003
+    addr: 0x06f2
+- ascii:
+    addr: 0x06f5
+    len: 0x0002
+- comment: ! '0x4025: PR (line printer output) device control block'
+- bytes:
+    nbytes: 0x0001
+    addr: 0x06f7
+- jumptable:
+    nbytes: 0x0002
+    addr: 0x06f8
+- bytes:
+    nbytes: 0x0003
+    addr: 0x06fa
+- ascii:
+    addr: 0x06fd
+    len: 0x0002
+- comment: ! '0x402d:'
+- disasm:
+    nbytes: 0x0005
+    start: 0x06ff
+- comment: ! '0x4033: OUTDCB jumps here if the requested device type bit doesn''t
+    match'
+- disasm:
+    nbytes: 0x0002
+    start: 0x0705
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: End of the restart vector initialization table.
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- disasm:
+    nbytes: 0x02c9
+    start: 0x0708
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: Copy bytes pointed to by HL to the buffer pointed to by DE
+- comment: This just exchanges DE and HL, falls through to CPDE2HL
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- disasm:
+    nbytes: 0x0000
+    start: 0x09d2
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: Copy the bytes pointed to by DE to the buffer pointed to by HL
+- comment: A, B, DE and HL are not preserved. NTF (numeric type flag)
+- comment: indicates the number of bytes to copy.
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- disasm:
+    nbytes: 0x09a8
+    start: 0x09d3
+- comment: 0.0 floating point constant
+- bytes:
+    nbytes: 0x0004
+    addr: 0x137c
+- comment: 0.5 floating point constant
+- bytes:
+    nbytes: 0x0004
+    addr: 0x1380
+- comment: ?? floating point constant
+- bytes:
+    nbytes: 0x0004
+    addr: 0x1384
+- disasm:
+    nbytes: 0x0202
+    start: 0x1388
+- comment: These four bytes are a floating point constant?
+- bytes:
+    nbytes: 0x0004
+    addr: 0x158b
+- disasm:
+    nbytes: 0x00c0
+    start: 0x158f
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: BASIC verb table -- first character has high bit set
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- highbits:
+    nbytes: 0x01d0
+    addr: 0x1650
+- jumptable:
+    nbytes: 0x00a9
+    addr: 0x1820
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: ! 'BASIC error codes:'
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- ascii:
+    addr: 0x18c9
+    len: 0x0002
+- ascii:
+    addr: 0x18cb
+    len: 0x0002
+- ascii:
+    addr: 0x18cd
+    len: 0x0002
+- ascii:
+    addr: 0x18cf
+    len: 0x0002
+- ascii:
+    addr: 0x18d1
+    len: 0x0002
+- ascii:
+    addr: 0x18d3
+    len: 0x0002
+- ascii:
+    addr: 0x18d5
+    len: 0x0002
+- ascii:
+    addr: 0x18d7
+    len: 0x0002
+- ascii:
+    addr: 0x18d9
+    len: 0x0002
+- ascii:
+    addr: 0x18db
+    len: 0x0002
+- ascii:
+    addr: 0x18dd
+    len: 0x0002
+- ascii:
+    addr: 0x18df
+    len: 0x0002
+- ascii:
+    addr: 0x18e1
+    len: 0x0002
+- ascii:
+    addr: 0x18e3
+    len: 0x0002
+- ascii:
+    addr: 0x18e5
+    len: 0x0002
+- ascii:
+    addr: 0x18e7
+    len: 0x0002
+- ascii:
+    addr: 0x18e9
+    len: 0x0002
+- ascii:
+    addr: 0x18eb
+    len: 0x0002
+- ascii:
+    addr: 0x18ed
+    len: 0x0002
+- ascii:
+    addr: 0x18ef
+    len: 0x0002
+- ascii:
+    addr: 0x18f1
+    len: 0x0002
+- ascii:
+    addr: 0x18f3
+    len: 0x0002
+- ascii:
+    addr: 0x18f5
+    len: 0x0002
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: BASIC reserved data table.
+- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- bytes:
+    nbytes: 0x0027
+    addr: 0x18f7
+- ascii:
+    addr: 0x191e
+    len: 0x0005
+- bytes:
+    nbytes: 0x0001
+    addr: 0x1923
+- ascii:
+    addr: 0x1924
+    len: 0x0004
+- bytes:
+    nbytes: 0x0001
+    addr: 0x1928
+- ascii:
+    addr: 0x1929
+    len: 0x0005
+- bytes:
+    nbytes: 0x0002
+    addr: 0x192e
+- ascii:
+    addr: 0x1930
+    len: 0x0005
+- bytes:
+    nbytes: 0x0001
+    addr: 0x1935
+- disasm:
+    nbytes: 0x035f
+    start: 0x1936
+- comment: |
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    Compare (HL) against character following the RST 08 instruction.
+    
+    Return address is pointed to by SP, which is transferred into HL
+    The return address is incremented so that the RET returns to the
+    instruction following the character.
+    
+    A is not preserved. (HL) is the character pointed to by the HL
+    register.
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- disasm:
+    nbytes: 0x0942
+    start: 0x1c96
+- comment: |
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    Test the numberic type flag (NTF)
+    Z: String
+    M: Integer
+    P, C: Single precision
+    P, NC, Double precision
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- disasm:
+    nbytes: 0x0a26
+    start: 0x25d9

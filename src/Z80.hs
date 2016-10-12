@@ -1,3 +1,6 @@
+{-# LANGUAGE RankNTypes #-}
+{- kill off RankNTypes when a more specific memory system is created. -}
+
 -- | Re-export module for the Zilog Z80 processor.
 module Z80
        ( module Z80.Processor
@@ -7,7 +10,11 @@ module Z80
        , module Z80.DisasmOutput
        -- , module Z80.ParseAnalytic
        , z80processor
+       , z80generic
        ) where
+
+import qualified Data.Vector.Unboxed as DVU
+import Data.Word
 
 import Machine
 
@@ -19,11 +26,29 @@ import Z80.DisasmOutput
 
 import Z80.InsnDecode
 
--- | Constructor function for an emulated Zilog Z80
-z80processor :: Z80emulation
-z80processor =
-  EmulatedProcessor
-  { _procPrettyName = "Zilog Z80"
-  , _procAliases    = ["z80", "Z80", "Zilog-z80", "Zilog-Z80"]
-  , _internals      = z80initialState
-  }
+-- | Z80 processor.
+z80processor :: EmulatedProcessor Z80state Word16 Z80instruction
+z80processor = EmulatedProcessor
+               { _procPrettyName = "Zilog Z80"
+               , _internals      = z80initialState
+               }
+
+-- | Generic Z80 system, used for disassembling ROMs and such. This is not an actual or useful
+-- system.
+z80generic :: forall memInternals. EmulatedSystem Z80state memInternals Word16 Word16 Z80instruction
+z80generic = EmulatedSystem
+             { _processor = z80processor
+             , _memory    = MemorySystem
+                            { _memInternals = undefined
+                            , _mfetch  = (\_addr -> 0 :: Word16)
+                            , _mfetchN = (\_addr _nBytes -> DVU.empty)
+                            , _maxmem  = 65535 :: Word16
+                            }
+             , _idecode    = (\pc _mem -> DecodedInsn pc NOP)
+             , _sysName    = "Generic Z80 system"
+             , _sysAliases = ["z80generic", "Z80-generic"]
+             }
+
+-- | 'EmuCommandLineDispatch' type family instance for the Z80 generic processor
+instance EmuCommandLineDispatch Z80state Word16 Z80instruction where
+  cmdDispatch _state options = putStrLn $ "Z80 generic system dispatch invoked, args = " ++ (show options)

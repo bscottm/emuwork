@@ -30,12 +30,14 @@ doDispatch :: String                            -- ^ The requested emulator's na
            -> [String]                          -- ^ Command line (emulator-specific)
            -> IO ()
 doDispatch emuName emuOpts
-  | nullproc <- Machine.nullProcessor, Machine.procIdentify (Machine.processor ^$ nullproc) emuName =
-    Machine.cmdDispatch (Machine.processor ^$ nullproc) emuOpts
-{-
-  | z80proc  <- Z80.z80processor, Machine.procIdentify z80proc emuName =
-    Machine.cmdDispatch z80proc emuOpts
--}
+  | nullproc <- Machine.nullProcessor,
+    Machine.sysIdentify nullproc emuName
+  = Machine.cmdDispatch (nullproc ^. Machine.processor) emuOpts
+
+  | z80proc  <- Z80.z80generic,
+    Machine.sysIdentify z80proc emuName
+  = Machine.cmdDispatch (z80proc ^. Machine.processor) emuOpts
+
   | otherwise =
     hPutStrLn stderr ("Unsupported or unknown processor emulator: '" ++ (show emuName) ++ "'")
     >> dumpEmulators
@@ -108,20 +110,20 @@ exitError msg = do
 dumpEmulators :: IO ()
 dumpEmulators = do
     hPutStrLn stderr "Available emulators are:"
-      >> prettyEmu (Machine.processor ^$ Machine.nullProcessor)
-      >> prettyEmu Z80.z80processor
+      >> prettyEmu Machine.nullProcessor
+      >> prettyEmu Z80.z80generic
   where
     prefix = "-- "
     indent = "   "
     indentLen = length indent
 
-    initialString :: (Machine.EmulatedProcessor procInternals addrType instructionSet) -> String
-    initialString emu = prefix ++ (emu ^. Machine.procPrettyName) ++ " ("
+    initialString :: (Machine.EmulatedSystem procInternals memInternals addrType wordType instructionSet) -> String
+    initialString emu = prefix ++ (emu ^. Machine.sysName) ++ " ("
 
-    prettyEmu :: (Machine.EmulatedProcessor procInternals addrType instructionSet) -> IO ()
+    prettyEmu :: (Machine.EmulatedSystem procInternals memInternals addrType wordType instructionSet) -> IO ()
     prettyEmu emu = do
       hPutStr stderr (initialString emu)
-      prettyEmuNames (emu ^. Machine.procAliases) (length (initialString emu))
+      prettyEmuNames (emu ^. Machine.sysAliases) (length (initialString emu))
 
     prettyEmuNames []         _accLen = hPutStrLn stderr ""
     prettyEmuNames (eName:[]) _accLen = hPutStrLn stderr ("\"" ++ eName ++ "\")")

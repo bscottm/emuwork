@@ -1,4 +1,4 @@
-module KnownSymbols where
+module Disasm.KnownSymbols where
 
 import Data.Map (Map)
 import qualified Data.Map as Map

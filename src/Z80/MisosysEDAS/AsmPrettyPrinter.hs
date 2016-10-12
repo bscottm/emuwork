@@ -7,10 +7,12 @@ module Z80.MisosysEDAS.AsmPrettyPrinter
   ) where
 
 import Numeric
+-- import Data.Maybe
 import Data.Char
 import Data.Word
 import Data.Bits
-import Data.Maybe
+-- import Data.List
+-- import Text.Parsec.Pos
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 
@@ -35,11 +37,8 @@ asmStmtPretty :: T.Text                             -- ^ Line prefix (usually a 
               -> [T.Text]
 
 -- Empty statement
-asmStmtPretty lprefix (AsmStmt _pos symLab NoAsmOp cmnt _stmtAddr _bytes) =
-  let tSymLabel = if isJust symLab then
-                    emitSymLabel True symLab
-                  else
-                    T.empty
+asmStmtPretty (AsmStmt _pos symLab NoAsmOp cmnt _stmtAddr _bytes) =
+  let tSymLabel = maybe T.empty id symLab
       -- Try to be somewhat heuristic about label placement on empty lines
       fmtCmnt (Comment srcCol c) =
         let tCmnt = T.cons ';' c
@@ -220,7 +219,7 @@ formatExpr :: Bool                                  -- ^ Constants are 8-bit (Tr
 formatExpr _const8 EmptyExpr       = T.empty
 
 -- Constant values are signed 16-bit for decimal, octal and binary. Hex is always treated as unsigned.
-formatExpr  False  (Const _ val base)  =
+formatExpr  False  (Const16 _ val base)  =
   -- 'showIntAsBase' will invoke error if handed a negative number. Consequently, special handling
   -- here with two's complement manipulations and signs
   let sign       = if val < 0 then T.singleton '-' else T.empty
@@ -235,7 +234,7 @@ formatExpr  False  (Const _ val base)  =
         _otherwise -> error ("formatExpr: Unknown base: '" ++ (show base) ++ "'")
 
 -- Constant values are signed 8-bit for decimal, octal and binary. Hex is always treated as unsigned.
-formatExpr  True   (Const _ val base)  =
+formatExpr  True   (Const16 _ val base)  =
   -- 'showIntAsBase' will invoke error if handed a negative number. Consequently, special handling
   -- here with two's complement manipulations and signs
   let val8       = fromIntegral val :: Word8

@@ -152,7 +152,7 @@ constExpr signRequired srcpos =
     
     convertConst' base cvtFunc x = case signed cvtFunc x of
                                 Left errMsg        -> fail errMsg
-                                Right (val, "")    -> return $ Const srcpos val base
+                                Right (val, "")    -> return $ Const16 srcpos val base
                                 Right (_val, xtra) -> fail $ T.unpack ( T.concat [ "Extra characters following constant, '"
                                                                                  , xtra
                                                                                  , "'"

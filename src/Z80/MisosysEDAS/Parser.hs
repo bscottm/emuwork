@@ -12,17 +12,9 @@ module Z80.MisosysEDAS.Parser
 -- import Debug.Trace
 
 import Control.Exception hiding (try)
-import Control.Monad
-
-#ifdef mingw32_HOST_OS
-import Control.Lens hiding (value, walk, op)
-#else
-import Control.Lens hiding (value, walk)
-#endif
-
+import Control.Lens
 import Text.Parsec
 import Text.Parsec.Pos
-import Text.Parsec.Text()                 -- ghci 7.6.1 needs these imported instances, e.g., (Stream T.Text Identity Char)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import qualified Data.Vector.Unboxed as DVU

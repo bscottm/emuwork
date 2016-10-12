@@ -1,0 +1,37 @@
+cabal-version:  >= 1.12
+name:           trs80l2rom
+version:        0.1
+build-type:     Simple
+author:         B. Scott Michel
+synopsis:       A prototype processor emulation framework
+
+description:    Yet another processor emulation framework for my
+                favorite old processors.
+license:        GPL-3
+
+executable trs80l2rom
+  default-language:     Haskell2010
+  Main-Is:              RomDisassembly.hs
+  Build-Depends:        base >= 4,
+                        containers,
+                        unordered-containers,
+                        bytestring,
+                        text,
+                        binary,
+                        lens,
+                        vector,
+                        pureMD5,
+                        scientific,
+                        aeson,
+                        yaml,
+                        raw-strings-qq,
+                        emuwork
+  ghc-options:          -Wall -O2
+  other-modules:        Disasm.Guidance,
+                        Disasm.KnownSymbols
+  default-extensions:   GADTs,
+                        MultiParamTypeClasses,
+                        OverloadedStrings,
+                        TemplateHaskell,
+                        TypeSynonymInstances,
+                        FlexibleInstances

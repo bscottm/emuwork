@@ -13,14 +13,9 @@ module Z80.MisosysEDAS.Assembler
 
 -- import Debug.Trace
 
-#ifdef mingw32_HOST_OS
-import Control.Lens hiding (value, op)
-#else
-import Control.Lens hiding (value)
-#endif
-
 import Prelude hiding (words)
 import Control.Monad
+import Control.Lens hiding (op)
 import Data.Either
 import Data.Maybe
 import Data.Word
@@ -28,7 +23,7 @@ import Data.Int
 import Data.List hiding (words)
 import Data.Bits
 import Data.Time
-import System.Locale
+-- import System.Locale
 -- import Data.Time.Format
 import Text.Parsec.Pos
 import qualified Data.Char as C
@@ -311,10 +306,13 @@ evalCondAsmEval ictx
                   in annotateEndIfLabel (evalCondStatements ictx (condResult .~ boolVal $ stmt) boolVal)
          )
          (evalAsmExpr (stmt ^. evalExp) ictx)
+{- Catch all for pattern matching. -}
+evalCondAsmEval _ _ = undefined
 
 -- | Annotate address of a label assocated with the 'ENDIF' in a conditional
-annotateEndIfLabel :: (IntermediateCtx, AsmStmt)
-                   -> (IntermediateCtx, AsmStmt)
+annotateEndIfLabel :: Monad m
+                   => (m AsmEvalCtx, AsmStmt)
+                   -> (m AsmEvalCtx, AsmStmt)
 annotateEndIfLabel evalResult@( newCtx, newStmt ) =
   let theEndifLabel = newStmt ^. endifLabel
   in  if isJust theEndifLabel then
@@ -325,8 +323,9 @@ annotateEndIfLabel evalResult@( newCtx, newStmt ) =
         evalResult
 
 -- | Annotate address of a label assocated with the 'ELSE' in a conditional
-annotateElseLabel :: (IntermediateCtx, AsmStmt)
-                  -> (IntermediateCtx, AsmStmt)
+annotateElseLabel :: Monad m
+                  => (m AsmEvalCtx, AsmStmt)
+                  -> (m AsmEvalCtx, AsmStmt)
 annotateElseLabel evalResult@( newCtx, newStmt ) =
   let theElseLabel = newStmt ^. elseLabel
   in  if isJust theElseLabel then
@@ -355,8 +354,7 @@ evalCondStatements ictx stmt False =
 evalAsmExpr :: EDASExpr
             -> IntermediateCtx
             -> Either T.Text Word16
-evalAsmExpr EmptyExpr _                    = error "evalAsmExpr should not evaluate EmptyExpr"
-evalAsmExpr (Const _srcloc cst _base) _ctx = Right (fromIntegral cst)
+evalAsmExpr (Const16 _srcloc cst _base) _ctx = Right (fromIntegral cst)
 evalAsmExpr (Var pos v)          ctx       = 
   ctx >>= (\ctx' -> case findAsmSymbol v ctx' of
                       Nothing -> Left (T.concat [ mkSourcePosT pos
@@ -391,6 +389,7 @@ evalAsmExpr (ShiftR v x) ctx = liftM2 (\v' x' -> v' `shiftR` (fromIntegral x')) 
 evalAsmExpr (OnesCpl x)  ctx = evalUnaryOp ctx complement x
 evalAsmExpr (HighByte x) ctx = evalUnaryOp ctx (\y -> (y `shiftR` 8) .&. 0xff) x
 evalAsmExpr (LowByte x)  ctx = evalUnaryOp ctx (\y -> y .&. 0xff) x
+evalAsmExpr EmptyExpr    _   = Left "Empty expression attempted."
 
 -- | Evaluate a unary operator expression
 evalUnaryOp :: IntermediateCtx

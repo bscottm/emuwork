@@ -6,7 +6,7 @@ import Prelude hiding (pred)
 -- import Debug.Trace
 
 import Test.HUnit hiding (showPath)
-import Data.Monoid
+-- import Data.Monoid
 import Data.Maybe
 import Data.Word
 import Data.Bits
@@ -31,7 +31,7 @@ main = do { (counts', _) <- performTest reportStart reportError reportFailure ()
     reportStart ss _us = TIO.putStrLn $ (showPath (path ss))
     reportError   = reportProblem "Error:"   "Error in:   "
     reportFailure = reportProblem "Failure:" "Failure in: "
-    reportProblem p0 p1 msg ss _us = TIO.putStrLn line
+    reportProblem p0 p1 _loc msg ss _us = TIO.putStrLn line
      where line  = T.concat [ "### "
                             , kind
                             , path'
@@ -607,7 +607,7 @@ checkStartAddress sAddr asm = liftM checkSAddr asm
     checkSAddr theAsm = case theAsm of
                           Left problems       -> error (T.unpack problems)
                           Right (ctx, _stmts) ->
-                            let asmStartAddr = startAddr ^$ ctx
+                            let asmStartAddr = ctx ^. startAddr
                                 sAddrsMatch  = (isJust asmStartAddr) && (fromJust asmStartAddr) == sAddr
                             in  if sAddrsMatch then
                                   sAddrsMatch
@@ -631,11 +631,11 @@ checkAssemblerWarnings asm showWarnings = when showWarnings dumpWarnings
                               >>= (\theAsm ->
                                     case theAsm of
                                       Left _problems      -> return ()
-                                      Right (ctx, _stmts) -> mapM_ TIO.putStrLn (warnings ^$ ctx)
+                                      Right (ctx, _stmts) -> mapM_ TIO.putStrLn (ctx ^. warnings)
                                  )
     checkAsmWarnings theAsm = case theAsm of
                                 Left _problems      -> False
-                                Right (ctx, _stmts) -> null (warnings ^$ ctx)
+                                Right (ctx, _stmts) -> null (ctx ^. warnings)
 
 -- | Convert a character to 'Word8'
 charToWord8 :: Char
@@ -651,7 +651,3 @@ stringToWord8 = map charToWord8
 textToWord8 :: T.Text
             -> [Word8]
 textToWord8 = stringToWord8 . T.unpack
-
-instance Monoid Word16 where
-  mempty = (0 :: Word16)
-  mappend = (+)
