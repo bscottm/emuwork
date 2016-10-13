@@ -10,6 +10,7 @@ import qualified Data.Text as T
 import qualified Data.Yaml as Y
 import           Disasm.Guidance
 
+
 t1 :: ByteString
 t1 = [r|
 - origin: 0x0
@@ -36,14 +37,17 @@ test1 =
 
 
 t2 :: ByteString
-t2 = [r|
-- origin: 0xgg
+t2 = [r|- origin: 0x0
 - comment: |
     multiline comment
     comment line 2
 - equate:
     name: RST08VEC
     value: 0x4000
+- comment: RST10 vector - this is a JP instruction
+- equate:
+    name: RST10VEC
+    value: 0x4003
 |]
 
 test2 :: IO ()

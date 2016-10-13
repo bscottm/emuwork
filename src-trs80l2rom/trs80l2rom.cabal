@@ -12,7 +12,7 @@ license:        GPL-3
 executable trs80l2rom
   default-language:     Haskell2010
   Main-Is:              RomDisassembly.hs
-  Build-Depends:        base >= 4,
+  Build-Depends:        base,
                         containers,
                         unordered-containers,
                         bytestring,
@@ -24,12 +24,33 @@ executable trs80l2rom
                         scientific,
                         aeson,
                         yaml,
-                        raw-strings-qq,
                         emuwork
   ghc-options:          -Wall -O2
   other-modules:        Disasm.Guidance,
                         Disasm.KnownSymbols
   default-extensions:   GADTs,
+                        MultiParamTypeClasses,
+                        OverloadedStrings,
+                        TemplateHaskell,
+                        TypeSynonymInstances,
+                        FlexibleInstances
+
+test-suite yamltest
+    default-language:   Haskell2010
+    Type:               detailed-0.9
+    Build-Depends:      base,
+                        Cabal,
+                        HUnit,
+                        unordered-containers,
+                        bytestring,
+                        text,
+                        raw-strings-qq,
+                        aeson,
+                        scientific,
+                        yaml,
+                        emuwork
+    Test-Module:        Disasm.YamlTest
+    default-extensions: GADTs,
                         MultiParamTypeClasses,
                         OverloadedStrings,
                         TemplateHaskell,
