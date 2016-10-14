@@ -98,17 +98,29 @@ showUsage = do
 -- The tests...
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
+infix 1 @!?
+
+-- | Boolean false assertion: Expect that the result of the test will be 'False'.
+(@!?) :: (AssertionPredicable t) =>
+         t
+      -> String
+      -> Assertion
+pred @!? msg = assertionPredicate pred >>= (\b -> when b (assertFailure msg))
+
 mkYAMLTests :: TestArgs -> IO Test
 mkYAMLTests opts =
   let sc = showContent opts
       sr = showResult  opts
-  in return $ test [ "test1" ~: (test1 sc sr) @? "test1 failed."
-                   , "test2" ~: (test2 sc sr) @? "test2 failed."
+  in return $ test [ "test1" ~: (test1 opts) @?  "test1 failed."
+                   , "equates" ~: test [ "valid equate"      ~: (validEquate opts)   @?  "valid equate failed."
+                                       , "invalid equate"    ~: (invalidEquate opts) @!? "invalid equate succeeded."
+                                       , "invalid hex value" ~: (invalidHex opts)    @!? "invalid hex succeeded."
+                                       ]
                    ]
 
-doYAMLTest :: Bool -> Bool -> ByteString -> IO Bool
-doYAMLTest showContent showResult testString =
-  (when showContent $
+doYAMLTest :: TestArgs -> ByteString -> IO Bool
+doYAMLTest opts testString =
+  (when (showContent opts) $
    do
      putStrLn "YAML Test Content:"
      putStrLn "~~~~"
@@ -117,15 +129,15 @@ doYAMLTest showContent showResult testString =
   >> (case Y.decodeEither' testString :: Either Y.ParseException [Guidance] of
         Left  err ->
           do
-            putStrLn ("Decode failed: " ++ (show err))
+            when (showResult opts) $ putStrLn ("Decode failed: " ++ (show err))
             return False
         Right res ->
           do
-            when showResult $ putStrLn (show res)
+            when (showResult opts) $ putStrLn (show res)
             return True)
 
-test1 :: Bool -> Bool -> IO Bool
-test1 sc sr = doYAMLTest sc sr [r|
+test1 :: TestArgs -> IO Bool
+test1 opts = doYAMLTest opts [r|
 - origin: 0x0
 - comment: Restart vector redirections. These are 'JP' instructions
 - comment: |
@@ -133,8 +145,8 @@ test1 sc sr = doYAMLTest sc sr [r|
     comment line 2
 |]
 
-test2 :: Bool -> Bool -> IO Bool
-test2 sc sr = doYAMLTest sc sr [r|- origin: 0x0
+validEquate :: TestArgs -> IO Bool
+validEquate opts = doYAMLTest opts [r|- origin: 0x0
 - comment: |
     multiline comment
     comment line 2
@@ -145,4 +157,21 @@ test2 sc sr = doYAMLTest sc sr [r|- origin: 0x0
 - equate:
     name: RST10VEC
     value: 0x4003
+|]
+
+-- | Invalid equate name
+invalidEquate :: TestArgs -> IO Bool
+invalidEquate opts = doYAMLTest opts [r|
+- equate:
+    name: 0RST10VEC
+    value: 0x4003
+|]
+
+
+-- | Invalid equate name
+invalidHex :: TestArgs -> IO Bool
+invalidHex opts = doYAMLTest opts [r|
+- equate:
+    name:  RST10VEC
+    value: 0xg
 |]

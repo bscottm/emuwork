@@ -10,6 +10,7 @@ import           Data.Maybe
 import           Data.Word
 import           Data.Bits
 import qualified Data.Text as T
+import qualified Data.Char as C
 import qualified Data.Yaml as Y
 import qualified Data.Aeson.Types as AT
 import qualified Data.Scientific as S
@@ -443,7 +444,7 @@ actions = [ SetOrigin 0x0000
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , nextSeg 0x1c96 0x25d8
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , Comment "Test the numberic type flag (NTF)"
+          , Comment "Test the numeric type flag (NTF)"
           , Comment "Z: String"
           , Comment "M: Integer"
           , Comment "P, C: Single precision"
@@ -533,12 +534,15 @@ instance FromJSON Guidance where
                              symval  = o' .:? "value"
                          in  symname >>= maybe (fail "Missing symbol name in equate")
                                                (\symname' ->
-                                                  symval >>= maybe (fail "Missing symbol value in equate")
-                                                                   (\symval' ->
-                                                                       (maybe (fail "Symbol value not a 16-bit constant")
-                                                                         (\val -> return $ SymEquate symname' val)
-                                                                         (convertWord16 symval'))))
-                       _otherwise  -> fail "equate guidance expects a (name, value) dictionary."
+                                                  if validSymName symname'
+                                                  then symval >>= maybe (fail "Missing symbol value in equate")
+                                                                        (\symval' ->
+                                                                           (maybe (fail "Symbol value not a 16-bit constant")
+                                                                            (\val -> return $ SymEquate symname' val)
+                                                                            (convertWord16 symval')))
+                                                  else fail ("Invalid equate name (max 15 chars, '[A-Z]$_@' first char)'" ++
+                                                             (T.unpack symname')))
+                       _otherwise  -> fail "equate guidance expects a name and a value (name, value dict.)"
 
   {- Catchall -}
   parseJSON invalid = AT.typeMismatch "Guidance" invalid
@@ -554,9 +558,9 @@ convertWord16 t
   | T.isPrefixOf "0o" t
   = convertOctal (T.drop 2 t)
   | T.isPrefixOf "0" t
-  = convertOctal (T.drop 1 t)
+  = convertOctal (T.tail t)
   | otherwise
-  = undefined
+  = convertDecimal t
 
 maxWord16 :: Int
 maxWord16 = fromIntegral (maxBound :: Word16)
@@ -580,3 +584,19 @@ convertOctal octstr = let val = fst $ T.mapAccumR (\v c -> (v * 8 + (fromEnum c 
                       in  if validOctal octstr && val <= maxWord16
                           then Just (fromIntegral val)
                           else Nothing
+
+validDecimal :: T.Text -> Bool
+validDecimal = T.all C.isDigit
+
+convertDecimal :: T.Text -> Maybe Word16
+convertDecimal str = let val = fst $ T.mapAccumR (\v c -> (v * 10 + (fromEnum c .&. 0xf), c)) 0 (T.reverse str)
+                     in  if validDecimal str && val <= maxWord16
+                          then Just (fromIntegral val)
+                          else Nothing
+
+validSymName :: T.Text -> Bool
+validSymName sym = let validChar x = (C.isLetter x || x == '$' || x == '_' || x == '@')
+                   in  (validChar . T.head) sym
+                       && T.compareLength sym 15 /= GT
+                       && T.all (\x -> validChar x || C.isDigit x || x == '?') (T.tail sym)
+                            
