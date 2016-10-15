@@ -12,6 +12,7 @@ import           Data.Bits
 import qualified Data.Text as T
 import qualified Data.Char as C
 import qualified Data.Yaml as Y
+import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as AT
 import qualified Data.Scientific as S
 import           Data.Yaml (FromJSON(..), ToJSON(..), (.=), (.:?))
@@ -497,7 +498,7 @@ instance ToJSON Guidance where
 
 instance FromJSON Guidance where
   parseJSON (Y.Object o)
-    -- | trace ("FromJSON object: " ++ (show o)) False = undefined
+    --  | trace ("FromJSON object: " ++ (show o)) False = undefined
     | (v, exists) <- probe "origin" o
     , exists
     -- , trace ("origin: v = " ++ (show v)) True
@@ -510,40 +511,56 @@ instance FromJSON Guidance where
     -- , trace ("comment: v = " ++ (show v)) True
     , exists
     = mkEquate v
+    | (v, exists) <- probe "disasm" o
+    -- , trace ("disasm: v = " ++ (show v)) True
+    = undefined
+    | (v, exists) <- probe "bytes" o
+    -- , trace ("bytes: v = " ++ (show v)) True
+    = undefined
+    | (v, exists) <- probe "asciiz" o
+    -- , trace ("asciiz: v = " ++ (show v)) True
+    = undefined
+    | (v, exists) <- probe "ascii" o
+    -- , trace ("ascii: v = " ++ (show v)) True
+    = undefined
+    | (v, exists) <- probe "highbits" o
+    -- , trace ("highbits: v = " ++ (show v)) True
+    = undefined
+    | (v, exists) <- probe "jumptable" o
+    -- , trace ("jumptable: v = " ++ (show v)) True
+    = undefined
     | otherwise
-    = fail ("Guidance type expected, got: " ++ (show o))
+    = fail ("Guidance expected, got: " ++ (show o))
     where
       probe k h   = let v = H.lookup k h
                     in  (v, isJust v)
-      mkOrigin v  = case v of
-                      Just (Y.String s') -> maybe (fail ("Invalid origin or origin out of 16-bit range: " ++ (show s')))
-                                                  (\n' -> return $ SetOrigin n')
-                                                  (convertWord16 s')
-                      Just (Y.Number n)  -> maybe (fail ("Numeric constant out of range: " ++ (show n)))
-                                                  (\n' -> return $ SetOrigin n')
-                                                  (S.toBoundedInteger n)
-                      Just something     -> fail ("origin expected a numeric value, got " ++ (show something))
-                      {- Nothing should never be encountered. -}
-                      Nothing            -> undefined
-      mkComment v  = case v of
-                       Just (Y.String s') -> return $ Comment s'
-                       _otherwise  -> fail "comment guidance expects a string."
-      mkEquate v   = case v of
-                       Just (Y.Object o') ->
-                         let symname = o' .:? "name"
-                             symval  = o' .:? "value"
-                         in  symname >>= maybe (fail "Missing symbol name in equate")
-                                               (\symname' ->
-                                                  if validSymName symname'
-                                                  then symval >>= maybe (fail "Missing symbol value in equate")
-                                                                        (\symval' ->
-                                                                           (maybe (fail "Symbol value not a 16-bit constant")
-                                                                            (\val -> return $ SymEquate symname' val)
-                                                                            (convertWord16 symval')))
-                                                  else fail ("Invalid equate name (max 15 chars, '[A-Z]$_@' first char)'" ++
-                                                             (T.unpack symname')))
-                       _otherwise  -> fail "equate guidance expects a name and a value (name, value dict.)"
 
+      mkOrigin (Just (Y.String s))  = maybe (fail ("Invalid origin or origin out of 16-bit range: " ++ (show s)))
+                                            (\n -> return $ SetOrigin n)
+                                            (convertWord16 s)
+      mkOrigin (Just (Y.Number n))  = maybe (fail ("Numeric constant out of range: " ++ (show n)))
+                                            (\n' -> return $ SetOrigin n')
+                                            (S.toBoundedInteger n)
+      mkOrigin (Just something)     = fail ("origin expected a numeric value, got " ++ (show something))
+      mkOrigin something            = fail ("origin expected a value, got " ++ (show something))
+
+      mkComment (Just (Y.String s)) = return $ Comment s
+      mkComment _                   = fail "comment guidance expects a string."
+
+      mkEquate (Just (Y.Object o'))  =
+        let symname = o' .:? "name"
+            symval  = o' .:? "value"
+        in  symname >>= maybe (fail "Missing symbol name in equate")
+                              (\symname' ->
+                                 if validSymName symname'
+                                 then symval >>= maybe (fail "Missing symbol value in equate")
+                                                       (\symval' ->
+                                                          (maybe (fail "Symbol value not a 16-bit constant")
+                                                                 (\val -> return $ SymEquate symname' val)
+                                                                 (convertWord16 symval')))
+                                 else fail ("Invalid equate name (max 15 chars, '[A-Z]$_@' first char)'" ++
+                                             (T.unpack symname')))
+      mkEquate _                    = fail "equate guidance expects a name and a value (name, value dict.)"
   {- Catchall -}
   parseJSON invalid = AT.typeMismatch "Guidance" invalid
 

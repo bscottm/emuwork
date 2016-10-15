@@ -1,7 +1,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Main where
+module Main (main) where
 
 import           Control.Monad
 import           Data.ByteString (ByteString)
@@ -71,22 +71,26 @@ data TestArgs =
   TestArgs
   { showContent :: Bool
   , showResult  :: Bool
+  , showFail    :: Bool
   }
 
 mkTestArgs :: TestArgs
 mkTestArgs = TestArgs
                 { showContent = False
                 , showResult  = False
+                , showFail    = False
                 }
 
 testOptions :: [OptDescr (TestArgs -> IO TestArgs)]
 testOptions =
  [ Option [] ["show-content"] (NoArg setShowContent) "Show test string's contents"
  , Option [] ["show-result"]  (NoArg setShowResult)  "Show test's result"
+ , Option [] ["show-fail"]    (NoArg setShowFail)    "Show failure output"
  ]
  where
    setShowContent arg = return $ arg { showContent = True }
    setShowResult  arg = return $ arg { showResult  = True }
+   setShowFail    arg = return $ arg { showFail    = True }
    
 showUsage :: IO ()
 showUsage = do
@@ -112,9 +116,11 @@ mkYAMLTests opts =
   let sc = showContent opts
       sr = showResult  opts
   in return $ test [ "test1" ~: (test1 opts) @?  "test1 failed."
-                   , "equates" ~: test [ "valid equate"      ~: (validEquate opts)   @?  "valid equate failed."
-                                       , "invalid equate"    ~: (invalidEquate opts) @!? "invalid equate succeeded."
-                                       , "invalid hex value" ~: (invalidHex opts)    @!? "invalid hex succeeded."
+                   , "equates" ~: test [ "valid equate"       ~: (validEquate opts)   @?  "valid equate failed."
+                                       , "invalid equate"     ~: (invalidEquate opts) @!? "invalid equate succeeded."
+                                       , "invalid hex value"  ~: (invalidHex opts)    @!? "invalid hex succeeded."
+                                       , "out of range value" ~: (invalidValue opts)  @!? "invalid value succeeded."
+                                       , "missing equ name"   ~: (missingEquName opts) @!? "missing equate name succeeded."
                                        ]
                    ]
 
@@ -129,7 +135,7 @@ doYAMLTest opts testString =
   >> (case Y.decodeEither' testString :: Either Y.ParseException [Guidance] of
         Left  err ->
           do
-            when (showResult opts) $ putStrLn ("Decode failed: " ++ (show err))
+            when (showFail opts) $ putStrLn ("Decode failed: " ++ (show err))
             return False
         Right res ->
           do
@@ -174,4 +180,19 @@ invalidHex opts = doYAMLTest opts [r|
 - equate:
     name:  RST10VEC
     value: 0xg
+|]
+
+-- | Invalid value
+invalidValue :: TestArgs -> IO Bool
+invalidValue opts = doYAMLTest opts [r|
+- equate:
+    name:  RST10VEC
+    value: 65536
+|]
+
+-- | Missing equate name
+missingEquName :: TestArgs -> IO Bool
+missingEquName opts = doYAMLTest opts [r|
+- equate:
+    value: 65536
 |]
