@@ -1,12 +1,21 @@
 
-module Disasm.Guidance where
+module Disasm.Guidance
+  {- ( Guidance(..)
+  , ToJSON(..)
+  , FromJSON(..)
+  , actions
+  ) -} where
 
 import           Data.Maybe
+import           Data.Word
+import           Data.Bits
 import qualified Data.Text as T
+import qualified Data.Char as C
 import qualified Data.Yaml as Y
+import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as AT
 import qualified Data.Scientific as S
-import           Data.Yaml (FromJSON(..), ToJSON(..), (.=), (.:))
+import           Data.Yaml (FromJSON(..), ToJSON(..), (.=), (.:?))
 import qualified Data.HashMap.Strict as H
 
 import Z80
@@ -18,7 +27,7 @@ import Machine.Utils
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
 
 data Guidance where
-  SetOrigin      :: Z80addr                     -- Assembly origin address
+  SetOrigin      :: !Z80addr                    -- Assembly origin address
                  -> Guidance
   SymEquate      :: T.Text                      -- Symbolic name
                  -> Z80addr                     -- Address to associate with the symbolic name
@@ -436,7 +445,7 @@ actions = [ SetOrigin 0x0000
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , nextSeg 0x1c96 0x25d8
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , Comment "Test the numberic type flag (NTF)"
+          , Comment "Test the numeric type flag (NTF)"
           , Comment "Z: String"
           , Comment "M: Integer"
           , Comment "P, C: Single precision"
@@ -489,7 +498,7 @@ instance ToJSON Guidance where
 
 instance FromJSON Guidance where
   parseJSON (Y.Object o)
-    -- | trace ("FromJSON object: " ++ (show o)) False = undefined
+    --  | trace ("FromJSON object: " ++ (show o)) False = undefined
     | (v, exists) <- probe "origin" o
     , exists
     -- , trace ("origin: v = " ++ (show v)) True
@@ -502,26 +511,109 @@ instance FromJSON Guidance where
     -- , trace ("comment: v = " ++ (show v)) True
     , exists
     = mkEquate v
+    | (v, exists) <- probe "disasm" o
+    -- , trace ("disasm: v = " ++ (show v)) True
+    = undefined
+    | (v, exists) <- probe "bytes" o
+    -- , trace ("bytes: v = " ++ (show v)) True
+    = undefined
+    | (v, exists) <- probe "asciiz" o
+    -- , trace ("asciiz: v = " ++ (show v)) True
+    = undefined
+    | (v, exists) <- probe "ascii" o
+    -- , trace ("ascii: v = " ++ (show v)) True
+    = undefined
+    | (v, exists) <- probe "highbits" o
+    -- , trace ("highbits: v = " ++ (show v)) True
+    = undefined
+    | (v, exists) <- probe "jumptable" o
+    -- , trace ("jumptable: v = " ++ (show v)) True
+    = undefined
     | otherwise
-    = fail ("Guidance type expected, got: " ++ (show o))
+    = fail ("Guidance expected, got: " ++ (show o))
     where
       probe k h   = let v = H.lookup k h
                     in  (v, isJust v)
-      mkOrigin v  = let s = fromJust v
-                    in case s of
-                         Y.String s' -> return $ SetOrigin $ (read . T.unpack) s'
-                         Y.Number n  -> case S.toBoundedInteger n of
-                                          Just n' -> return $ SetOrigin n'
-                                          Nothing -> fail ("Numeric constant out of range: " ++ (show n))
-                         _otherwise  -> fail ("origin expected a string value, got " ++ (show s))
-      mkComment v  = let s = fromJust v
-                     in case s of
-                           Y.String s' -> return $ Comment s'
-                           _otherwise  -> fail "comment guidance expects a string."
-      mkEquate v   = let s = fromJust v in
-                       case s of
-                         Y.Object o' -> SymEquate <$> o' .: "name" <*> pure 0
-                         _otherwise  -> fail "equate guidance expects a dictionary (name, value)."
 
+      mkOrigin (Just (Y.String s))  = maybe (fail ("Invalid origin or origin out of 16-bit range: " ++ (show s)))
+                                            (\n -> return $ SetOrigin n)
+                                            (convertWord16 s)
+      mkOrigin (Just (Y.Number n))  = maybe (fail ("Numeric constant out of range: " ++ (show n)))
+                                            (\n' -> return $ SetOrigin n')
+                                            (S.toBoundedInteger n)
+      mkOrigin (Just something)     = fail ("origin expected a numeric value, got " ++ (show something))
+      mkOrigin something            = fail ("origin expected a value, got " ++ (show something))
+
+      mkComment (Just (Y.String s)) = return $ Comment s
+      mkComment _                   = fail "comment guidance expects a string."
+
+      mkEquate (Just (Y.Object o'))  =
+        let symname = o' .:? "name"
+            symval  = o' .:? "value"
+        in  symname >>= maybe (fail "Missing symbol name in equate")
+                              (\symname' ->
+                                 if validSymName symname'
+                                 then symval >>= maybe (fail "Missing symbol value in equate")
+                                                       (\symval' ->
+                                                          (maybe (fail "Symbol value not a 16-bit constant")
+                                                                 (\val -> return $ SymEquate symname' val)
+                                                                 (convertWord16 symval')))
+                                 else fail ("Invalid equate name (max 15 chars, '[A-Z]$_@' first char)'" ++
+                                             (T.unpack symname')))
+      mkEquate _                    = fail "equate guidance expects a name and a value (name, value dict.)"
   {- Catchall -}
   parseJSON invalid = AT.typeMismatch "Guidance" invalid
+
+convertWord16 :: T.Text -> Maybe Word16
+convertWord16 t
+  | T.isPrefixOf "0x" t
+  = let hexstr = T.drop 2 t
+        val = fst $ T.mapAccumR (\v c -> (v * 16 + hexDigit c, c)) 0 (T.reverse hexstr)
+    in if validHex hexstr && val <= maxWord16
+         then Just (fromIntegral val)
+         else Nothing
+  | T.isPrefixOf "0o" t
+  = convertOctal (T.drop 2 t)
+  | T.isPrefixOf "0" t
+  = convertOctal (T.tail t)
+  | otherwise
+  = convertDecimal t
+
+maxWord16 :: Int
+maxWord16 = fromIntegral (maxBound :: Word16)
+
+hexDigit :: Char -> Int
+hexDigit c = let i = fromEnum c
+             in  (i .&. 0xf) + ((i .&. 0x40) `shiftR` 6) * 9
+
+validHex :: T.Text -> Bool
+validHex = T.all (\c -> let c' = fromEnum c
+                        in (c' >= fromEnum('0') && (c' <= fromEnum('9'))) ||
+                           (c' >= fromEnum('a') && (c' <= fromEnum('f'))) ||
+                           (c' >= fromEnum('A') && (c' <= fromEnum('F'))))
+
+validOctal :: T.Text -> Bool
+validOctal = T.all (\c -> let c' = fromEnum c
+                          in  (c' >= fromEnum('0') && c' <= fromEnum('7')))
+
+convertOctal :: T.Text -> Maybe Word16
+convertOctal octstr = let val = fst $ T.mapAccumR (\v c -> (v * 8 + (fromEnum c .&. 0xf), c)) 0 (T.reverse octstr)
+                      in  if validOctal octstr && val <= maxWord16
+                          then Just (fromIntegral val)
+                          else Nothing
+
+validDecimal :: T.Text -> Bool
+validDecimal = T.all C.isDigit
+
+convertDecimal :: T.Text -> Maybe Word16
+convertDecimal str = let val = fst $ T.mapAccumR (\v c -> (v * 10 + (fromEnum c .&. 0xf), c)) 0 (T.reverse str)
+                     in  if validDecimal str && val <= maxWord16
+                          then Just (fromIntegral val)
+                          else Nothing
+
+validSymName :: T.Text -> Bool
+validSymName sym = let validChar x = (C.isLetter x || x == '$' || x == '_' || x == '@')
+                   in  (validChar . T.head) sym
+                       && T.compareLength sym 15 /= GT
+                       && T.all (\x -> validChar x || C.isDigit x || x == '?') (T.tail sym)
+                            
