@@ -3,35 +3,32 @@
 -- This module is merely a driver to disassemble the TRS-80 Level II ROM, complete with annotations
 module Main where
 
-import System.IO (stdout, stderr, hPutStrLn)
-import System.Environment
-import System.Console.GetOpt
-import System.Exit
-import Control.Lens hiding ((|>))
-import Control.Monad
-import Data.Digest.Pure.MD5
-import Data.Binary
-
-import qualified Data.Map as Map
+import           Control.Lens hiding ((|>))
+import           Control.Monad
+import           Data.Binary
+import           Data.Bits
 import qualified Data.ByteString.Lazy as BCL
+import           Data.Char
+import           Data.Digest.Pure.MD5
+import qualified Data.Foldable as Foldable
+import qualified Data.Map as Map
+import           Data.Sequence (Seq, (|>), (><))
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import Data.Sequence (Seq, (|>), (><))
-import qualified Data.Sequence as Seq
-import Data.Vector.Unboxed (Vector, (!))
+import           Data.Vector.Unboxed (Vector, (!))
 import qualified Data.Vector.Unboxed as DVU
-import qualified Data.Foldable as Foldable
-import Data.Bits
-import Data.Char
+import           System.Console.GetOpt
+import           System.Environment
+import           System.Exit
+import           System.IO (stdout, stderr, hPutStrLn)
 
--- import Debug.Trace
+import           Reader
+import           Machine
+import           Z80
 
-import Reader
-import Machine
-import Z80
-
-import Disasm.Guidance
-import Disasm.KnownSymbols
+import           Disasm.Guidance
+import           Disasm.KnownSymbols
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 

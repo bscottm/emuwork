@@ -61,10 +61,11 @@ main =
            kind  = T.pack (if T.null path' then p0 else p1)
            path' = showPath (path ss)
     showPath [] = T.empty
-    showPath nodes = foldl1 f (map showNode nodes)
-     where f b a = T.concat [ a, ":",  b ]
-           showNode (ListItem n) = T.justifyRight 3 ' ' ((T.pack . show) n)
-           showNode (Label label) = T.pack $ safe label (show label)
+    showPath nodes = T.concat ["++ ", T.intercalate ":" (map showNode (reverse (filter onlyLabels nodes)))]
+     where onlyLabels (Label _) = True
+           onlyLabels _         = False
+           showNode (ListItem n) = T.empty
+           showNode (Label label) = T.justifyLeft 15 ' ' (T.pack $ safe label (show label))
            safe s ss = if ':' `elem` s || "\"" ++ s ++ "\"" /= ss then ss else s
 
 data TestArgs =
@@ -115,7 +116,9 @@ mkYAMLTests :: TestArgs -> IO Test
 mkYAMLTests opts =
   let sc = showContent opts
       sr = showResult  opts
-  in return $ test [ "test1" ~: (test1 opts) @?  "test1 failed."
+  in return $ test [ "origin"  ~: test [ "bad origin"          ~: (badOrigin opts)     @!? "bad origin succeeded."
+                                       , "origin+comment"      ~: (test1 opts)         @?  "test1 failed."
+                                       ]
                    , "equates" ~: test [ "valid equate"       ~: (validEquate opts)   @?  "valid equate failed."
                                        , "invalid equate"     ~: (invalidEquate opts) @!? "invalid equate succeeded."
                                        , "invalid hex value"  ~: (invalidHex opts)    @!? "invalid hex succeeded."
@@ -135,13 +138,16 @@ doYAMLTest opts testString =
   >> (case Y.decodeEither' testString :: Either Y.ParseException [Guidance] of
         Left  err ->
           do
-            when (showFail opts) $ putStrLn ("Decode failed: " ++ (show err))
+            when (showFail opts) $ putStrLn (Y.prettyPrintParseException err)
             return False
         Right res ->
           do
             when (showResult opts) $ putStrLn (show res)
             return True)
 
+badOrigin :: TestArgs -> IO Bool
+badOrigin opts = doYAMLTest opts [r|- origin: invalid|]
+  
 test1 :: TestArgs -> IO Bool
 test1 opts = doYAMLTest opts [r|
 - origin: 0x0

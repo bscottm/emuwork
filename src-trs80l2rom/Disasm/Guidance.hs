@@ -1,25 +1,26 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Disasm.Guidance
-  {- ( Guidance(..)
+  ( Guidance(..)
   , ToJSON(..)
   , FromJSON(..)
   , actions
-  ) -} where
+  ) where
 
-import           Data.Maybe
-import           Data.Word
-import           Data.Bits
-import qualified Data.Text as T
-import qualified Data.Char as C
-import qualified Data.Yaml as Y
-import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as AT
-import qualified Data.Scientific as S
-import           Data.Yaml (FromJSON(..), ToJSON(..), (.=), (.:?))
+import           Data.Bits
+import qualified Data.Char as C
 import qualified Data.HashMap.Strict as H
+import           Data.Maybe
+import qualified Data.Scientific as S
+import qualified Data.Text as T
+import           Data.Word
+import           Data.Yaml (FromJSON(..), ToJSON(..), (.=))
+import qualified Data.Yaml as Y
 
-import Z80
-import Machine.Utils
+import           Machine.Utils (as0xHex)
+import           Z80 (Z80addr, Z80disp)
 
 -- import Debug.Trace
 
@@ -27,7 +28,7 @@ import Machine.Utils
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
 
 data Guidance where
-  SetOrigin      :: !Z80addr                    -- Assembly origin address
+  SetOrigin      :: Z80addr                     -- Assembly origin address
                  -> Guidance
   SymEquate      :: T.Text                      -- Symbolic name
                  -> Z80addr                     -- Address to associate with the symbolic name
@@ -502,15 +503,15 @@ instance FromJSON Guidance where
     | (v, exists) <- probe "origin" o
     , exists
     -- , trace ("origin: v = " ++ (show v)) True
-    = mkOrigin v
+    = either (fail . T.unpack) (return) $ mkOrigin v
     | (v, exists) <- probe "comment" o
     , exists
     -- , trace ("comment: v = " ++ (show v)) True
-    = mkComment v
+    = either (fail. T.unpack) (return) $ mkComment v
     | (v, exists) <- probe "equate" o
     -- , trace ("comment: v = " ++ (show v)) True
     , exists
-    = mkEquate v
+    = either (fail . T.unpack) (return) $ mkEquate v
     | (v, exists) <- probe "disasm" o
     -- , trace ("disasm: v = " ++ (show v)) True
     = undefined
@@ -535,85 +536,113 @@ instance FromJSON Guidance where
       probe k h   = let v = H.lookup k h
                     in  (v, isJust v)
 
-      mkOrigin (Just (Y.String s))  = maybe (fail ("Invalid origin or origin out of 16-bit range: " ++ (show s)))
-                                            (\n -> return $ SetOrigin n)
-                                            (convertWord16 s)
-      mkOrigin (Just (Y.Number n))  = maybe (fail ("Numeric constant out of range: " ++ (show n)))
-                                            (\n' -> return $ SetOrigin n')
-                                            (S.toBoundedInteger n)
-      mkOrigin (Just something)     = fail ("origin expected a numeric value, got " ++ (show something))
-      mkOrigin something            = fail ("origin expected a value, got " ++ (show something))
-
-      mkComment (Just (Y.String s)) = return $ Comment s
-      mkComment _                   = fail "comment guidance expects a string."
-
-      mkEquate (Just (Y.Object o'))  =
-        let symname = o' .:? "name"
-            symval  = o' .:? "value"
-        in  symname >>= maybe (fail "Missing symbol name in equate")
-                              (\symname' ->
-                                 if validSymName symname'
-                                 then symval >>= maybe (fail "Missing symbol value in equate")
-                                                       (\symval' ->
-                                                          (maybe (fail "Symbol value not a 16-bit constant")
-                                                                 (\val -> return $ SymEquate symname' val)
-                                                                 (convertWord16 symval')))
-                                 else fail ("Invalid equate name (max 15 chars, '[A-Z]$_@' first char)'" ++
-                                             (T.unpack symname')))
-      mkEquate _                    = fail "equate guidance expects a name and a value (name, value dict.)"
   {- Catchall -}
   parseJSON invalid = AT.typeMismatch "Guidance" invalid
 
-convertWord16 :: T.Text -> Maybe Word16
+mkOrigin :: Maybe AT.Value -> Either T.Text Guidance
+mkOrigin (Just (Y.String s))  = SetOrigin <$> convertWord16 s
+mkOrigin (Just (Y.Number n))  = maybe (outOfRange n)
+                                      (\n' -> Right $ SetOrigin n')
+                                      (S.toBoundedInteger n)
+mkOrigin (Just something)     = Left $ T.concat ["origin expected a numeric value, got '"
+                                                , T.pack (show something)
+                                                , singleQuote
+                                                ]
+mkOrigin something            = Left $ T.concat ["origin expected a value, got '"
+                                                , T.pack (show something)
+                                                , singleQuote
+                                                ]
+
+mkComment :: Maybe AT.Value -> Either T.Text Guidance
+mkComment (Just (Y.String s)) = Right $ Comment s
+mkComment _                   = Left "Comment guidance expects a string."
+
+mkEquate :: Maybe AT.Value -> Either T.Text Guidance
+mkEquate (Just (Y.Object o'))  =
+  let symname = H.lookup "name" o'
+      symval  = H.lookup "value" o'
+  in case symname of
+       Just (AT.String symname') -> if validSymName symname'
+                                    then case symval of
+                                           Just (AT.String symval') -> SymEquate symname' <$> convertWord16 symval'
+                                           Just (AT.Number symval') -> maybe (outOfRange symval')
+                                                                             (\n -> Right $ SymEquate symname' n)
+                                                                             (S.toBoundedInteger symval')
+                                           Just something           -> Left $ T.concat ["String expected for equate value: '"
+                                                                                       , T.pack (show something)
+                                                                                       , singleQuote
+                                                                                       ]
+                                           Nothing                    -> Left "Missing symbol value in equate"
+                                    else Left $ T.concat ["Invalid equate name (max 15 chars, '[A-Z]$_@' first char)': '"
+                                                         , symname'
+                                                         , singleQuote
+                                                         ]
+       Just something            -> Left $ T.concat ["String expected for equate symbol name: '"
+                                                    , T.pack (show something)
+                                                    , singleQuote
+                                                    ]
+       Nothing                   -> Left "Missing symbol name in equate"
+mkEquate _                    = fail "equate guidance expects a name and a value (name, value dict.)"
+
+convertWord16 :: T.Text -> Either T.Text Word16
 convertWord16 t
   | T.isPrefixOf "0x" t
-  = let hexstr = T.drop 2 t
-        val = fst $ T.mapAccumR (\v c -> (v * 16 + hexDigit c, c)) 0 (T.reverse hexstr)
-    in if validHex hexstr && val <= maxWord16
-         then Just (fromIntegral val)
-         else Nothing
+  = convertHex t
   | T.isPrefixOf "0o" t
   = convertOctal (T.drop 2 t)
   | T.isPrefixOf "0" t
   = convertOctal (T.tail t)
   | otherwise
   = convertDecimal t
+  | otherwise
+  = Left (T.concat ["Invalid 16-bit constant: '", t, singleQuote])
 
 maxWord16 :: Int
 maxWord16 = fromIntegral (maxBound :: Word16)
 
-hexDigit :: Char -> Int
-hexDigit c = let i = fromEnum c
-             in  (i .&. 0xf) + ((i .&. 0x40) `shiftR` 6) * 9
+convertHex :: T.Text -> Either T.Text Z80addr
+convertHex t =
+  let t' = T.drop 2 t
+      val = fst $ T.mapAccumR (\v c -> (v * 16 + hexDigit c, c)) 0 $ T.reverse t'
+      hexDigit c = let i = fromEnum c
+                   in  (i .&. 0xf) + ((i .&. 0x40) `shiftR` 6) * 9
+  in if T.all (\c -> let c' = fromEnum c
+                             in (c' >= fromEnum('0') && (c' <= fromEnum('9'))) ||
+                                (c' >= fromEnum('a') && (c' <= fromEnum('f'))) ||
+                                (c' >= fromEnum('A') && (c' <= fromEnum('F')))) t'
+      then if val <= maxWord16
+           then Right $ fromIntegral val
+           else Left $ T.concat ["Not a valid 16-bit constant: '", t, singleQuote]
+     else Left $ T.concat ["Invalid hexadecimal constant: '", t, singleQuote]
+                                 
+convertOctal :: T.Text -> Either T.Text Word16
+convertOctal octstr =
+  let val = fst $ T.mapAccumR (\v c -> (v * 8 + (fromEnum c .&. 0xf), c)) 0 (T.reverse octstr)
+      validOctal = T.all (\c -> let c' = fromEnum c
+                                in  (c' >= fromEnum('0') && c' <= fromEnum('7')))
+  in  if validOctal octstr
+      then if val <= maxWord16
+           then Right $ (fromIntegral val :: Word16)
+           else Left $ T.concat ["Not a valid 16-bit constant: '", octstr, singleQuote]
+      else Left $ T.concat ["Invalid octal constant: '", octstr, singleQuote]
 
-validHex :: T.Text -> Bool
-validHex = T.all (\c -> let c' = fromEnum c
-                        in (c' >= fromEnum('0') && (c' <= fromEnum('9'))) ||
-                           (c' >= fromEnum('a') && (c' <= fromEnum('f'))) ||
-                           (c' >= fromEnum('A') && (c' <= fromEnum('F'))))
-
-validOctal :: T.Text -> Bool
-validOctal = T.all (\c -> let c' = fromEnum c
-                          in  (c' >= fromEnum('0') && c' <= fromEnum('7')))
-
-convertOctal :: T.Text -> Maybe Word16
-convertOctal octstr = let val = fst $ T.mapAccumR (\v c -> (v * 8 + (fromEnum c .&. 0xf), c)) 0 (T.reverse octstr)
-                      in  if validOctal octstr && val <= maxWord16
-                          then Just (fromIntegral val)
-                          else Nothing
-
-validDecimal :: T.Text -> Bool
-validDecimal = T.all C.isDigit
-
-convertDecimal :: T.Text -> Maybe Word16
-convertDecimal str = let val = fst $ T.mapAccumR (\v c -> (v * 10 + (fromEnum c .&. 0xf), c)) 0 (T.reverse str)
-                     in  if validDecimal str && val <= maxWord16
-                          then Just (fromIntegral val)
-                          else Nothing
+convertDecimal :: T.Text -> Either T.Text Word16
+convertDecimal str =
+  let val = fst $ T.mapAccumR (\v c -> (v * 10 + (fromEnum c .&. 0xf), c)) 0 (T.reverse str)
+  in  if T.all C.isDigit str
+      then if val <= maxWord16
+           then Right (fromIntegral val)
+           else Left $ T.concat ["Not a valid 16-bit constant: '", str, singleQuote]
+      else Left $ T.concat ["Invalid decimal constant: '", str, singleQuote]
 
 validSymName :: T.Text -> Bool
 validSymName sym = let validChar x = (C.isLetter x || x == '$' || x == '_' || x == '@')
                    in  (validChar . T.head) sym
                        && T.compareLength sym 15 /= GT
                        && T.all (\x -> validChar x || C.isDigit x || x == '?') (T.tail sym)
-                            
+
+outOfRange :: forall b a. Show a => a -> Either T.Text b
+outOfRange n = Left $ T.concat ["Numeric constant out of 16-bit range: '", T.pack (show n), singleQuote]
+
+singleQuote :: T.Text
+singleQuote = T.singleton '\''
