@@ -210,34 +210,34 @@
     
 - disasm:
     nbytes: 0x004f
-    start: 0x0000
+    addr: 0x0000
 - bytes:
     nbytes: 0x0010
     addr: 0x0050
 - disasm:
     nbytes: 0x00a4
-    start: 0x0060
+    addr: 0x0060
 - ascii:
     addr: 0x0105
-    len: 0x000b
+    nbytes: 0x000b
 - bytes:
     nbytes: 0x0001
     addr: 0x0110
 - ascii:
     addr: 0x0111
-    len: 0x001a
+    nbytes: 0x001a
 - bytes:
     nbytes: 0x0002
     addr: 0x012b
 - disasm:
     nbytes: 0x020c
-    start: 0x012d
+    addr: 0x012d
 - comment:  |
     This is an alternate entry point into CHARPRINT, which preserves
     DE. Note that CHARPRINT will load DE with the DO DCB.
 - disasm:
     nbytes: 0x0087
-    start: 0x033a
+    addr: 0x033a
 - comment: |
     =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     Output character to a device, device control block is pointed to
@@ -360,7 +360,7 @@
     
 - disasm:
     nbytes: 0x0020
-    start: 0x03c2
+    addr: 0x03c2
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - comment: Read the keyboard's memory locations, determining if a key has
 - comment: been pressed. The scan starts as KBDLINE0, with the C register
@@ -382,7 +382,7 @@
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - disasm:
     nbytes: 0x0074
-    start: 0x03e3
+    addr: 0x03e3
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - comment: DO (display output) DCB function
 - comment: ''
@@ -394,19 +394,19 @@
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - disasm:
     nbytes: 0x0134
-    start: 0x0458
+    addr: 0x0458
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - comment: PR (line printer output) DCB function
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - disasm:
     nbytes: 0x00e6
-    start: 0x058d
+    addr: 0x058d
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - comment: Initialize the restart vector table, located at RST08VEC
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - disasm:
     nbytes: 0x005d
-    start: 0x0674
+    addr: 0x0674
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - comment: Restart vector initialization table. Yes, this is code that is
 - comment: copied into RAM.
@@ -414,31 +414,31 @@
 - comment: 0x4000 -> RST08 redirect
 - disasm:
     nbytes: 0x0002
-    start: 0x06d2
+    addr: 0x06d2
 - comment: 0x4003 -> RST10 redirect
 - disasm:
     nbytes: 0x0002
-    start: 0x06d5
+    addr: 0x06d5
 - comment: 0x4006 -> RST18 redirect
 - disasm:
     nbytes: 0x0002
-    start: 0x06d8
+    addr: 0x06d8
 - comment: 0x4009 -> RST20 redirect
 - disasm:
     nbytes: 0x0002
-    start: 0x06db
+    addr: 0x06db
 - comment: 0x400c -> RST28 redirect
 - disasm:
     nbytes: 0x0002
-    start: 0x06de
+    addr: 0x06de
 - comment: 0x400f -> RST30 redirect
 - disasm:
     nbytes: 0x0002
-    start: 0x06e1
+    addr: 0x06e1
 - comment: 0x4012 -> RST38 redirect
 - disasm:
     nbytes: 0x0002
-    start: 0x06e4
+    addr: 0x06e4
 - comment: ! '0x4015: KI (keyboard) device control block'
 - bytes:
     nbytes: 0x0001
@@ -451,7 +451,7 @@
     addr: 0x06ea
 - ascii:
     addr: 0x06ed
-    len: 0x0002
+    nbytes: 0x0002
 - comment: ! '0x401d: DO (display output) device control block'
 - bytes:
     nbytes: 0x0001
@@ -464,7 +464,7 @@
     addr: 0x06f2
 - ascii:
     addr: 0x06f5
-    len: 0x0002
+    nbytes: 0x0002
 - comment: ! '0x4025: PR (line printer output) device control block'
 - bytes:
     nbytes: 0x0001
@@ -477,29 +477,29 @@
     addr: 0x06fa
 - ascii:
     addr: 0x06fd
-    len: 0x0002
+    nbytes: 0x0002
 - comment: ! '0x402d:'
 - disasm:
     nbytes: 0x0005
-    start: 0x06ff
+    addr: 0x06ff
 - comment: ! '0x4033: OUTDCB jumps here if the requested device type bit doesn''t
     match'
 - disasm:
     nbytes: 0x0002
-    start: 0x0705
+    addr: 0x0705
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - comment: End of the restart vector initialization table.
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - disasm:
     nbytes: 0x02c9
-    start: 0x0708
+    addr: 0x0708
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - comment: Copy bytes pointed to by HL to the buffer pointed to by DE
 - comment: This just exchanges DE and HL, falls through to CPDE2HL
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - disasm:
     nbytes: 0x0000
-    start: 0x09d2
+    addr: 0x09d2
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - comment: Copy the bytes pointed to by DE to the buffer pointed to by HL
 - comment: A, B, DE and HL are not preserved. NTF (numeric type flag)
@@ -507,7 +507,7 @@
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - disasm:
     nbytes: 0x09a8
-    start: 0x09d3
+    addr: 0x09d3
 - comment: 0.0 floating point constant
 - bytes:
     nbytes: 0x0004
@@ -522,14 +522,14 @@
     addr: 0x1384
 - disasm:
     nbytes: 0x0202
-    start: 0x1388
+    addr: 0x1388
 - comment: These four bytes are a floating point constant?
 - bytes:
     nbytes: 0x0004
     addr: 0x158b
 - disasm:
     nbytes: 0x00c0
-    start: 0x158f
+    addr: 0x158f
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - comment: BASIC verb table -- first character has high bit set
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -544,73 +544,73 @@
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - ascii:
     addr: 0x18c9
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18cb
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18cd
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18cf
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18d1
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18d3
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18d5
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18d7
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18d9
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18db
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18dd
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18df
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18e1
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18e3
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18e5
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18e7
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18e9
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18eb
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18ed
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18ef
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18f1
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18f3
-    len: 0x0002
+    nbytes: 0x0002
 - ascii:
     addr: 0x18f5
-    len: 0x0002
+    nbytes: 0x0002
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - comment: BASIC reserved data table.
 - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -619,31 +619,31 @@
     addr: 0x18f7
 - ascii:
     addr: 0x191e
-    len: 0x0005
+    nbytes: 0x0005
 - bytes:
     nbytes: 0x0001
     addr: 0x1923
 - ascii:
     addr: 0x1924
-    len: 0x0004
+    nbytes: 0x0004
 - bytes:
     nbytes: 0x0001
     addr: 0x1928
 - ascii:
     addr: 0x1929
-    len: 0x0005
+    nbytes: 0x0005
 - bytes:
     nbytes: 0x0002
     addr: 0x192e
 - ascii:
     addr: 0x1930
-    len: 0x0005
+    nbytes: 0x0005
 - bytes:
     nbytes: 0x0001
     addr: 0x1935
 - disasm:
     nbytes: 0x035f
-    start: 0x1936
+    addr: 0x1936
 - comment: |
     =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     Compare (HL) against character following the RST 08 instruction.
@@ -657,7 +657,7 @@
     =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - disasm:
     nbytes: 0x0942
-    start: 0x1c96
+    addr: 0x1c96
 - comment: |
     =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     Test the numberic type flag (NTF)
@@ -668,4 +668,4 @@
     =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - disasm:
     nbytes: 0x0a26
-    start: 0x25d9
+    addr: 0x25d9

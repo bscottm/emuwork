@@ -116,15 +116,24 @@ mkYAMLTests :: TestArgs -> IO Test
 mkYAMLTests opts =
   let sc = showContent opts
       sr = showResult  opts
-  in return $ test [ "origin"  ~: test [ "bad origin"          ~: (badOrigin opts)     @!? "bad origin succeeded."
-                                       , "origin+comment"      ~: (test1 opts)         @?  "test1 failed."
-                                       ]
-                   , "equates" ~: test [ "valid equate"       ~: (validEquate opts)   @?  "valid equate failed."
-                                       , "invalid equate"     ~: (invalidEquate opts) @!? "invalid equate succeeded."
-                                       , "invalid hex value"  ~: (invalidHex opts)    @!? "invalid hex succeeded."
-                                       , "out of range value" ~: (invalidValue opts)  @!? "invalid value succeeded."
-                                       , "missing equ name"   ~: (missingEquName opts) @!? "missing equate name succeeded."
-                                       ]
+  in return $ test [ "origin"   ~: test [ "bad origin (1)"    ~: (badOrigin00 opts)     @!? "bad origin (1) succeeded."
+                                        , "bad origin (2)"    ~: (badOrigin01 opts)     @!? "bad origin (2) succeeded."
+                                        , "origin+comment"    ~: (test1 opts)           @?  "origin+comment failed."
+                                        ]
+                   , "equates"  ~: test [ "valid equate"       ~: (validEquate opts)    @?  "valid equate failed."
+                                        , "invalid equate"     ~: (invalidEquate opts)  @!? "invalid equate succeeded."
+                                        , "invalid hex value"  ~: (invalidHex opts)     @!? "invalid hex succeeded."
+                                        , "out of range value" ~: (invalidValue opts)   @!? "invalid value succeeded."
+                                        , "missing equ name"   ~: (missingEquName opts) @!? "missing equate name succeeded."
+                                        ]
+                   , "disasm"   ~: test [ "valid disasm"       ~: (validDisasm opts)    @?  "disasm failed."
+                                        ]
+                   , "bytes"    ~: test [ "valid bytes"        ~: (validBytes opts)     @?  "bytes directive failed."
+                                        ]
+                   , "ascii"    ~: test [ "valid ascii"        ~: (validAscii opts)     @? "ascii directive failed."
+                                        ]
+                   , "highbits" ~: test [ "valid highbits"     ~: (validHighBits opts)  @? "highbits directive failed."
+                                        ]
                    ]
 
 doYAMLTest :: TestArgs -> ByteString -> IO Bool
@@ -145,8 +154,14 @@ doYAMLTest opts testString =
             when (showResult opts) $ putStrLn (show res)
             return True)
 
-badOrigin :: TestArgs -> IO Bool
-badOrigin opts = doYAMLTest opts [r|- origin: invalid|]
+badOrigin00 :: TestArgs -> IO Bool
+badOrigin00 opts = doYAMLTest opts [r|- origin: not an origin|]
+
+badOrigin01 :: TestArgs -> IO Bool
+badOrigin01 opts = doYAMLTest opts [r|
+- origin:
+    key1: val1
+|]
   
 test1 :: TestArgs -> IO Bool
 test1 opts = doYAMLTest opts [r|
@@ -201,4 +216,36 @@ missingEquName :: TestArgs -> IO Bool
 missingEquName opts = doYAMLTest opts [r|
 - equate:
     value: 65536
+|]
+
+-- | Valid disasm directive
+validDisasm :: TestArgs -> IO Bool
+validDisasm opts = doYAMLTest opts [r|
+- disasm:
+    nbytes: 0x0a26
+    addr: 0x25d9
+|]
+
+-- | Valid bytes directive
+validBytes :: TestArgs -> IO Bool
+validBytes opts = doYAMLTest opts [r|
+- bytes:
+    nbytes: 0x0010
+    addr: 0x0050
+|]
+
+-- | Valid ASCII directive
+validAscii :: TestArgs -> IO Bool
+validAscii opts = doYAMLTest opts [r|
+- ascii:
+    addr: 0x0105
+    nBytes: 0x000b
+|]
+    
+-- | Valid highbits directive
+validHighBits :: TestArgs -> IO Bool
+validHighBits opts = doYAMLTest opts [r|
+- highbits:
+    addr: 0x1650
+    nbytes: 0x01d0
 |]
