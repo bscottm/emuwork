@@ -307,7 +307,7 @@ evalCondAsmEval ictx
          )
          (evalAsmExpr (stmt ^. evalExp) ictx)
 {- Catch all for pattern matching. -}
-evalCondAsmEval _ _ = undefined
+-- evalCondAsmEval _ _ = undefined
 
 -- | Annotate address of a label assocated with the 'ENDIF' in a conditional
 annotateEndIfLabel :: Monad m

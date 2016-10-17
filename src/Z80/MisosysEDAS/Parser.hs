@@ -12,6 +12,7 @@ module Z80.MisosysEDAS.Parser
 -- import Debug.Trace
 
 import Control.Exception hiding (try)
+import Control.Monad
 import Control.Lens
 import Text.Parsec
 import Text.Parsec.Pos
