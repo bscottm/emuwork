@@ -699,7 +699,8 @@ rdStartAndLength tyCon (Just (Y.Object o)) =
                     in case nb' of
                          (Just _) -> nb'
                          Nothing  -> H.lookup "nbytes" o
-      -- rdLength :: Maybe AT.Value -> Maybe AT.Value -> Either T.Text Z80addr -> Either T.Text Guidance
+                         
+      rdLength :: Maybe AT.Value -> Maybe AT.Value -> Either T.Text Z80addr -> Either T.Text Guidance
       -- Pass errors through... quickly.
       rdLength _                    _                    (Left err)   = Left err
       rdLength (Just (Y.String ea)) Nothing              (Right sa)   =
