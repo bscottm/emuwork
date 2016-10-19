@@ -1,0 +1,50 @@
+cabal-version:  >= 1.12
+name:           emubase
+version:        0.1
+build-type:     Simple
+author:         B. Scott Michel
+synopsis:       A prototype processor emulation framework
+
+description:    Yet another processor emulation framework for my
+                favorite old processors.
+license:        GPL-3
+
+library
+  default-language:     Haskell2010
+
+  build-depends:      
+                        base,
+                        time,
+                        primitive,
+                        filepath,
+                        directory,
+                        deepseq,
+                        containers,
+                        bytestring,
+                        text,
+                        vector,
+                        old-locale,
+                        lens,
+                        transformers,
+                        syb,
+                        parsec
+
+  ghc-options:          -Wall -O2
+
+  default-extensions:   GADTs,
+                        MultiParamTypeClasses,
+                        OverloadedStrings,
+                        TemplateHaskell,
+                        TypeSynonymInstances,
+                        FlexibleInstances
+
+  exposed-modules:      Machine,
+                        Machine.Utils,
+                        Reader
+
+  other-modules:        Machine.DisassemblerTypes,
+                        Machine.EmulatedSystem,
+                        Machine.NullProcessor,
+                        Reader.RawFormat,
+                        Reader.IntelHex,
+                        Reader.ErrorHandling

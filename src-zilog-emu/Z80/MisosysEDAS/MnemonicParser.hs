@@ -19,7 +19,7 @@ import Text.Parsec.Text()                 -- ghci 7.6.1 needs these imported ins
 import qualified Data.Text as T
 import qualified Data.Map as Map
 
-import Machine.EmulatedSystem
+import Machine
 import Z80.InstructionSet
 import Z80.MisosysEDAS.Types
 import Z80.MisosysEDAS.ParserUtils

@@ -35,7 +35,7 @@ import Data.Word
 import Data.Int
 import Control.Lens hiding (ix)
 
-import Machine.EmulatedSystem
+import Machine
 
 type Z80word          = Word8                           -- ^ Basic word type on a Z80: byte
 type Z80addr          = Word16                          -- ^ Memory addresses are 16-bit quantities

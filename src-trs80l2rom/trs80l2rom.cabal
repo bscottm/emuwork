@@ -24,7 +24,8 @@ executable trs80l2rom
                         scientific,
                         aeson,
                         yaml,
-                        emuwork
+                        zilog-emu,
+                        emubase
   ghc-options:          -Wall -O2
   other-modules:        Disasm.Guidance,
                         Disasm.KnownSymbols
@@ -48,7 +49,7 @@ test-suite yamltest
                         aeson,
                         scientific,
                         yaml,
-                        emuwork
+                        emubase
     Main-is:            Disasm/YamlTest.hs
     Other-Modules:      Disasm.Guidance
     default-extensions: GADTs,

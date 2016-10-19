@@ -649,7 +649,7 @@ convertHex t =
            then Right $ fromIntegral val
            else outOfRange vMin vMax t
      else Left $ T.concat ["Invalid hexadecimal constant: '", t, singleQuote]
-                                 
+
 convertOctal :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
 convertOctal octstr =
   let val = fst $ T.mapAccumR (\v c -> (v * 8 + (fromEnum c .&. 0xf), c)) 0 (T.reverse octstr)
@@ -699,7 +699,7 @@ rdStartAndLength tyCon (Just (Y.Object o)) =
                     in case nb' of
                          (Just _) -> nb'
                          Nothing  -> H.lookup "nbytes" o
-                         
+
       rdLength :: Maybe AT.Value -> Maybe AT.Value -> Either T.Text Z80addr -> Either T.Text Guidance
       -- Pass errors through... quickly.
       rdLength _                    _                    (Left err)   = Left err

@@ -82,7 +82,7 @@ options =
   where
     setEmulator emuname flags   = return $ flags { Machine.emulator = emuname }
 
-    doUsage           _flags    = do 
+    doUsage           _flags    = do
       showUsage
       exitWith ExitSuccess
 
