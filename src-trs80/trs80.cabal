@@ -1,12 +1,11 @@
 cabal-version:  >= 1.12
-name:           emubase
+name:           trs80
 version:        0.1
 build-type:     Simple
 author:         B. Scott Michel
-synopsis:       A prototype processor emulation framework
+synopsis:       TRS-80 system emulator
 
-description:    Yet another processor emulation framework for my
-                favorite old processors.
+description:    The venerable TRS-80 ("Trash 80")
 license:        GPL-3
 
 library
@@ -27,7 +26,9 @@ library
                         lens,
                         transformers,
                         syb,
-                        parsec
+                        parsec,
+                        zilog-emu,
+                        emubase
 
   ghc-options:          -Wall -O2
 
@@ -36,14 +37,7 @@ library
                         OverloadedStrings,
                         TemplateHaskell
 
-  exposed-modules:      Machine,
-                        Machine.Utils,
-                        Reader
+  exposed-modules:
+                        TRS80.Memory
 
-  other-modules:        Machine.DisassemblerTypes,
-                        Machine.EmulatedSystem,
-                        Machine.EmulatorDriver,
-                        Machine.NullProcessor,
-                        Reader.RawFormat,
-                        Reader.IntelHex,
-                        Reader.ErrorHandling
+--  other-modules:

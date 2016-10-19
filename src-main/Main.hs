@@ -12,12 +12,24 @@ import Control.Lens
 import qualified Machine
 import qualified Z80
 
+-- | Common command line option data record
+data CommonEmulatorOptions =
+  EmulatorOptions
+  { emulator :: String                  -- ^ The processor emulator's name
+  }
+
+-- | The default emulator options
+defaultCommonEmulatorOptions :: CommonEmulatorOptions
+defaultCommonEmulatorOptions = EmulatorOptions
+                         { emulator = ""
+                         }
+
 -- | Where all of the emulator stuff starts...
 main::IO ()
 main =
   do
     (flags, others) <- parseOptions
-    case Machine.emulator flags of
+    case emulator flags of
       ""      -> hPutStrLn stderr "Emulator not specified on command line with '--processor.' flag."
                  >> dumpEmulators
       emuName  -> doDispatch emuName others
@@ -42,9 +54,9 @@ doDispatch emuName emuOpts
     hPutStrLn stderr ("Unsupported or unknown processor emulator: '" ++ (show emuName) ++ "'")
     >> dumpEmulators
 
--- | Parse command line flags and options, returning a 'Machine.CommonEmulatorOptions' record (options) and
+-- | Parse command line flags and options, returning a 'CommonEmulatorOptions' record (options) and
 -- remaining command line parameters wrapped in the IO monad
-parseOptions :: IO (Machine.CommonEmulatorOptions, [String])
+parseOptions :: IO (CommonEmulatorOptions, [String])
 parseOptions =
     let processArgs         = getArgs >>= return . getOpt RequireOrder options
         -- The key observation here is that within each option in the OptDescr list,
@@ -57,7 +69,7 @@ parseOptions =
         -- the parts of the record that occurred on the command line. The result
         -- is a single (IO Machine.CommonEmulatorOptions) object that has the
         -- default options set, modified by the options present in getArgs
-        foldArgsAndDefaults = foldl' (>>=) (return Machine.defaultCommonEmulatorOptions)
+        foldArgsAndDefaults = foldl' (>>=) (return defaultCommonEmulatorOptions)
         -- Yell at the user if there were option/flag processing errors
         checkErrors errors  = unless (null errors) $ do
                                 mapM_ (hPutStrLn stderr) errors
@@ -74,13 +86,13 @@ parseOptions =
       return (opts, rest)
 
 -- | Common command line options
-options :: [OptDescr (Machine.CommonEmulatorOptions -> IO Machine.CommonEmulatorOptions)]
+options :: [OptDescr (CommonEmulatorOptions -> IO CommonEmulatorOptions)]
 options =
   [ Option []    ["processor"]  (ReqArg setEmulator "<NAME>") "Set the processor emulator"
   , Option ['?'] ["help"]       (NoArg  doUsage)              "Get help"
   ]
   where
-    setEmulator emuname flags   = return $ flags { Machine.emulator = emuname }
+    setEmulator emuname flags   = return $ flags { emulator = emuname }
 
     doUsage           _flags    = do
       showUsage

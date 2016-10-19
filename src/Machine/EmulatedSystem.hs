@@ -72,11 +72,11 @@ class GenericPC pcThing where
              -> pcThing
 
 -- | 'EmulatedProcessor' encapsulates general information about an emulated machine.
-data EmulatedProcessor procInternals addrType instructionSet =
-  EmulatedProcessor
-  { _procPrettyName :: String                   -- ^ Pretty name for the emulated processor
-  , _internals      :: procInternals            -- ^ Processor-specific internal data.
-  }
+data EmulatedProcessor procInternals addrType instructionSet where
+  EmulatedProcessor ::
+    { _procPrettyName :: String                 -- ^ Pretty name for the emulated processor
+    , _internals      :: procInternals          -- ^ Processor-specific internal data.
+    } -> EmulatedProcessor  procInternals addrType instructionSet
 
 -- Emit Template Haskell hair for the lenses
 makeLenses ''EmulatedProcessor
@@ -155,15 +155,6 @@ instance (ShowHex addrType) =>
          Show (SymAbsAddr addrType) where
   show (AbsAddr addr)  = as0xHexS addr
   show (SymAddr label) = show label
-
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
--- | Emulator command line interface type class. This separates out the handling from the 'EmulatedProcessor'
--- processor internals, reducing the amount of polymorphic magic.
-class EmuCommandLineDispatch procInternals addrType instructionSet where
-  cmdDispatch    :: EmulatedProcessor procInternals addrType instructionSet
-                 -> [String]
-                 -> IO ()
 
 -- !! FIXME !! this should really identify a system, not a processor.
 -- | Identify this emulated system by matching the requsted processor name to the system's name and aliases. Usually,

@@ -5,6 +5,7 @@ import Data.Word
 import qualified Data.Vector.Unboxed as DVU
 
 import Machine.EmulatedSystem
+import Machine.EmulatorDriver
 
 -- | There is no machine state for this processor.
 data NullProcState = NullProcState
@@ -32,5 +33,5 @@ nullProcessor = EmulatedSystem
                 }
 
 -- | 'EmuCommandLineDispatch' type family instance for the null processor
-instance EmuCommandLineDispatch NullProcState Word32 NullProcState where
+instance EmulatorDriver NullProcState Word32 NullProcState where
   cmdDispatch _state options = putStrLn $ "Null processor dispatch invoked, args = " ++ (show options)

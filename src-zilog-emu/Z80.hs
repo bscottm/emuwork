@@ -50,5 +50,5 @@ z80generic = EmulatedSystem
              }
 
 -- | 'EmuCommandLineDispatch' type family instance for the Z80 generic processor
-instance EmuCommandLineDispatch Z80state Word16 Z80instruction where
+instance EmulatorDriver Z80state Word16 Z80instruction where
   cmdDispatch _state options = putStrLn $ "Z80 generic system dispatch invoked, args = " ++ (show options)
