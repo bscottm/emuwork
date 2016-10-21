@@ -14,9 +14,17 @@ library
 
   build-depends:
                 base,
+                bytestring,
                 array,
+                containers,
                 lens,
                 vector,
+                text,
+                pureMD5,
+                unordered-containers,
+                scientific,
+                aeson,
+                yaml,
                 zilog-emu,
                 emubase
 
@@ -33,4 +41,8 @@ library
         TRS80
 
   other-modules:
-        TRS80.System
+                TRS80.System
+                TRS80.Disasm
+                TRS80.CmdDriver
+                TRS80.Disasm.Guidance
+                TRS80.Disasm.KnownSymbols

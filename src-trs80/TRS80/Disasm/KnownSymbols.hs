@@ -1,4 +1,4 @@
-module Disasm.KnownSymbols where
+module TRS80.Disasm.KnownSymbols where
 
 import Data.Map (Map)
 import qualified Data.Map as Map

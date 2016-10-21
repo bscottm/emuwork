@@ -2,7 +2,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module Disasm.Guidance
+module TRS80.Disasm.Guidance
   ( Guidance(..)
   , ToJSON(..)
   , FromJSON(..)
