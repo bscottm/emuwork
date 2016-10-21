@@ -11,24 +11,12 @@ license:        GPL-3
 library
   default-language:     Haskell2010
 
-  build-depends:      
-                        base,
-                        time,
-                        primitive,
-                        filepath,
-                        directory,
-                        deepseq,
-                        containers,
-                        bytestring,
-                        text,
-                        vector,
-                        old-locale,
-                        lens,
-                        transformers,
-                        syb,
-                        parsec,
-                        zilog-emu,
-                        emubase
+  build-depends:
+                base,
+                array,
+                lens,
+                zilog-emu,
+                emubase
 
   ghc-options:          -Wall -O2
 

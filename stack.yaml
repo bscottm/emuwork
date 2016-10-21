@@ -37,7 +37,7 @@ resolver: lts-7.4
 # will not be run. This is useful for tweaking upstream packages.
 packages:
 - '.'
-- src/
+- src-emubase/
 - src-trs80/
 - src-trs80l2rom/
 - src-zilog-emu/
