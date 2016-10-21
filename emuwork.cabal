@@ -19,6 +19,7 @@ executable emuwork
                         deepseq,
                         lens,
                         vector,
+                        trs80,
                         zilog-emu,
                         emubase
   ghc-options:          -Wall -O2
@@ -41,6 +42,7 @@ executable edas
                         lens,
                         vector,
                         deepseq,
+                        trs80,
                         zilog-emu,
                         emubase
   ghc-options:          -Wall -O2

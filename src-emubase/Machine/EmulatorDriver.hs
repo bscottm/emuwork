@@ -1,12 +1,15 @@
 module Machine.EmulatorDriver where
 
-import Machine.EmulatedSystem
-
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
--- | Emulator command line interface type class. This separates out the handling from the 'EmulatedProcessor'
--- processor internals, reducing the amount of polymorphic magic.
-class EmulatorDriver procInternals addrType instructionSet where
-  cmdDispatch    :: EmulatedProcessor procInternals addrType instructionSet
-                 -> [String]
-                 -> IO ()
+-- | Emulator command line interface driver, responsible for identifying a system
+-- and dispatching the command line.
+class EmulatorDriver emulator where
+  -- | The formal name of the system
+  formalName    :: emulator
+                -> String
+  -- | The system's names used to identify it.
+  identityNames :: emulator
+                -> [String]
+  -- | Command line dispatch
+  cmdDispatch   :: emulator
+                -> [String]
+                -> IO ()

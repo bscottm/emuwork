@@ -124,20 +124,21 @@ type InsnDecodeF instructionSet addrType wordType memInternals =
   )
 
 -- | 'EmulatedSystem' encapsulates the various parts required to emulate a system (processor, memory, ...)
-data EmulatedSystem procInternals memInternals addrType wordType instructionSet =
-  EmulatedSystem
-  { _processor  :: EmulatedProcessor procInternals addrType instructionSet
-                                                -- ^ System processor
-  , _memory     :: MemorySystem addrType wordType memInternals
-                                                -- ^ System memory
-  , _idecode    :: InsnDecodeF instructionSet addrType wordType memInternals
-                                                -- ^ Instruction decoding function. Used to disassemble instructions as well
-                                                -- as execute them.
-  , _sysName    :: String
-                                                -- ^ System pretty-printed name
-  , _sysAliases :: [String]
-                                                -- ^ Aliases for the system
-  }
+data EmulatedSystem procInternals memInternals addrType wordType instructionSet where
+  EmulatedSystem ::
+    { _processor  :: EmulatedProcessor procInternals addrType instructionSet
+                     -- ^ System processor
+    , _memory     :: MemorySystem addrType wordType memInternals
+                     -- ^ System memory
+    , _idecode    :: InsnDecodeF instructionSet addrType wordType memInternals
+                     -- ^ Instruction decoding function. Used to disassemble instructions as well
+                     -- as execute them.
+    , _sysName    :: String
+                  -- ^ The system's name, e.g. "Null/dummy processor"
+    , _sysAliases :: [String]
+                  -- ^ System identity aliases, e.g., "null", "trs80-model-I" used to identify the
+                  -- emulator.
+    } -> EmulatedSystem procInternals memInternals addrType wordType instructionSet
 
 makeLenses ''EmulatedSystem
 
@@ -155,14 +156,6 @@ instance (ShowHex addrType) =>
          Show (SymAbsAddr addrType) where
   show (AbsAddr addr)  = as0xHexS addr
   show (SymAddr label) = show label
-
--- !! FIXME !! this should really identify a system, not a processor.
--- | Identify this emulated system by matching the requsted processor name to the system's name and aliases. Usually,
--- the match will occur in the alises, since the system's name is used for pretty printing.
-sysIdentify :: EmulatedSystem procInternals memInternals addrType wordType instructionSet -- ^ The emulated system
-            -> String                                                          -- ^ The requested name
-            -> Bool                                                            -- ^ 'True' if matched.
-sysIdentify theSystem name = any (== name) (theSystem ^. sysAliases) || (name == (theSystem ^. sysName))
 
 -- | Get a program counter's actual (internal) value
 getPCvalue :: ProgramCounter addrType

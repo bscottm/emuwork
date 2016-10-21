@@ -13,11 +13,9 @@ import qualified Data.Aeson.Types as AT
 import           Data.Bits
 import qualified Data.Char as C
 import qualified Data.HashMap.Strict as H
-import           Data.Int
 import           Data.Maybe
 import qualified Data.Scientific as S
 import qualified Data.Text as T
-import           Data.Word
 import           Data.Yaml (FromJSON(..), ToJSON(..), (.=))
 import qualified Data.Yaml as Y
 

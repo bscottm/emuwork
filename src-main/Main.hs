@@ -1,22 +1,23 @@
+{-# LANGUAGE ExistentialQuantification #-}
 -- | The main module, where all of the fun happens.
 module Main (main) where
 
-import System.IO
-import System.Environment
-import System.Exit
-import System.Console.GetOpt
-import Data.List
-import Control.Monad
-import Control.Lens
+import           Control.Lens
+import           Control.Monad
+import           Data.List
+import           System.Console.GetOpt
+import           System.Environment
+import           System.Exit
+import           System.IO
 
 import qualified Machine
-import qualified Z80
+import qualified TRS80
 
 -- | Common command line option data record
-data CommonEmulatorOptions =
-  EmulatorOptions
-  { emulator :: String                  -- ^ The processor emulator's name
-  }
+data CommonEmulatorOptions where
+  EmulatorOptions ::
+    { emulator :: String                  -- ^ The processor emulator's name
+    } -> CommonEmulatorOptions
 
 -- | The default emulator options
 defaultCommonEmulatorOptions :: CommonEmulatorOptions
@@ -30,9 +31,22 @@ main =
   do
     (flags, others) <- parseOptions
     case emulator flags of
-      ""      -> hPutStrLn stderr "Emulator not specified on command line with '--processor.' flag."
+      ""      -> hPutStrLn stderr "Emulator not specified on command line with '--system.' flag."
                  >> dumpEmulators
       emuName  -> doDispatch emuName others
+
+data AnyEmulator where
+  AnyEmulator :: Machine.EmulatorDriver emu => emu -> AnyEmulator
+
+instance Machine.EmulatorDriver AnyEmulator where
+  formalName (AnyEmulator emu)            = Machine.formalName emu
+  identityNames (AnyEmulator emu)         = Machine.identityNames emu
+  cmdDispatch (AnyEmulator emu) opts      = Machine.cmdDispatch emu opts
+
+knownEmulators :: [ AnyEmulator ]
+knownEmulators = [ AnyEmulator Machine.nullProcessor
+            , AnyEmulator TRS80.trs80generic
+            ]
 
 -- | Dispatch the command to the appropriate emulator.
 --
@@ -41,18 +55,15 @@ main =
 doDispatch :: String                            -- ^ The requested emulator's name
            -> [String]                          -- ^ Command line (emulator-specific)
            -> IO ()
-doDispatch emuName emuOpts
-  | nullproc <- Machine.nullProcessor,
-    Machine.sysIdentify nullproc emuName
-  = Machine.cmdDispatch (nullproc ^. Machine.processor) emuOpts
-
-  | z80proc  <- Z80.z80generic,
-    Machine.sysIdentify z80proc emuName
-  = Machine.cmdDispatch (z80proc ^. Machine.processor) emuOpts
-
-  | otherwise =
-    hPutStrLn stderr ("Unsupported or unknown processor emulator: '" ++ (show emuName) ++ "'")
-    >> dumpEmulators
+doDispatch emuName emuOpts =
+  let candEmulators = filter (\emu -> emuName `elem` (Machine.identityNames emu)) knownEmulators
+  in  if length candEmulators == 1
+      then Machine.cmdDispatch (head candEmulators) emuOpts
+      else hPutStrLn stderr
+                     (if length candEmulators == 0
+                      then ("Unsupported or unknown emulator: '" ++ emuName ++ "'")
+                      else ("Ambiguous emulator: '" ++ emuName ++ "'"))
+             >> dumpEmulators
 
 -- | Parse command line flags and options, returning a 'CommonEmulatorOptions' record (options) and
 -- remaining command line parameters wrapped in the IO monad
@@ -88,7 +99,7 @@ parseOptions =
 -- | Common command line options
 options :: [OptDescr (CommonEmulatorOptions -> IO CommonEmulatorOptions)]
 options =
-  [ Option []    ["processor"]  (ReqArg setEmulator "<NAME>") "Set the processor emulator"
+  [ Option []    ["system"]     (ReqArg setEmulator "<NAME>") "Set the system emulator"
   , Option ['?'] ["help"]       (NoArg  doUsage)              "Get help"
   ]
   where
@@ -107,48 +118,24 @@ helpMsg progname = let header = "Usage: " ++ progname ++ " [OPTIONS]"
 showUsage :: IO ()
 showUsage = getProgName >>= (\progname -> hPutStr stderr (helpMsg progname))
 
-{- unused:
--- | Print an error message to stderr, then exit with failure status
-exitError :: String
-             -> IO a
-exitError msg = do
-    prg <- getProgName
-    hPutStrLn stderr (prg ++ ": " ++ msg)
-    showUsage
-    exitFailure
--}
-
 -- | Dump the known emulators
 dumpEmulators :: IO ()
 dumpEmulators = do
-    hPutStrLn stderr "Available emulators are:"
-      >> prettyEmu Machine.nullProcessor
-      >> prettyEmu Z80.z80generic
+    hPutStrLn stderr ""
+      >> hPutStrLn stderr "Available emulators are:"
+      >> mapM_ prettyEmu knownEmulators
   where
-    prefix = "-- "
-    indent = "   "
-    indentLen = length indent
+    prefix = ".. "
 
-    initialString :: (Machine.EmulatedSystem procInternals memInternals addrType wordType instructionSet) -> String
-    initialString emu = prefix ++ (emu ^. Machine.sysName) ++ " ("
+    initialString :: AnyEmulator -> String
+    initialString emu = prefix ++ (Machine.formalName emu)
 
-    prettyEmu :: (Machine.EmulatedSystem procInternals memInternals addrType wordType instructionSet) -> IO ()
+    prettyEmu :: AnyEmulator -> IO ()
     prettyEmu emu = do
-      hPutStr stderr (initialString emu)
-      prettyEmuNames (emu ^. Machine.sysAliases) (length (initialString emu))
+      progName <- getProgName
+      hPutStrLn stderr (initialString emu)
+      prettyEmuNames progName (Machine.identityNames emu)
 
-    prettyEmuNames []         _accLen = hPutStrLn stderr ""
-    prettyEmuNames (eName:[]) _accLen = hPutStrLn stderr ("\"" ++ eName ++ "\")")
-    prettyEmuNames emuNames@(eName:eNames) accLen
-      | accLen == 0 =
-          do
-            hPutStr stderr (indent ++ "\"" ++ eName ++ "\"")
-            prettyEmuNames eNames (indentLen + length eName + 2)
-      | length eName + accLen > 80 =
-          do
-            hPutStrLn stderr ""
-            prettyEmuNames emuNames 0
-      | otherwise =
-          do
-            hPutStr stderr ("\"" ++ eName ++ "\", ")
-            prettyEmuNames eNames (accLen + length eName + 4)
+    prettyEmuNames _    []             = hPutStrLn stderr ""
+    prettyEmuNames prog (eName:eNames) = hPutStrLn stderr ("  " ++ prog ++ " --system=" ++ eName ++ " [options]")
+                                         >> prettyEmuNames prog eNames

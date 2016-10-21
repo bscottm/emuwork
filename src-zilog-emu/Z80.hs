@@ -1,5 +1,4 @@
 {-# LANGUAGE RankNTypes #-}
-{- kill off RankNTypes when a more specific memory system is created. -}
 
 -- | Re-export module for the Zilog Z80 processor.
 module Z80
@@ -48,7 +47,3 @@ z80generic = EmulatedSystem
              , _sysName    = "Generic Z80 system"
              , _sysAliases = ["z80generic", "Z80-generic"]
              }
-
--- | 'EmuCommandLineDispatch' type family instance for the Z80 generic processor
-instance EmulatorDriver Z80state Word16 Z80instruction where
-  cmdDispatch _state options = putStrLn $ "Z80 generic system dispatch invoked, args = " ++ (show options)

@@ -38,8 +38,6 @@ trs80system romImage = EmulatedSystem
                        { _processor  = z80processor
                        , _memory     = romMemory romImage
                        , _idecode    = z80insnDecode
-                       , _sysName    = "TRS-80 Model II rom image disassembler"
-                       , _sysAliases = ["trs80-disasm"]
                        }
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=

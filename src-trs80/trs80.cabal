@@ -30,6 +30,7 @@ library
                      TemplateHaskell
 
   exposed-modules:
-                  TRS80.System
+        TRS80
 
---  other-modules:
+  other-modules:
+        TRS80.System
