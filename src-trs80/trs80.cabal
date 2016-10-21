@@ -16,6 +16,7 @@ library
                 base,
                 array,
                 lens,
+                vector,
                 zilog-emu,
                 emubase
 
@@ -29,7 +30,6 @@ library
                      TemplateHaskell
 
   exposed-modules:
-                  TRS80.Memory,
                   TRS80.System
 
 --  other-modules:

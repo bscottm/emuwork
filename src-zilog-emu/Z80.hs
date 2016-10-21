@@ -35,12 +35,12 @@ z80processor = EmulatedProcessor
 
 -- | Generic Z80 system, used for disassembling ROMs and such. This is not an actual or useful
 -- system.
-z80generic :: forall memInternals. EmulatedSystem Z80state memInternals Word16 Word16 Z80instruction
+z80generic :: forall memInternals. EmulatedSystem Z80state memInternals Word16 Word8 Z80instruction
 z80generic = EmulatedSystem
              { _processor = z80processor
              , _memory    = MemorySystem
                             { _memInternals = undefined
-                            , _mfetch  = (\_addr -> 0 :: Word16)
+                            , _mfetch  = (\_addr -> 0 :: Word8)
                             , _mfetchN = (\_addr _nBytes -> DVU.empty)
                             , _maxmem  = 65535 :: Word16
                             }
