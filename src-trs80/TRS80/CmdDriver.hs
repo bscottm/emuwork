@@ -6,10 +6,13 @@ module TRS80.CmdDriver
   ) where
 
 import Control.Lens ((^.))
+import System.Console.GetOpt
 import System.IO
+
 import Machine
-import TRS80.System
+import TRS80.CommonOptions
 import TRS80.Disasm
+import TRS80.System
 
 commandLineDriver :: ModelISystem -> [String] -> IO ()
 commandLineDriver sys options
@@ -21,7 +24,7 @@ commandLineDriver sys options
   where
     cmd = head options
 
--- | 'EmuCommandLineDispatch' type family instance for the TRS-80 Model I System generic processor
+-- | 'EmulatorDriver' type family instance for the TRS-80 Model I base system
 instance EmulatorDriver ModelISystem where
   formalName sys            = sys ^. sysName
   identityNames sys         = sys ^. sysAliases

@@ -39,7 +39,7 @@ packages:
 - '.'
 - src-emubase/
 - src-trs80/
-- src-trs80l2rom/
+#- src-trs80l2rom/
 - src-zilog-emu/
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)

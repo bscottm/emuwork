@@ -2,17 +2,20 @@ module TRS80.Disasm
   ( disasmCmd
   ) where
 
+import           Control.Lens ((^.), (%~), (.~))
+import           Control.Monad (unless)
+import           Data.Binary
+import           Data.Bits
 import qualified Data.ByteString.Lazy as BCL
 import           Data.Char
 import           Data.Digest.Pure.MD5
-import           Control.Monad (unless)
 import qualified Data.Foldable as Foldable
 import qualified Data.Map as Map
 import           Data.Sequence (Seq, (|>), (><))
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import           Data.Vector.Unboxed (Vector)
+import           Data.Vector.Unboxed (Vector, (!))
 import qualified Data.Vector.Unboxed as DVU
 import           Data.Word
 import           System.Console.GetOpt
@@ -20,70 +23,48 @@ import           System.Environment
 import           System.Exit
 import           System.IO
 
+import           Machine
 import           Reader
+import           TRS80.CommonOptions
 import           TRS80.Disasm.Guidance
+import           TRS80.Disasm.KnownSymbols
 import           TRS80.System
-import Machine
 import           Z80
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-disasmCmd :: [String] -> IO ()
-disasmCmd opts =
+disasmCmd :: ModelISystem
+          -> [String]
+          -> IO ()
+disasmCmd sys opts =
   pure opts
-  >>= return . getOpt RequireOrder utilOptions
+  >>= return . getOpt RequireOrder commonOptions
   >>= (\(optsActions, rest, errs) ->
           (unless (null errs) $ do
              mapM_ (hPutStrLn stderr) errs
-             >> showUsage
+             >> commonOptionUsage
              >> exitFailure)
-          >> Foldable.foldl' (>>=) (return mkUtilCommand) optsActions
+          >> Foldable.foldl' (>>=) (return mkCommonOptions) optsActions
           >>= (\options ->
                 if length rest == 1 then
-                  trs80Rom (imageReader options) (head rest)
+                  trs80Rom (imageReader options) sys (head rest)
                 else
                   showUsage))
 
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
-data UtilCommand =
-  UtilCommand
-  { imageReader :: FilePath -> IO (Vector Word8)
-  }
-
-mkUtilCommand :: UtilCommand
-mkUtilCommand = UtilCommand
-                { imageReader = readRawWord8Vector
-                }
-
-utilOptions :: [OptDescr (UtilCommand -> IO UtilCommand)]
-utilOptions =
- [ Option [] ["format"] (ReqArg setImageReader "<ROM image format>") "ROM image reader ('ihex', 'intelhex' or 'raw')"
- ]
- where
-  setImageReader fmt flags =
-    case fmt of
-      "ihex"     -> return $ flags { imageReader = readIntelHexVector }
-      "intelhex" -> return $ flags { imageReader = readIntelHexVector }
-      "raw"      -> return $ flags { imageReader = readRawWord8Vector }
-      unknown    -> hPutStrLn stderr ("Unknown reader format: '" ++ (show unknown) ++ "'")
-                    >> hPutStrLn stderr "Valid formats are 'ihex', 'intelhex' or 'raw'"
-                    >> showUsage
-                    >> return flags
-
 showUsage :: IO ()
-showUsage = do
-  prog <- getProgName
-  hPutStrLn stderr ("Usage: " ++ prog ++ " <--format=(ihex|intelhex|raw)> image")
-  exitFailure
+showUsage =
+  do
+    commonOptionUsage
+    return ()
 
 -- | Disassemble the TRS-80 ROM (with annotations, known symbols, ...)
 trs80Rom :: (FilePath -> IO (Vector Word8))
+         -> ModelISystem
          -> String 
          -> IO ()
-trs80Rom imgReader imgName =
-  imgReader imgName
-  >>= (\img -> let dis = collectRom (trs80system img) (initialDisassembly img) actions
+trs80Rom imgReader sys imgName =
+  trs80System imgName imgReader sys
+  >>= (\img -> let dis = collectRom (trs80System img) (initialDisassembly img) actions
                in  if (not . DVU.null) img then
                      do
                        checkAddrContinuity dis
@@ -146,7 +127,7 @@ collectRom sys = Foldable.foldl' (doAction sys)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-doAction :: Z80system (Vector Z80word)
+doAction :: ModelISystem
          -> Z80disassembly
          -> Guidance
          -> Z80disassembly
@@ -246,3 +227,28 @@ trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) mem pc dstate =
   in  (pcInc pc, (disasmSeq %~ (\s -> s |> ins |> (pseudo sAddr (DVU.singleton byte))) $ dstate))
 -- Otherwise, just append the instruction onto the disassembly sequence.
 trs80RomPostProcessor elt mem pc dstate = z80DefaultPostProcessor elt mem pc dstate
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Check the disassembled sequence for address continuity to ensure that the addresses
+-- increase monotonically, without gaps.
+checkAddrContinuity :: Z80disassembly
+                    -> IO ()
+checkAddrContinuity dis =
+  let insOnly   = dis ^. disasmSeq & (Seq.filter isZ80AddrIns)
+      insAddrs  = fmap z80InsAddr insOnly
+      nextAddrs = Seq.zipWith (+) (fmap (fromIntegral . z80InsLength) insOnly) insAddrs
+      nextAddrs'  = (Seq.drop 1 insAddrs) |> (fromIntegral $ Seq.index nextAddrs (Seq.length nextAddrs - 1))
+
+      checkSeq   = Seq.zipWith (\a1 a2 -> a1 == a2) nextAddrs' nextAddrs
+
+      formatDiscontinuity (expected, got) = 
+        TIO.hPutStrLn stderr $ T.concat [ "  expected "
+                                        , as0xHex expected
+                                        , ", got "
+                                        , as0xHex got
+                                        ]
+  in  if Foldable.and checkSeq then
+        return ()
+      else
+        hPutStrLn stderr "Discontinuities = "
+        >> (Foldable.traverse_ formatDiscontinuity $ Seq.filter (\(a, b) -> a /= b) $ (Seq.zip nextAddrs' nextAddrs))

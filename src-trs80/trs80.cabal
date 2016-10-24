@@ -13,20 +13,21 @@ library
                    Haskell2010
 
   build-depends:
-                base,
-                bytestring,
-                array,
-                containers,
-                lens,
-                vector,
-                text,
-                pureMD5,
-                unordered-containers,
-                scientific,
                 aeson,
+                array,
+                base,
+                binary,
+                bytestring,
+                containers,
+                emubase,
+                lens,
+                pureMD5,
+                scientific,
+                text,
+                unordered-containers,
+                vector,
                 yaml,
-                zilog-emu,
-                emubase
+                zilog-emu
 
   ghc-options:
               -Wall -O2
@@ -44,5 +45,6 @@ library
                 TRS80.System
                 TRS80.Disasm
                 TRS80.CmdDriver
+                TRS80.CommonOptions
                 TRS80.Disasm.Guidance
                 TRS80.Disasm.KnownSymbols
