@@ -24,19 +24,20 @@ module Z80.Disassembler
   , disasmSeq
   ) where
 
-import Data.Data
-import Control.Lens hiding ((|>))
-import Data.Map (Map)
+import           Control.Lens hiding ((|>))
+import           Data.Data
+import           Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Sequence (Seq, (|>))
+import           Data.Sequence (Seq, (|>))
 import qualified Data.Sequence as Seq
-import qualified Data.Vector.Unboxed as DVU
 import qualified Data.Text as T
-import Data.Word
+import           Debug.Trace
+import qualified Data.Vector.Unboxed as DVU
+import           Data.Word
 
-import Machine
-import Z80.Processor
-import Z80.InstructionSet
+import           Machine
+import           Z80.Processor
+import           Z80.InstructionSet
 
 -- | Disassembly elements for the Z80
 type Z80DisasmElt = DisElement Z80instruction Z80addr Z80word Z80PseudoOps
@@ -116,6 +117,7 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
     addrInDisasmF = dstate    ^. addrInDisasmRange
 
     disasm' pc curDState
+      | trace ("disasm " ++ (show pc)) False = undefined
       | pc <= lastpc =
         let DecodedInsn newpc insn = iDecode pc theMem
             -- Identify symbols where absolute addresses are found and build up a symbol table for a later

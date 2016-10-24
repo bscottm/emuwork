@@ -43,7 +43,7 @@ z80generic = EmulatedSystem
                             , _mfetchN = (\_addr _nBytes -> DVU.empty)
                             , _maxmem  = 65535 :: Word16
                             }
-             , _idecode    = (\pc _mem -> DecodedInsn pc NOP)
+             , _idecode    = z80insnDecode
              , _sysName    = "Generic Z80 system"
              , _sysAliases = ["z80generic", "Z80-generic"]
              }

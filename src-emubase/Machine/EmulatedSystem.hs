@@ -81,29 +81,23 @@ data EmulatedProcessor procInternals addrType instructionSet where
 -- Emit Template Haskell hair for the lenses
 makeLenses ''EmulatedProcessor
 
--- | Memory system interface type.
---
--- The record type implementation is much more flexible than using type classes, since it cuts down on
--- the amount of type context/constraint that has to be provided.
-data MemorySystem addrType wordType memInternals =
-  MemorySystem
-  { -- | The internal implementation of the memory system. For simple processors, like the Z80, this can be just
-    -- a vector of bytes. More sophisticated processors can have more complicated implementations, obviously. The
-    -- actual implementation depends on the system implemented.
-    _memInternals :: memInternals
-    -- | Fetch a word from memory.
-  , _mfetch       :: addrType
-                  -> wordType
-    -- | Fetch a block of words from memory.
-  , _mfetchN      :: addrType
-                  -> Int
-                  -> Vector wordType
-    -- | Query the highest address in the memory system (for unboxed vectors, this should be a synonym with
-    -- 'Data.Vector.Unboxed.length')
-  , _maxmem       :: addrType
-  }
+-- | Type class for memory systems.
+class MemorySystem memSys addrType wordType where
+  fetch :: memSys
+        -> addrType
+        -> wordType
 
-makeLenses ''MemorySystem
+  fetchN :: memSys
+         -> addrType
+         -> Int
+         -> Vector wordType
+
+{-
+  -- | Query the highest address in the memory system (for unboxed vectors, this should be a synonym with
+  -- 'Data.Vector.Unboxed.length')
+  maxMem :: memSys
+         -> addrType
+-}
 
 -- | Generic representation of instruction decoder outputs
 data DecodedInsn instructionSet addrType where
@@ -117,9 +111,9 @@ data DecodedInsn instructionSet addrType where
               -> DecodedInsn instructionSet addrType
 
 -- | Instruction decoder function signature shorthand
-type InsnDecodeF instructionSet addrType wordType memInternals =
+type InsnDecodeF instructionSet addrType wordType memSys =
   (    ProgramCounter addrType                          --  Current program counter
-    -> MemorySystem addrType wordType memInternals      --  Memory system from which words are fetched
+    -> memSys                                           --  Memory system from which words are fetched
     -> DecodedInsn instructionSet addrType              --  Decoder result
   )
 
@@ -128,7 +122,7 @@ data EmulatedSystem procInternals memInternals addrType wordType instructionSet 
   EmulatedSystem ::
     { _processor  :: EmulatedProcessor procInternals addrType instructionSet
                      -- ^ System processor
-    , _memory     :: MemorySystem addrType wordType memInternals
+    , _memory     :: (MemorySystem addrType wordType memSys) => memSys
                      -- ^ System memory
     , _idecode    :: InsnDecodeF instructionSet addrType wordType memInternals
                      -- ^ Instruction decoding function. Used to disassemble instructions as well
@@ -157,27 +151,23 @@ instance (ShowHex addrType) =>
   show (AbsAddr addr)  = as0xHexS addr
   show (SymAddr label) = show label
 
--- | Get a program counter's actual (internal) value
+-- | Do an action on a program counter
+withPC :: ProgramCounter addrType -> (addrType -> value) -> value
+withPC (PC pc) f = f pc
+
 getPCvalue :: ProgramCounter addrType
            -> addrType
 getPCvalue (PC pc) = pc
 
--- | Fetch from memory and increment a program counter
-memFetchAndIncPC :: MemorySystem addrType wordType memSys       -- ^ System memory interface
-                 -> ProgramCounter addrType                     -- ^ Current Z80 state
-                 -> (ProgramCounter addrType, wordType)         -- ^ New Z80 state and fetched byte
-memFetchAndIncPC mem pc = let mFetchF = mem ^. mfetch
-                              thePC   = getPCvalue pc
-                          in  (pcInc pc, mFetchF thePC)
-
--- | Fetch from memory and increment a program counter
-memIncPCAndFetch :: MemorySystem addrType wordType memSys       -- ^ System memory interface
-                 -> ProgramCounter addrType                     -- ^ Current Z80 state
-                 -> (ProgramCounter addrType, wordType)         -- ^ New Z80 state and fetched byte
-memIncPCAndFetch mem pc = let mFetchF = mem ^. mfetch
-                              newpc   = pcInc pc
-                              thePC   = getPCvalue newpc
-                          in  (newpc, mFetchF thePC)
+-- | Fetch from memory at the current program counter's address, returning the incremented program counter and
+-- the fetched value
+memFetchAndIncPC :: (MemorySystem addrType wordType memSys) => memSys
+                 -- ^ System memory interface
+                 -> ProgramCounter addrType
+                 -- ^ Current Z80 state
+                 -> (ProgramCounter addrType, wordType)
+                 -- ^ New PC and fetched byte
+memFetchAndIncPC mem pc = (pcInc pc, withPC pc (fetch mem))
 
 -- | Instantiate 'GenericPC' operations for 'ProgramCounter'
 instance GenericPC (ProgramCounter addrType) where

@@ -17,7 +17,7 @@ import TRS80.System
 commandLineDriver :: ModelISystem -> [String] -> IO ()
 commandLineDriver sys options
   | cmd == "disasm"
-  = disasmCmd sys options
+  = disasmCmd sys (tail options)
   | otherwise
   = do
       hPutStrLn stderr $ "TRS-80 Model I: unrecognized command: '" ++ cmd ++ "'"
