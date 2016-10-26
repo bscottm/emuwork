@@ -136,6 +136,8 @@ actions = [ SetOrigin 0x0000
           , Comment "Integer accumulator: LSB, MSB"
           , Comment "Single precision accumulator, LSB, LSB, MSB, EXP"
           , SymEquate "IACC" 0x4121
+	  , Comment "Most significant byte in the SP floating point number's mantissa"
+	  , SymEquate "SPMANT_MSB" 0x4123
           , Comment "\"Hex\" accumulator: integer, single, double precision aligned at"
           , Comment "the same location."
           , SymEquate "HEXACC" 0x4127
@@ -368,7 +370,16 @@ actions = [ SetOrigin 0x0000
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "End of the restart vector initialization table."
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , nextSeg 0x0708 0x09d1
+          , nextSeg 0x0708 0x0981
+          , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
+	  , Comment "Negate a SP or DP floating point number in ACC/DACC"
+          , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
+          , nextSeg 0x0982 0x09c1
+          , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
+	  , Comment "Copy bytes from (HL) into BC and DE. Used to load ACC into BC/DE"
+	  , Comment "for SP floating point routines."
+          , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
+          , nextSeg 0x09c2 0x09d1
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Copy bytes pointed to by HL to the buffer pointed to by DE"
           , Comment "This just exchanges DE and HL, falls through to CPDE2HL"
@@ -387,9 +398,13 @@ actions = [ SetOrigin 0x0000
           , Comment "?? floating point constant"
           , GrabBytes 0x1384 4
           , nextSeg 0x1388 0x158a
-          , Comment "These four bytes are a floating point constant?"
+          , Comment "PI/2: Exploit's the identity that cos(theta + pi/2) = sin(theta)"
           , GrabBytes 0x158b 4
-          , nextSeg 0x158f 0x164f
+          , Comment "Another floating point constant?"
+          , GrabBytes 0x158f 4
+          , Comment "Another floating point constant?"
+          , GrabBytes 0x1593 4
+          , nextSeg 0x1597 0x164f
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "BASIC verb table -- first character has high bit set"
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
@@ -444,7 +459,11 @@ actions = [ SetOrigin 0x0000
           , Comment "A is not preserved. (HL) is the character pointed to by the HL"
           , Comment "register."
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-          , nextSeg 0x1c96 0x25d8
+          , nextSeg 0x1c96 0x2177
+	  , GrabAsciiZ 0x2178
+          , nextSeg 0x217f 0x2285
+	  , GrabAsciiZ 0x2286
+          , nextSeg 0x2296 0x25d8
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
           , Comment "Test the numeric type flag (NTF)"
           , Comment "Z: String"

@@ -485,7 +485,7 @@ formatPseudo (DisOrigin origin) = Seq.singleton $ T.concat [ T.replicate (lenOut
 formatPseudo (Equate label addr) = Seq.singleton $ T.concat [ T.replicate lenOutputPrefix textSpace
                                                                          , padTo lenSymLabel label
                                                                          , padTo lenMnemonic "="
-                                                                         , upperHex addr
+                                                                         , oldStyleHex addr
                                                                          ]
 
 formatPseudo (LineComment comment) = Seq.singleton $ T.concat [ T.replicate lenOutputPrefix textSpace
