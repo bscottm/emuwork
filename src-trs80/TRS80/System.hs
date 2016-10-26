@@ -17,13 +17,11 @@ module TRS80.System
 import           Control.Lens
 import           Data.Vector.Unboxed (Vector, (!), empty)
 import qualified Data.Vector.Unboxed as DVU (replicate, generate)
-import qualified Data.Text as T
-import           Debug.Trace
 
 import           Machine
-import           Z80 hiding (_ram)
+import           Z80
 
-{- | The TRS-80 Model I's memory system.-}
+-- | The TRS-80 Model I's memory system.
 data ModelIMemory where
   ModelIMemory ::
     { rom :: Vector Z80word
@@ -48,11 +46,9 @@ installMem :: ModelISystem
            -> Vector Z80word
            -> ModelISystem
 installMem sys memSize newROM =
-  let maxRAM = memSize * 1024
-      sysRAM = trace ("mkRAM: maxRAM = " ++ (show maxRAM)) $ DVU.replicate (fromIntegral maxRAM) 0
-  in sys & memory .~ MemorySystem ModelIMemory { rom = newROM
-                                               , ram = sysRAM
-                                               }
+  sys & memory .~ MemorySystem ModelIMemory { rom = newROM
+                                            , ram = DVU.replicate (fromIntegral (memSize * 1024)) 0
+                                            }
 
 {- ! Fetch a byte from memory. The TRS-80 has a very simple memory layout:
 

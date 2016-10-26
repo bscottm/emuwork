@@ -6,6 +6,7 @@ module Machine.EmulatedSystem where
 
 import Data.Data
 import Control.Lens
+import Data.Functor.Identity
 import Data.Vector.Unboxed (Vector)
 import qualified Data.Text as T
 
@@ -51,7 +52,7 @@ instance (Integral dispType, SignExtend dispType) => Num (RelativePC dispType) w
   (RelativePC a) * (RelativePC b) = RelativePC (a * b)
   abs (RelativePC a)              = RelativePC . abs $ a
   signum (RelativePC a)           = RelativePC . signum $ a
-  fromInteger a                   = RelativePC (fromInteger a)
+  fromInteger a                   = RelativePC . fromInteger $ a
 
 instance Ord (RelativePC dispType) where
   compare (RelativePC a) (RelativePC b) = compare a b
@@ -75,6 +76,7 @@ class GenericPC pcThing where
 -- | Do an action on a program counter
 withPC :: ProgramCounter addrType -> (addrType -> value) -> value
 withPC (PC pc) f = f pc
+{-# INLINE withPC #-}
 
 -- | 'EmulatedProcessor' encapsulates general information about an emulated machine.
 data EmulatedProcessor procInternals addrType instructionSet where
@@ -117,8 +119,9 @@ class MemoryOps memSys addrType wordType where
   mIncPCAndFetch pc mem = let pc' = pcInc pc
                           in  (pc', withPC pc' (mFetch mem))
 
+-- | A memory system, for a given address type and word type.
 data MemorySystem addrType wordType where
-  MemorySystem :: MemoryOps memSysType addrType wordType =>  
+  MemorySystem :: MemoryOps memSysType addrType wordType =>
                   memSysType
                -> MemorySystem addrType wordType
 

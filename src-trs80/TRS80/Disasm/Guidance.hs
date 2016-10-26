@@ -400,9 +400,9 @@ actions = [ SetOrigin 0x0000
           , nextSeg 0x1388 0x158a
           , Comment "PI/2: Exploit's the identity that cos(theta + pi/2) = sin(theta)"
           , GrabBytes 0x158b 4
-          , Comment "Another floating point constant?"
+          , Comment "??Floating point constant?"
           , GrabBytes 0x158f 4
-          , Comment "Another floating point constant?"
+          , Comment "Floating point constant?"
           , GrabBytes 0x1593 4
           , nextSeg 0x1597 0x164f
           , Comment "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
@@ -720,6 +720,7 @@ rdStartAndLength tyCon (Just (Y.Object o)) =
       rdLength :: Maybe AT.Value -> Maybe AT.Value -> Either T.Text Z80addr -> Either T.Text Guidance
       -- Pass errors through... quickly.
       rdLength _                    _                    (Left err)   = Left err
+      rdLength (Just _)             (Just _)             _            = Left "Only one of 'end' or 'nBytes' can be specified."
       rdLength (Just (Y.String ea)) Nothing              (Right sa)   =
         either (\err  -> Left err)
                (\ea'  -> Right $ tyCon sa (fromIntegral (ea' - sa)))
@@ -749,3 +750,5 @@ rdStartAndLength tyCon (Just (Y.Object o)) =
                                        Nothing                -> outOfRange minZ80addr maxZ80addr startAddr
         Just _something           -> Left "Invalid start address ('addr')."
         Nothing                   -> Left "start address ('addr') key required."
+
+rdStartAndLength _tyCon _anything = Left "Expected a dictionary with 'start' and 'end'/'nBytes'"

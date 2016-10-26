@@ -6,7 +6,6 @@ module TRS80.CmdDriver
   ) where
 
 import Control.Lens ((^.))
-import System.Console.GetOpt
 import System.IO
 
 import Machine
