@@ -99,12 +99,12 @@ mkInitialDisassembly = Z80disassembly
 
 -- | Where the real work of the Z80 disassembly happens...
 disasm :: Z80disassembly                        -- ^ Incoming disassembly sequence and state
-       -> EmulatedSystem procInternals memSys Z80addr Z80word Z80instruction
+       -> EmulatedSystem procInternals Z80addr Z80word Z80instruction
                                                 -- ^ The emulated Z80 system
        -> Z80PC                                 -- ^ Current program counter
        -> Z80PC                                 -- ^ The disassembly's last address
        -> ( Z80DisasmElt
-            -> MemorySystem Z80addr Z80word memSys
+            -> Z80memory
             -> Z80PC
             -> Z80disassembly
             -> (Z80PC, Z80disassembly)
@@ -117,7 +117,7 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
     addrInDisasmF = dstate    ^. addrInDisasmRange
 
     disasm' pc curDState
-      | trace ("disasm " ++ (show pc)) False = undefined
+      {- | trace ("disasm " ++ (show pc)) False = undefined -}
       | pc <= lastpc =
         let DecodedInsn newpc insn = iDecode pc theMem
             -- Identify symbols where absolute addresses are found and build up a symbol table for a later
@@ -138,14 +138,13 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
                 CALL (AbsAddr addr)                     -> collectSymtab curDState addr "SUB"
                 CALLCC _cc (AbsAddr addr)               -> collectSymtab curDState addr "SUB"
                 _otherwise                              -> curDState
-            (newpc', curDState'')  = postProc (mkDisasmInst pc newpc insn) theMem newpc curDState'
+            (newpc', curDState'')  = postProc (mkDisasmInst pc newpc theMem insn) theMem newpc curDState'
         in  disasm' newpc' curDState''
       | otherwise = curDState
 
-    mkDisasmInst (PC oldpc) (PC newpc) ins =
-      let opcodes = let oldpc' = (fromIntegral oldpc) :: Int
-                        newpc' = (fromIntegral newpc) :: Int
-                    in  (theMem ^. mfetchN) oldpc (newpc' - oldpc')
+    mkDisasmInst :: Z80PC -> Z80PC -> Z80memory -> Z80instruction -> Z80DisasmElt
+    mkDisasmInst (PC oldpc) (PC newpc) (MemorySystem msys) ins =
+      let opcodes = mFetchN msys oldpc (fromIntegral (newpc - oldpc))
           cmnt
             | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- ins, addrInDisasmF addr = "INTREF"
             | otherwise                                                         = T.empty
@@ -164,22 +163,22 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
 
 -- | Grab a sequence of bytes from the memory image, add to the disassembly sequence as a 'ByteRange' pseudo instruction
 z80disbytes :: Z80disassembly                   -- ^ Current disassembly state
-            -> Z80memory memSys                 -- ^ Vector of bytes from which to extract some data
+            -> Z80memory                        -- ^ Vector of bytes from which to extract some data
             -> Z80PC                            -- ^ Start address from which to grab bytes
             -> Z80disp                          -- ^ Number of bytes to extract
             -> Z80disassembly                   -- ^ Resulting diassembly state
-z80disbytes dstate mem (PC sAddr) nBytes =
-  disasmSeq %~ (|> (mkByteRange sAddr $ (mem ^. mfetchN) sAddr (fromIntegral nBytes))) $ dstate
+z80disbytes dstate (MemorySystem mem) (PC sAddr) nBytes =
+  disasmSeq %~ (|> (mkByteRange sAddr $ mFetchN mem sAddr (fromIntegral nBytes))) $ dstate
 
 -- | Grab (what is presumably) an ASCII string sequence, terminating at the first 0 encountered. This is somewhat inefficient
 -- because multiple 'Vector' slices get created.
 z80disasciiz :: Z80disassembly                  -- ^ Current disassembly state
-             -> Z80memory memSys                -- ^ Vector of bytes from which to extract some data
+             -> Z80memory                       -- ^ Vector of bytes from which to extract some data
              -> Z80PC                           -- ^ Start address
              -> Z80disassembly                  -- ^ Resulting diassembly state
-z80disasciiz dstate mem (PC sAddr) =
-  let sRange       = (mem ^. maxmem) - sAddr
-      toSearch     = (mem ^. mfetchN) sAddr (fromIntegral sRange)
+z80disasciiz dstate (MemorySystem mem) (PC sAddr) =
+  let sRange       = maxBound - sAddr
+      toSearch     = mFetchN mem sAddr (fromIntegral sRange)
       foundStr idx = mkAsciiZ sAddr (DVU.slice 0 (idx + 1) toSearch)
   in  case DVU.elemIndex 0 toSearch of
         Nothing  -> dstate                      -- Not found?
@@ -187,16 +186,16 @@ z80disasciiz dstate mem (PC sAddr) =
 
 -- | Grab a sequence of bytes from the memory image, add to the disassembly sequence as a 'ByteRange' pseudo instruction
 z80disascii :: Z80disassembly                   -- ^ Current disassembly state
-            -> Z80memory memSys                 -- ^ Vector of bytes from which to extract some data
+            -> Z80memory                        -- ^ Vector of bytes from which to extract some data
             -> Z80PC                            -- ^ Start address from which to start extracting bytes
             -> Z80disp                          -- ^ Number of bytes to extract
             -> Z80disassembly                   -- ^ Resulting diassembly state
-z80disascii dstate mem (PC sAddr) nBytes =
-  disasmSeq %~ (|> (mkAscii sAddr $ (mem ^. mfetchN) sAddr (fromIntegral nBytes))) $ dstate
+z80disascii dstate (MemorySystem mem) (PC sAddr) nBytes =
+  disasmSeq %~ (|> (mkAscii sAddr $ mFetchN mem sAddr (fromIntegral nBytes))) $ dstate
 
 -- | Z80 default instruction post processor. This merely appends the decoded instruction onto the disassembly sequence.
 z80DefaultPostProcessor :: Z80DisasmElt
-                        -> Z80memory memsys
+                        -> Z80memory
                         -> Z80PC
                         -> Z80disassembly
                         -> (Z80PC, Z80disassembly)

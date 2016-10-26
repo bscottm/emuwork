@@ -6,25 +6,18 @@ module Z80.MisosysEDAS.MnemonicParser
   ( asmMnemonic
   ) where
 
-{-
-#ifdef mingw32_HOST_OS
-import Control.Lens hiding (value, walk, op)
-#else
-import Control.Lens hiding (value, walk)
-#endif
--}
-
-import Text.Parsec
-import Text.Parsec.Text()                 -- ghci 7.6.1 needs these imported instances, e.g., (Stream T.Text Identity Char)
-import qualified Data.Text as T
+import           Data.Int
 import qualified Data.Map as Map
+import qualified Data.Text as T
+import           Text.Parsec
+import           Text.Parsec.Text ()
 
-import Machine
-import Z80.InstructionSet
-import Z80.MisosysEDAS.Types
-import Z80.MisosysEDAS.ParserUtils
-import Z80.MisosysEDAS.ExprParser
-import Z80.MisosysEDAS.Assembler
+import           Machine
+import           Z80.InstructionSet
+import           Z80.MisosysEDAS.Types
+import           Z80.MisosysEDAS.ParserUtils
+import           Z80.MisosysEDAS.ExprParser
+import           Z80.MisosysEDAS.Assembler
 
 -- | Parse a Z80 assembler opcode
 asmMnemonic :: EDASParser AsmOp
@@ -147,7 +140,7 @@ asmMnemonic =
                            ; c <- constExpr True srcpos
                            ; case c of
                                Const16 _srcloc disp _base -> if disp >= -128 && disp <= 127 then
-                                                               return disp
+                                                               return (fromIntegral disp :: Int8)
                                                              else
                                                                fail "index displacement out of bounds"
                                _otherwise  -> fail "index register displacement"

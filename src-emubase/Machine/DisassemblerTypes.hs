@@ -172,7 +172,7 @@ mkLabeledAddress = Labeled
 -- just make the Haddock output that more readable?)
 type DisElementPostProc disasmState insnType memSys addrType wordType extPseudoType =
   ( DisElement insnType addrType wordType extPseudoType -- Decoded instruction or pseudo-operation
-    -> MemorySystem addrType wordType memSys            -- Memory system
+    -> MemorySystem addrType wordType                   -- Memory system
     -> ProgramCounter addrType                          -- Current program counter
     -> disasmState                                      -- Incoming disassembly state
     -> (ProgramCounter addrType, disasmState)           -- Resulting disassembly state
@@ -183,7 +183,7 @@ class Disassembler disasmState insnType addrType wordType extPseudoType where
   -- | The main disassembler function
   disassemble :: disasmState                            -- ^ The incoming disassembly state. This data type should collect
                                                         -- the disassembled instruction, associated pseudo-operations.
-              -> EmulatedSystem procInternals memSys addrType wordType insnType
+              -> EmulatedSystem procInternals addrType wordType insnType
                                                         -- ^ Emulated system that contains the memory system and
                                                         -- instruction decoder
               -> ProgramCounter addrType                -- ^ Starting address to disassemble

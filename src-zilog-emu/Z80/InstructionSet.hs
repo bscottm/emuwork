@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveDataTypeable, RankNTypes, FlexibleContexts #-}
 {-# OPTIONS_HADDOCK ignore-exports #-}
 
 -- | The Haskell representation of the Z80 instruction set
@@ -18,6 +18,7 @@ module Z80.InstructionSet
   , RegPairAF(..)
   , Z80ExchangeOper(..)
 
+{-  
   -- * Index register transform functions
   , Z80reg8XForm
   , Z80reg16XForm
@@ -29,7 +30,8 @@ module Z80.InstructionSet
   -- * Lens functions
   , reg8XForm
   , reg16XForm
-
+-}
+  
   -- * Other utilities
   , reg8NameMap
   , reg8NameToReg
@@ -40,22 +42,21 @@ module Z80.InstructionSet
   , specialRegNames
   ) where
 
-import Control.Lens
-import Data.Typeable
-import Data.Data
-import Data.Map (Map, (!))
+import           Data.Data
+import           Data.Int
+import           Data.Map (Map, (!))
 import qualified Data.Map as Map
 import qualified Data.Text as T
 
-import Machine
-import Z80.Processor
+import           Machine
+import           Z80.Processor
 
 -- | Shorthand for the Z80\'s 'EmulatedProcessor' type. This is defined here because 'Z80instruction' is required
 -- and would otherwise form a module import cycle.
 type Z80emulation = EmulatedProcessor Z80state Z80addr Z80instruction
 
 -- | Shorthand for a Z80 emulated system. All Z80 systems share this characteristic type.
-type Z80system memSys = EmulatedSystem Z80state memSys Z80addr Z80word Z80instruction
+type Z80system memSys = EmulatedSystem Z80state Z80addr Z80word Z80instruction
 
 -- | The Z80 instruction set
 data Z80instruction where
@@ -250,9 +251,9 @@ data Z80reg8 where
   H          :: Z80reg8                         -- Index 4
   L          :: Z80reg8                         -- Index 5
   HLindirect :: Z80reg8                         -- Index 6
-  IXindirect :: Z80disp                         -- IX + displacement
+  IXindirect :: Int8                            -- IX + byte displacement
              -> Z80reg8
-  IYindirect :: Z80disp                         -- IY + displacement
+  IYindirect :: Int8                            -- IY + byte displacement
              -> Z80reg8
   deriving (Show, Typeable, Data)
 
@@ -332,76 +333,3 @@ idxRegNameToReg reg = idxRegNameMap ! reg
 
 specialRegNames :: [T.Text]
 specialRegNames = [ "sp", "af", "i", "r" ]
-
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- Index register transform functions:
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
--- | Shorthand for 8-bit register transform
-type Z80reg8XForm memSys = ( Z80memory memSys           -- The memory system
-                             -> Z80PC                   -- Program counter
-                             -> Z80reg8                 -- Register to be transformed
-                             -> (Z80PC, Z80reg8)        -- Possibly incremented program counter, transformed register pair tuple
-                           )
-
--- | Shorthand for 16-bit register transform
-type Z80reg16XForm = (Z80reg16                  -- Register pair to be transformed
-                      -> Z80reg16)              -- Resulting transformed register pair
-
--- | Transform the 8-bit register operand to the IX register and displacement, only
--- if the operand is indirect via HL
-ixXFormReg8 :: Z80reg8XForm memSys
--- Use lens transformations to operate on the second tuple member
-ixXFormReg8 z80mem  pc HLindirect    = _2 %~ (IXindirect . fromIntegral) $ memIncPCAndFetch z80mem pc
-ixXFormReg8 _z80mem z80state operand = (z80state, operand)
-
--- | Transform the 8-bit register operand to the IY register and displacement, only
--- if the operand is indirect via HL
-iyXFormReg8 :: Z80reg8XForm memSys
-iyXFormReg8 z80mem  z80state HLindirect = let (procState, disp) = memFetchAndIncPC z80mem z80state
-                                              disp' = IXindirect $ fromIntegral disp
-                                          in  (procState, disp')
-iyXFormReg8 _z80mem z80state operand    = (z80state, operand)
-
--- | Transform 16-bit register operands to an index register, only if HL happens
--- to be the destination. Used when decoding 0xdd prefixed instructions
-
-ixXFormReg16 :: Z80reg16XForm
-ixXFormReg16 HL    = IX
-ixXFormReg16 other = other
-
--- | See 'ixXFormReg16' documentation -- this is for the IY register
-iyXFormReg16 ::Z80reg16XForm
-iyXFormReg16 HL    = IY
-iyXFormReg16 other = other
-
--- | A collection of register transforms. Note that access to individual elements of
--- the record is mediated via 'Data.Label' lenses.
-data Z80indexTransform memSys =
-  Z80indexTransform
-  { _reg8XForm  :: Z80reg8XForm memSys          -- Z80reg8 8-bit register transform
-  , _reg16XForm :: Z80reg16XForm                -- RegPairSP and RegPairAF 16-bit register transform
-  }
-
--- | Pass-through register transform: no transform required
-z80nullTransform :: Z80indexTransform memSys
-z80nullTransform = Z80indexTransform
-                   { _reg8XForm = (\_z80mem z80state operand -> (z80state, operand))
-                   , _reg16XForm = id
-                   }
-
--- | HL -> IX register transform collection
-z80ixTransform :: Z80indexTransform memSys
-z80ixTransform = Z80indexTransform
-                 { _reg8XForm = ixXFormReg8
-                 , _reg16XForm = ixXFormReg16
-                 }
-
--- | HL -> IY register transform collection
-z80iyTransform :: Z80indexTransform memSys
-z80iyTransform = Z80indexTransform
-                 { _reg8XForm = iyXFormReg8
-                 , _reg16XForm = iyXFormReg16
-                 }
-
-makeLenses ''Z80indexTransform

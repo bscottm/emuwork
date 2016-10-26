@@ -31,12 +31,14 @@ library
 
   ghc-options:          -Wall -O2
 
-  default-extensions:   GADTs,
-                        MultiParamTypeClasses,
-                        OverloadedStrings,
-                        TemplateHaskell,
-                        TypeSynonymInstances,
-                        FlexibleInstances
+  default-extensions:
+                     GADTs,
+                     MultiParamTypeClasses,
+                     OverloadedStrings,
+                     TemplateHaskell,
+                     TypeSynonymInstances,
+                     RankNTypes,
+                     FlexibleInstances
 
   exposed-modules:
                         Z80,

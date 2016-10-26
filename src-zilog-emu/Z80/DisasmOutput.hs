@@ -515,7 +515,7 @@ fmtByteGroup bytes addr idx outF
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-showDisp :: Z80disp
+showDisp :: (Integral dispT, Show dispT) => dispT
          -> T.Text
 showDisp disp
   | disp < 0  = T.pack . show $ disp

@@ -1,4 +1,5 @@
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE RankNTypes, DeriveDataTypeable #-}
 
 -- | General data structures and type classes for emulated processors.
 module Machine.EmulatedSystem where
@@ -71,6 +72,10 @@ class GenericPC pcThing where
              -> pcThing
              -> pcThing
 
+-- | Do an action on a program counter
+withPC :: ProgramCounter addrType -> (addrType -> value) -> value
+withPC (PC pc) f = f pc
+
 -- | 'EmulatedProcessor' encapsulates general information about an emulated machine.
 data EmulatedProcessor procInternals addrType instructionSet where
   EmulatedProcessor ::
@@ -81,23 +86,41 @@ data EmulatedProcessor procInternals addrType instructionSet where
 -- Emit Template Haskell hair for the lenses
 makeLenses ''EmulatedProcessor
 
--- | Type class for memory systems.
-class MemorySystem memSys addrType wordType where
-  fetch :: memSys
+-- | Type class for memory system operations.
+class MemoryOps memSys addrType wordType where
+  -- | Fetch a single entity from memory
+  mFetch :: memSys
         -> addrType
         -> wordType
 
-  fetchN :: memSys
+  -- | Fetch multiple entities from memory
+  mFetchN :: memSys
          -> addrType
          -> Int
          -> Vector wordType
 
-{-
-  -- | Query the highest address in the memory system (for unboxed vectors, this should be a synonym with
-  -- 'Data.Vector.Unboxed.length')
-  maxMem :: memSys
-         -> addrType
--}
+  -- | Fetch an entity from memory at the current program counter, return the (incremented pc, contents)
+  -- pair.
+  mFetchAndIncPC :: (GenericPC addrType) =>
+                    ProgramCounter addrType
+                    -- ^ The program counter
+                 -> memSys
+                 -- ^ The memory system
+                 -> (ProgramCounter addrType, wordType)
+  mFetchAndIncPC pc mem = (pcInc pc, withPC pc (mFetch mem))
+
+  -- | Fetch an entity from memory, pre-incrementing the program counter, returning the (incremented pc, contents)
+  mIncPCAndFetch :: (GenericPC addrType) =>
+                    ProgramCounter addrType
+                 -> memSys
+                 -> (ProgramCounter addrType, wordType)
+  mIncPCAndFetch pc mem = let pc' = pcInc pc
+                          in  (pc', withPC pc' (mFetch mem))
+
+data MemorySystem addrType wordType where
+  MemorySystem :: MemoryOps memSysType addrType wordType =>  
+                  memSysType
+               -> MemorySystem addrType wordType
 
 -- | Generic representation of instruction decoder outputs
 data DecodedInsn instructionSet addrType where
@@ -111,20 +134,20 @@ data DecodedInsn instructionSet addrType where
               -> DecodedInsn instructionSet addrType
 
 -- | Instruction decoder function signature shorthand
-type InsnDecodeF instructionSet addrType wordType memSys =
+type InsnDecodeF instructionSet addrType wordType =
   (    ProgramCounter addrType                          --  Current program counter
-    -> memSys                                           --  Memory system from which words are fetched
+    -> MemorySystem addrType wordType                   --  Memory system from which entities are fetched
     -> DecodedInsn instructionSet addrType              --  Decoder result
   )
 
 -- | 'EmulatedSystem' encapsulates the various parts required to emulate a system (processor, memory, ...)
-data EmulatedSystem procInternals memInternals addrType wordType instructionSet where
+data EmulatedSystem procInternals addrType wordType instructionSet where
   EmulatedSystem ::
     { _processor  :: EmulatedProcessor procInternals addrType instructionSet
                      -- ^ System processor
-    , _memory     :: (MemorySystem addrType wordType memSys) => memSys
+    , _memory     :: MemorySystem addrType wordType
                      -- ^ System memory
-    , _idecode    :: InsnDecodeF instructionSet addrType wordType memInternals
+    , _idecode    :: InsnDecodeF instructionSet addrType wordType
                      -- ^ Instruction decoding function. Used to disassemble instructions as well
                      -- as execute them.
     , _sysName    :: String
@@ -132,7 +155,7 @@ data EmulatedSystem procInternals memInternals addrType wordType instructionSet 
     , _sysAliases :: [String]
                   -- ^ System identity aliases, e.g., "null", "trs80-model-I" used to identify the
                   -- emulator.
-    } -> EmulatedSystem procInternals memInternals addrType wordType instructionSet
+    } -> EmulatedSystem procInternals addrType wordType instructionSet
 
 makeLenses ''EmulatedSystem
 
@@ -150,24 +173,6 @@ instance (ShowHex addrType) =>
          Show (SymAbsAddr addrType) where
   show (AbsAddr addr)  = as0xHexS addr
   show (SymAddr label) = show label
-
--- | Do an action on a program counter
-withPC :: ProgramCounter addrType -> (addrType -> value) -> value
-withPC (PC pc) f = f pc
-
-getPCvalue :: ProgramCounter addrType
-           -> addrType
-getPCvalue (PC pc) = pc
-
--- | Fetch from memory at the current program counter's address, returning the incremented program counter and
--- the fetched value
-memFetchAndIncPC :: (MemorySystem addrType wordType memSys) => memSys
-                 -- ^ System memory interface
-                 -> ProgramCounter addrType
-                 -- ^ Current Z80 state
-                 -> (ProgramCounter addrType, wordType)
-                 -- ^ New PC and fetched byte
-memFetchAndIncPC mem pc = (pcInc pc, withPC pc (fetch mem))
 
 -- | Instantiate 'GenericPC' operations for 'ProgramCounter'
 instance GenericPC (ProgramCounter addrType) where

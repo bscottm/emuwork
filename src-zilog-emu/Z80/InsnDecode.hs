@@ -23,7 +23,7 @@ type Z80decodedInsn = DecodedInsn Z80instruction Z80addr
 
 -- | Decode one instruction, returning the new program counter and disassembly state.
 z80insnDecode :: Z80PC                  -- ^ Current program counter
-              -> Z80memory memSys       -- ^ The memory system from which bytes are fetched
+              -> Z80memory              -- ^ The memory system from which bytes are fetched
               -> Z80decodedInsn         -- ^ The decoded instruction
 z80insnDecode pc mem =
   let opc = getOpcode pc mem
@@ -47,9 +47,9 @@ z80insnDecode pc mem =
 
 -- | Instruction group 0 decoder: 
 group0decode :: Z80word                         -- ^ Current opcode
-             -> Z80memory memSys                -- ^ Memory image
+             -> Z80memory                       -- ^ Memory image
              -> Z80PC                           -- ^ Current program counter
-             -> Z80indexTransform memSys        -- ^ Index register transform function
+             -> Z80indexTransform               -- ^ Index register transform function
              -> Z80decodedInsn                  -- ^ (Instruction, New disassembly state)
 
 group0decode opc mem pc xForm
@@ -92,8 +92,8 @@ group0decode opc mem pc xForm
     y             = (shiftR opc 3) .&. 7
     p             = (shiftR opc 4) .&. 3
     q             = (shiftR opc 3) .&. 1
-    reg8XFormF    = xForm ^. reg8XForm
-    reg16XFormF   = xForm ^. reg16XForm
+    reg8XFormF    = reg8XForm xForm
+    reg16XFormF   = reg16XForm xForm
     nextIns       = pcInc pc
     defResult ins = DecodedInsn nextIns ins
 
@@ -111,13 +111,13 @@ accumOps = IntMap.fromList [ (0, RLCA)
 
 -- | Instruction group 1: 8-bit loads and HALT
 group1decode :: Z80word
-             -> Z80memory memSys          
+             -> Z80memory
              -> Z80PC
-             -> Z80indexTransform memSys
+             -> Z80indexTransform
              -> Z80decodedInsn
 group1decode opc mem pc xform
   | z == 6, y == 6  = DecodedInsn (pcInc pc) HALT
-  | otherwise       = let reg8XFormF         = xform ^. reg8XForm
+  | otherwise       = let reg8XFormF       = reg8XForm xform
                           (newpc, dstReg)  = reg8 reg8XFormF mem pc y
                           (newpc', srcReg) = reg8 reg8XFormF mem newpc z
                       in  DecodedInsn (pcInc newpc') (LD (Reg8Reg8 dstReg srcReg))
@@ -127,12 +127,12 @@ group1decode opc mem pc xform
 
 -- | ALU instruction decode (group 2)
 group2decode :: Z80word
-             -> Z80memory memSys                        -- ^ Z80 memory being disassembled
+             -> Z80memory                               -- ^ Z80 memory being disassembled
              -> Z80PC                                   -- ^ Current program counter
-             -> Z80indexTransform memSys                -- ^ HL -> index register transform collection
+             -> Z80indexTransform                       -- ^ HL -> index register transform collection
              -> Z80decodedInsn                          -- ^ Decoded result
 group2decode opc mem pc xForms =
-  let (newpc, alu8operand) = aluReg8 (xForms ^. reg8XForm) mem pc (opc .&. 7)
+  let (newpc, alu8operand) = aluReg8 (reg8XForm xForms) mem pc (opc .&. 7)
       insCTor    = case opc `shiftR` 3 .&. 7 of 
                      0          -> ADD . ALU8
                      1          -> ADC . ALU8
@@ -147,9 +147,9 @@ group2decode opc mem pc xForms =
 
 -- | Group 3 instructions
 group3decode :: Z80word
-             -> Z80memory memSys                -- ^ System memory being disassembled
+             -> Z80memory                       -- ^ System memory being disassembled
              -> Z80PC                           -- ^ Program counter
-             -> Z80indexTransform memSys        -- ^ HL to IX or IY conversion functions
+             -> Z80indexTransform               -- ^ HL to IX or IY conversion functions
              -> Z80decodedInsn                  -- ^ Decoded result
 group3decode opc mem pc xForm
   | z == 0          = defResult (RETCC . condC $ y)
@@ -212,14 +212,14 @@ group3decode opc mem pc xForm
     y             = (shiftR opc 3) .&. 7
     p             = (shiftR opc 4) .&. 3
     q             = (shiftR opc 3) .&. 1
-    reg16XFormF   = xForm ^. reg16XForm
+    reg16XFormF   = reg16XForm xForm
     nextIns       = pcInc pc
     defResult ins = DecodedInsn nextIns ins
 
 -- | The SET, RESet, BIT instructions and rotation operations. Note that this is not suitable for dealing with the
 -- IX and IY indexed instructions, since the instruction format is 'DDCB <displacement> <opcode>', and has to be
 -- handled seperately.
-bitopsDecode :: Z80memory memSys                -- ^ Z80 memory (required to use the null register transform)
+bitopsDecode :: Z80memory                       -- ^ Z80 memory (required to use the null register transform)
              -> Z80PC                           -- ^ Disassembly state, queried for current program counter
              -> Z80word                         -- ^ Bit/rotate operation opcode
              -> Z80instruction                  -- ^ The result
@@ -234,7 +234,7 @@ bitopsDecode mem pc opc =
     z = (opc .&. 7)
     y = (shiftR opc 3) .&. 7
     -- Ignore any new program counter 'reg8' because we always apply the null transform
-    (_, theReg) = reg8 (z80nullTransform ^. reg8XForm) mem pc z
+    (_, theReg) = reg8 (reg8XForm z80nullTransform) mem pc z
 
 rotOps :: IntMap (Z80reg8 -> Z80instruction)
 rotOps = IntMap.fromList [ (0, RLC)
@@ -249,7 +249,7 @@ rotOps = IntMap.fromList [ (0, RLC)
 
 -- | Decode 'ED'-prefixed instructions
 edPrefixDecode :: Z80word
-               -> Z80memory memSys          
+               -> Z80memory
                -> Z80PC
                -> Z80decodedInsn
 edPrefixDecode opc mem pc
@@ -298,8 +298,8 @@ edPrefixDecode opc mem pc
     p               = (y `shiftR` 1) .&. 3
     q               = y .&. 1
     invalid         = defResult (Z80undef [0xed, opc])
-    nullXFormF      = z80nullTransform ^. reg8XForm
-    nullReg16XFormF = z80nullTransform ^. reg16XForm
+    nullXFormF      = reg8XForm z80nullTransform
+    nullReg16XFormF = reg16XForm z80nullTransform
     nextIns         = pcInc pc
     defResult ins   = DecodedInsn nextIns ins 
 
@@ -360,8 +360,8 @@ pairAF _xform 3 = AF
 pairAF _      x = error ("pairAF: invalid 16-bit register code " ++ (show x))
 
 -- | Convert 8-bit register index to a 'Z80reg8' operand
-reg8 :: Z80reg8XForm memSys                     -- ^ Register transform function, used for IX/IY transformations
-     -> Z80memory memSys                        -- ^ Memory from which to fetch IX/IY displacements
+reg8 :: Z80reg8XForm                            -- ^ Register transform function, used for IX/IY transformations
+     -> Z80memory                               -- ^ Memory from which to fetch IX/IY displacements
      -> Z80PC                                   -- ^ Disassembler state
      -> Z80word                                 -- ^ 8-bit register index
      -> (Z80PC, Z80reg8)                        -- ^ Register and new disassembly state
@@ -380,8 +380,8 @@ reg8 _xform _mem _pc  x = error ("reg8: Invalid 8-bit register code " ++ (show x
 -- This uses Control.Lens to apply the 'ALUreg8' data constructor on the first element of the pair
 -- returned by 'reg8'
 
-aluReg8 :: Z80reg8XForm memSys                          -- ^ IX/IY transform function, when needed
-        -> Z80memory memSys                             -- ^ Memory from which IX/IY displacements are fetched
+aluReg8 :: Z80reg8XForm                                 -- ^ IX/IY transform function, when needed
+        -> Z80memory                                    -- ^ Memory from which IX/IY displacements are fetched
         -> Z80PC                                        -- ^ Current program counter
         -> Z80word                                      -- ^ Register code
         -> (Z80PC, OperALU)
@@ -403,7 +403,7 @@ condC x = error ("condC: Invalid condition code index " ++ (show x))
 
 -- | Compute signed, relative displacement address' absolute address, generating a label for it
 -- if not already in the disassembler's symbol table.
-displacementInstruction :: Z80memory memSys          
+displacementInstruction :: Z80memory
                         -> Z80PC
                         -> ((SymAbsAddr Z80addr) -> Z80instruction)
                         -> Z80decodedInsn
@@ -411,19 +411,19 @@ displacementInstruction mem pc ins =
   let pc'     = pcInc pc
       disp    = getOpcode pc' mem
       disp'        = signExtend disp
-      destAddr     = fromIntegral (((fromIntegral . getPCvalue) pc) + disp' + 2)
+      destAddr     = fromIntegral ((withPC pc fromIntegral) + disp' + 2)
       nextIns      = pcInc pc'
   in  DecodedInsn nextIns (ins . AbsAddr $ destAddr)
 
 -- | Get opcode at current program counter
 getOpcode :: Z80PC
-          -> Z80memory memSys
+          -> Z80memory
           -> Z80word
-getOpcode pc mem =  mem ^. mfetch $ (getPCvalue pc)
+getOpcode pc (MemorySystem mem) = withPC pc (mFetch mem)
 
 -- | Fetch address, insert into an instruction
 mkAbsAddrIns :: (SymAbsAddr Z80addr -> Z80instruction)
-             -> Z80memory memSys
+             -> Z80memory
              -> Z80PC
              -> Z80decodedInsn
 mkAbsAddrIns ins mem pc =
@@ -431,10 +431,80 @@ mkAbsAddrIns ins mem pc =
   in  DecodedInsn pc' ((ins . AbsAddr) addr)
 
 -- | Fetch an absolute (16-bit) little endian address
-z80getAddr :: Z80memory memSys          -- ^ Memory from which address is fetched
+z80getAddr :: Z80memory                 -- ^ Memory from which address is fetched
            -> Z80PC                     -- ^ The program counter
            -> Z80decodedInsn
-z80getAddr mem pc = let lo         = fromIntegral ((mem ^. mfetch) (getPCvalue pc))
-                        pc'        = pcInc pc
-                        hi         = fromIntegral ((mem ^. mfetch) (getPCvalue pc'))
-                    in DecodedAddr (pcInc pc') ((shiftL hi 8) .|. lo)
+z80getAddr (MemorySystem mem) pc = let lo, hi     :: Z80word
+                                       lo         = withPC pc (mFetch mem)
+                                       pc'        = pcInc pc
+                                       hi         = withPC pc' (mFetch mem)
+                                   in DecodedAddr (pcInc pc') ((shiftL (fromIntegral hi) 8) .|. (fromIntegral lo))
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- Index register transform functions:
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+-- | Shorthand for 8-bit register transforms
+type Z80reg8XForm = Z80memory                    -- The memory system
+                    -> Z80PC                     -- Program counter
+                    -> Z80reg8                   -- Register to be transformed
+                    -> (Z80PC, Z80reg8)          -- Possibly incremented program counter, transformed register pair tuple
+
+-- | Shorthand for 16-bit register transform
+type Z80reg16XForm = (  Z80reg16                -- Register pair to be transformed
+                     -> Z80reg16)               -- Resulting transformed register pair
+
+-- | Transform the 8-bit register operand to the IX register and displacement, only
+-- if the operand is indirect via HL
+ixXFormReg8 :: Z80reg8XForm
+ixXFormReg8 (MemorySystem msys)  pc HLindirect = let (pc', disp) = (mIncPCAndFetch pc msys) :: (Z80PC, Z80word)
+                                                 in  (pc', IXindirect $ fromIntegral disp)
+ixXFormReg8 _msys pc operand                   = (pc, operand)
+
+-- | Transform the 8-bit register operand to the IY register and displacement, only
+-- if the operand is indirect via HL
+iyXFormReg8 :: Z80reg8XForm
+iyXFormReg8 (MemorySystem msys) pc HLindirect = let (pc', disp) = (mFetchAndIncPC pc msys) :: (Z80PC, Z80word)
+                                                in  (pc', IYindirect $ fromIntegral disp)
+iyXFormReg8 _msys pc operand                  = (pc, operand)
+
+-- | Transform 16-bit register operands to an index register, only if HL happens
+-- to be the destination. Used when decoding 0xdd prefixed instructions
+
+ixXFormReg16 :: Z80reg16XForm
+ixXFormReg16 HL    = IX
+ixXFormReg16 other = other
+
+-- | See 'ixXFormReg16' documentation -- this is for the IY register
+iyXFormReg16 ::Z80reg16XForm
+iyXFormReg16 HL    = IY
+iyXFormReg16 other = other
+
+-- | A collection of register transforms. Note that access to individual elements of
+-- the record is mediated via 'Data.Label' lenses.
+data Z80indexTransform =
+  Z80indexTransform
+  { reg8XForm  :: Z80reg8XForm                 -- Z80reg8 8-bit register transform
+  , reg16XForm :: Z80reg16XForm                -- RegPairSP and RegPairAF 16-bit register transform
+  }
+
+-- | Pass-through register transform: no transform required
+z80nullTransform :: Z80indexTransform
+z80nullTransform = Z80indexTransform
+                   { reg8XForm = (\_z80mem pc operand -> (pc, operand))
+                   , reg16XForm = id
+                   }
+
+-- | HL -> IX register transform collection
+z80ixTransform :: Z80indexTransform
+z80ixTransform = Z80indexTransform
+                 { reg8XForm = ixXFormReg8
+                 , reg16XForm = ixXFormReg16
+                 }
+
+-- | HL -> IY register transform collection
+z80iyTransform :: Z80indexTransform
+z80iyTransform = Z80indexTransform
+                 { reg8XForm = iyXFormReg8
+                 , reg16XForm = iyXFormReg16
+                 }

@@ -8,13 +8,13 @@ module Z80.Processor
   , Z80state(..)
   , Z80PC
   , Z80memory
+  , MemoryOps(..)
 
     -- * Functions
   , z80MinAddr
   , z80MaxAddr
   , z80initialState
   , z80MemSizeIntegral
-  , memFetchAndIncPC
 
     -- * Lens functions
   , regs
@@ -30,10 +30,10 @@ module Z80.Processor
   , intmode
   ) where
 
-import Prelude hiding (replicate)
-import Data.Word
+import Control.Lens (makeLenses, (+~), (-~))
 import Data.Int
-import Control.Lens hiding (ix)
+import Data.Word
+import Prelude hiding (replicate)
 
 import Machine
 
@@ -41,9 +41,13 @@ type Z80word          = Word8                           -- ^ Basic word type on 
 type Z80addr          = Word16                          -- ^ Memory addresses are 16-bit quantities
 type Z80disp          = Int16                           -- ^ Program counter displacements are 16 bits
 type Z80PC            = ProgramCounter Z80addr          -- ^ Z80 program counter
--- | Generic Z80 memory interface
-type Z80memory memSys = MemorySystem Z80addr Z80word memSys
-        
+type Z80memory        = MemorySystem Z80addr Z80word    -- ^ Z80 memory system type
+
+instance GenericPC Z80addr where
+  pcInc pc = 1+ pc
+  pcDec pc = 1- pc
+  pcDisplace (RelativePC disp) pc = fromIntegral (fromIntegral pc + disp)
+ 
 -- | The basic Z80 register file. The actual register file has two sides, the regular and prime. The prime
 -- registers are not generally visible except through the EXX instruction that exchanges the two sides.
 data Z80registers = Z80registers {
@@ -57,7 +61,7 @@ data Z80registers = Z80registers {
   , _z80hreg :: Z80word          -- ^ "High" register
   , _z80lreg :: Z80word          -- ^ "Low" register
   }
-                    
+
 -- | Default/zeroed register set
 zeroedRegisters :: Z80registers
 zeroedRegisters = Z80registers {

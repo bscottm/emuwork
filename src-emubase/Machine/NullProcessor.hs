@@ -18,7 +18,7 @@ instance GenericPC NullProcState where
   pcDec pc = pc
   pcDisplace _ pc = pc
 
-type NullSystemT = EmulatedSystem NullProcState NullProcState Word32 Word32 NullProcState
+type NullSystemT = EmulatedSystem NullProcState Word32 Word32 NullProcState
 
 nullProcessor :: NullSystemT
 nullProcessor = EmulatedSystem
@@ -26,16 +26,20 @@ nullProcessor = EmulatedSystem
                                 { _procPrettyName = "Null (dummy) processor"
                                 , _internals      = NullProcState
                                 }
-                , _memory     = MemorySystem
-                                { _memInternals = NullProcState
-                                , _mfetch       = (\_addr         -> 0 :: Word32)
-                                , _mfetchN      = (\_addr _nBytes -> DVU.empty)
-                                , _maxmem       = 0 :: Word32
-                                }
+                , _memory     = MemorySystem NullMemorySystem
                 , _idecode    = (\pc _mem -> DecodedInsn pc NullProcState)
                 , _sysName    = "Null/dummy system"
                 , _sysAliases = ["null", "dummy"]
                 }
+
+-- | The null memory system
+data NullMemorySystem where
+  NullMemorySystem :: NullMemorySystem
+
+-- | Memory operations on a null memory system
+instance MemoryOps NullMemorySystem Word32 Word32 where
+  mFetch _msys _addr = 0
+  mFetchN _msys _addr _nbytes = DVU.empty
 
 -- | 'EmuCommandLineDispatch' type family instance for the null system
 instance EmulatorDriver NullSystemT where
