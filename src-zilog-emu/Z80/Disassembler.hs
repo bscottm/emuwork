@@ -38,6 +38,7 @@ import           Data.Word
 import           Machine
 import           Z80.Processor
 import           Z80.InstructionSet
+import           Z80.InsnDecode
 
 -- | Disassembly elements for the Z80
 type Z80DisasmElt = DisElement Z80instruction Z80addr Z80word Z80PseudoOps
@@ -113,13 +114,12 @@ disasm :: Z80disassembly                        -- ^ Incoming disassembly sequen
 disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
   where
     theMem        = theSystem ^. memory
-    iDecode       = theSystem ^. idecode
     addrInDisasmF = dstate    ^. addrInDisasmRange
 
     disasm' pc curDState
       {- | trace ("disasm " ++ (show pc)) False = undefined -}
       | pc <= lastpc =
-        let DecodedInsn newpc insn = iDecode pc theMem
+        let DecodedInsn newpc insn = idecode pc theMem
             -- Identify symbols where absolute addresses are found and build up a symbol table for a later
             -- symbol translation pass:
             curDState'             =

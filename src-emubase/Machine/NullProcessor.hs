@@ -27,7 +27,6 @@ nullProcessor = EmulatedSystem
                                 , _internals      = NullProcState
                                 }
                 , _memory     = MemorySystem NullMemorySystem
-                , _idecode    = (\pc _mem -> DecodedInsn pc NullProcState)
                 , _sysName    = "Null/dummy system"
                 , _sysAliases = ["null", "dummy"]
                 }
@@ -38,8 +37,12 @@ data NullMemorySystem where
 
 -- | Memory operations on a null memory system
 instance MemoryOps NullMemorySystem Word32 Word32 where
-  mFetch _msys _addr = 0
+  mFetch _msys _addr          = 0
   mFetchN _msys _addr _nbytes = DVU.empty
+
+-- | Processor operations
+instance ProcessorOps NullProcState Word32 Word32 where
+  idecode pc _mem = DecodedInsn pc NullProcState
 
 -- | 'EmuCommandLineDispatch' type family instance for the null system
 instance EmulatorDriver NullSystemT where

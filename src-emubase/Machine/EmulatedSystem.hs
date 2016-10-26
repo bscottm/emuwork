@@ -6,7 +6,6 @@ module Machine.EmulatedSystem where
 
 import Data.Data
 import Control.Lens
-import Data.Functor.Identity
 import Data.Vector.Unboxed (Vector)
 import qualified Data.Text as T
 
@@ -14,7 +13,8 @@ import Machine.Utils
 
 -- | Generic program counter
 data ProgramCounter addrType where
-  PC :: (Integral addrType) => addrType
+  PC :: (Integral addrType) =>
+        addrType
      -> ProgramCounter addrType
 
 -- | Make program counters behave like numeric types
@@ -79,11 +79,11 @@ withPC (PC pc) f = f pc
 {-# INLINE withPC #-}
 
 -- | 'EmulatedProcessor' encapsulates general information about an emulated machine.
-data EmulatedProcessor procInternals addrType instructionSet where
+data EmulatedProcessor procType addrType instructionSet where
   EmulatedProcessor ::
     { _procPrettyName :: String                 -- ^ Pretty name for the emulated processor
-    , _internals      :: procInternals          -- ^ Processor-specific internal data.
-    } -> EmulatedProcessor  procInternals addrType instructionSet
+    , _internals      :: procType               -- ^ Processor-specific internal data.
+    } -> EmulatedProcessor  procType addrType instructionSet
 
 -- Emit Template Haskell hair for the lenses
 makeLenses ''EmulatedProcessor
@@ -121,7 +121,7 @@ class MemoryOps memSys addrType wordType where
 
 -- | A memory system, for a given address type and word type.
 data MemorySystem addrType wordType where
-  MemorySystem :: MemoryOps memSysType addrType wordType =>
+  MemorySystem :: (MemoryOps memSysType addrType wordType) =>
                   memSysType
                -> MemorySystem addrType wordType
 
@@ -136,23 +136,23 @@ data DecodedInsn instructionSet addrType where
               -> addrType
               -> DecodedInsn instructionSet addrType
 
--- | Instruction decoder function signature shorthand
-type InsnDecodeF instructionSet addrType wordType =
-  (    ProgramCounter addrType                          --  Current program counter
-    -> MemorySystem addrType wordType                   --  Memory system from which entities are fetched
-    -> DecodedInsn instructionSet addrType              --  Decoder result
-  )
+-- | Processor operations type class
+class ProcessorOps insnSet addrType wordType where
+  -- | Instruction decoder, for disassembly and execution
+  idecode :: ProgramCounter addrType
+          -- ^ Current program counter, from where instructions are fetched
+          -> MemorySystem addrType wordType
+          -- ^ The memory system
+          -> DecodedInsn insnSet addrType
+          -- ^ The decoded instruction
 
 -- | 'EmulatedSystem' encapsulates the various parts required to emulate a system (processor, memory, ...)
 data EmulatedSystem procInternals addrType wordType instructionSet where
-  EmulatedSystem ::
+  EmulatedSystem :: (ProcessorOps instructionSet addrType wordType) =>
     { _processor  :: EmulatedProcessor procInternals addrType instructionSet
                      -- ^ System processor
     , _memory     :: MemorySystem addrType wordType
                      -- ^ System memory
-    , _idecode    :: InsnDecodeF instructionSet addrType wordType
-                     -- ^ Instruction decoding function. Used to disassemble instructions as well
-                     -- as execute them.
     , _sysName    :: String
                   -- ^ The system's name, e.g. "Null/dummy processor"
     , _sysAliases :: [String]
@@ -160,7 +160,17 @@ data EmulatedSystem procInternals addrType wordType instructionSet where
                   -- emulator.
     } -> EmulatedSystem procInternals addrType wordType instructionSet
 
-makeLenses ''EmulatedSystem
+processor :: Lens' (EmulatedSystem procType addrType wordType insnSet) (EmulatedProcessor procType addrType insnSet)
+processor f sys = (\proc -> sys { _processor = proc }) <$> f (_processor sys)
+
+memory :: Lens' (EmulatedSystem procType addrType wordType insnSet) (MemorySystem addrType wordType)
+memory f sys = (\msys -> sys { _memory = msys }) <$> f (_memory sys)
+
+sysName :: Lens' (EmulatedSystem procType addrType wordType insnSet) String
+sysName f sys = (\name -> sys { _sysName = name }) <$> f (_sysName sys)
+
+sysAliases :: Lens' (EmulatedSystem procType addrType wordType insnSet) [String]
+sysAliases f sys = (\aliases -> sys { _sysAliases = aliases }) <$> f (_sysAliases sys)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -179,6 +189,6 @@ instance (ShowHex addrType) =>
 
 -- | Instantiate 'GenericPC' operations for 'ProgramCounter'
 instance GenericPC (ProgramCounter addrType) where
-  pcInc (PC pc)                        = PC (pc + 1)
-  pcDec (PC pc)                        = PC (pc - 1)
+  pcInc (PC pc)                        = PC $ pc + 1
+  pcDec (PC pc)                        = PC $ pc - 1
   pcDisplace (RelativePC disp) (PC pc) = PC (fromIntegral pc + fromIntegral disp)

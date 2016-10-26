@@ -7,6 +7,9 @@ module Z80.InsnDecode
     -- * Functions
   , z80insnDecode
   , z80getAddr
+
+  -- * Instances
+  , ProcessorOps(..)
   ) where
 
 import Control.Lens
@@ -20,6 +23,9 @@ import Z80.InstructionSet
 
 -- | 'DecodedInsn' shorthand for Z80 decoded instructions
 type Z80decodedInsn = DecodedInsn Z80instruction Z80addr
+
+instance ProcessorOps Z80instruction Z80addr Z80word where
+  idecode    = z80insnDecode
 
 -- | Decode one instruction, returning the new program counter and disassembly state.
 z80insnDecode :: Z80PC                  -- ^ Current program counter

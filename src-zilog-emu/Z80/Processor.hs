@@ -44,8 +44,8 @@ type Z80PC            = ProgramCounter Z80addr          -- ^ Z80 program counter
 type Z80memory        = MemorySystem Z80addr Z80word    -- ^ Z80 memory system type
 
 instance GenericPC Z80addr where
-  pcInc pc = 1+ pc
-  pcDec pc = 1- pc
+  pcInc pc = pc + 1
+  pcDec pc = pc - 1
   pcDisplace (RelativePC disp) pc = fromIntegral (fromIntegral pc + disp)
  
 -- | The basic Z80 register file. The actual register file has two sides, the regular and prime. The prime

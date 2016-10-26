@@ -41,7 +41,6 @@ z80generic :: EmulatedSystem Z80state Word16 Word8 Z80instruction
 z80generic = EmulatedSystem
              { _processor = z80processor
              , _memory    = MemorySystem (Z80genericMem { _ram = DVU.replicate (fromIntegral (maxBound :: Z80addr)) 0 })
-             , _idecode    = z80insnDecode
              , _sysName    = "Generic Z80 system"
              , _sysAliases = ["z80generic", "Z80-generic"]
              }
