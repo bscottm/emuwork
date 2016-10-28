@@ -44,7 +44,6 @@ library
   other-modules:
                 TRS80.System
                 TRS80.Disasm
-                TRS80.CmdDriver
                 TRS80.CommonOptions
                 TRS80.Disasm.Guidance
                 TRS80.Disasm.KnownSymbols

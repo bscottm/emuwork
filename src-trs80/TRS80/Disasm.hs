@@ -1,3 +1,7 @@
+{- |
+TRS-80 Model I disassembler.
+-}
+
 module TRS80.Disasm
   ( disasmCmd
   ) where
@@ -35,20 +39,14 @@ disasmCmd :: ModelISystem
           -> [String]
           -> IO ()
 disasmCmd sys opts =
-  pure opts
-  >>= return . getOpt RequireOrder commonOptions
-  >>= (\(optsActions, rest, errs) ->
-          (unless (null errs) $ do
-             mapM_ (hPutStrLn stderr) errs
-             >> commonOptionUsage
-             >> exitFailure)
-          >> Foldable.foldl' (>>=) (return mkCommonOptions) optsActions
-          >>= (\options ->
-                if length rest == 0 then
-                  trs80Rom sys (imageReader options) (romPath options) (memSize options)
-                else
-                  hPutStrLn stderr ("Extra remaining arguments: " ++ (show rest))
-                  >> showUsage))
+    getCommonOptions opts
+    >>= (\options -> case options of
+            (CommonOptions imgRdr image msize, []) -> trs80Rom sys imgRdr image msize
+            (InvalidOptions, _)                    -> hPutStrLn stderr "Invalid options. Exiting."
+                                                      >> exitFailure
+            (_, rest)                              -> hPutStrLn stderr ("Extra remaining arguments: " ++ (show rest))
+                                                      >> showUsage
+        )
 
 showUsage :: IO ()
 showUsage =
@@ -63,10 +61,13 @@ trs80Rom :: ModelISystem
          -> Int
          -> IO ()
 trs80Rom sys imgReader imgName msize =
-  trs80System imgName imgReader (fromIntegral msize) sys
+  hPutStrLn stderr "TRS-80 Model I configuration:"
+  >> hPutStrLn stderr ("Memory size: " ++ (show msize))
+  >> hPutStrLn stderr ("ROM image:   " ++ imgName)
+  >> trs80System imgName imgReader (fromIntegral msize) sys
   >>= (\trs80 -> case trs80 ^. memory of
                    MemorySystem memSys -> let img = mFetchN memSys (0 :: Z80addr) (12 * 1024)
-                                              dis = collectRom trs80 (initialDisassembly img) actions
+                                              dis = collectRom trs80 (initialDisassembly img) [] -- actions
                                           in  if (not . DVU.null) img
                                               then
                                                 checkAddrContinuity dis
@@ -120,7 +121,7 @@ collectRom :: ModelISystem
            -> Z80disassembly
               -- ^ Initial disassembler state. This is pre-populated with known
               -- symbols in the symbol table.
-           -> [Guidance]
+           -> [Directive]
               -- ^ Disassembler guidance
            -> Z80disassembly
               -- ^ Resulting disassembler state, symbol table and disassembly
@@ -131,12 +132,12 @@ collectRom sys = Foldable.foldl' (doAction sys)
 
 doAction :: ModelISystem
          -> Z80disassembly
-         -> Guidance
+         -> Directive
          -> Z80disassembly
 
 doAction sys dstate guide
-  {- | trace ("disasm: guide = " ++ (show guide)) False = undefined -}
-  | (SetOrigin origin)         <- guide = disasmSeq %~ (|> (mkDisOrigin origin)) $ dstate
+  {-  | trace ("disasm: guide = " ++ (show guide)) False = undefined -}
+  --  | (SetOrigin origin)         <- guide = disasmSeq %~ (|> (mkDisOrigin origin)) $ dstate
   | (SymEquate label addr)     <- guide = 
     (symbolTab %~ (Map.insert addr label)) . (disasmSeq %~ (|> (mkEquate label addr))) $ dstate
   | (Comment comment)          <- guide = disasmSeq %~ (|> (mkLineComment comment)) $ dstate

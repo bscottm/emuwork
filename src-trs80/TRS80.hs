@@ -1,9 +1,32 @@
-{-- | Re-export the TRS80 system --}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# OPTIONS_HADDOCK ignore-exports #-}
+
+{- |
+The TRS-80 Model I system (and maybe, someday, a Model III and Model 4P as well.)
+-}
 
 module TRS80
   ( module TRS80.System
-  , module TRS80.CmdDriver
   ) where
 
+import System.IO
+import Control.Lens ((^.))
+
+import Machine
+
 import TRS80.System
-import TRS80.CmdDriver()
+import TRS80.Disasm
+
+-- | 'EmulatorDriver' type family instance for the TRS-80 Model I base system
+instance EmulatorDriver ModelISystem where
+  formalName sys            = sys ^. sysName
+  identityNames sys         = sys ^. sysAliases
+  cmdDispatch sys options
+    | cmd == "disasm"
+    = disasmCmd sys (tail options)
+    | otherwise
+    = do
+        hPutStrLn stderr $ "TRS-80 Model I: unrecognized command: '" ++ cmd ++ "'"
+    where
+      cmd = head options
