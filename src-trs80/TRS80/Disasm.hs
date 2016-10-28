@@ -4,6 +4,7 @@ TRS-80 Model I disassembler.
 
 module TRS80.Disasm
   ( disasmCmd
+  , disasmUsage
   ) where
 
 import           Control.Lens ((^.), (%~), (.~), (&))
@@ -35,24 +36,65 @@ import           Z80
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
+-- | Disassembler command main logic.
 disasmCmd :: ModelISystem
           -> [String]
           -> IO ()
 disasmCmd sys opts =
-    getCommonOptions opts
-    >>= (\options -> case options of
-            (CommonOptions imgRdr image msize, []) -> trs80Rom sys imgRdr image msize
-            (InvalidOptions, _)                    -> hPutStrLn stderr "Invalid options. Exiting."
-                                                      >> exitFailure
-            (_, rest)                              -> hPutStrLn stderr ("Extra remaining arguments: " ++ (show rest))
-                                                      >> showUsage
-        )
-
-showUsage :: IO ()
-showUsage =
   do
-    commonOptionUsage
-    return ()
+    options <- getCommonOptions opts
+    case options of
+      (CommonOptions imgRdr image msize, rest) ->
+        do
+          disopts <- getDisasmOptions rest
+          case disopts of
+            (DisasmOptions gFile, []) -> trs80Rom sys imgRdr image msize
+            (_, _)                    -> hPutStrLn stderr "Invalid disassembler options. Exiting."
+                                         >> showUsage
+      (InvalidOptions, _) ->
+          disasmUsage
+          >> exitFailure
+
+      (_, rest) ->
+        hPutStrLn stderr ("Extra arguments: " ++ (show rest))
+        >> showUsage
+  where
+    showUsage = commonOptionUsage
+                >> disasmUsage
+                >> exitFailure
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+data DisasmOptions where
+  -- | Disassembler-specific options
+  DisasmOptions ::
+    { guidanceFile :: FilePath
+    } -> DisasmOptions
+  InvalidDisasm :: DisasmOptions
+
+getDisasmOptions :: [String]
+                 -> IO (DisasmOptions, [String])
+getDisasmOptions opts =
+  case getOpt RequireOrder disasmOptions opts of
+    (optsActions, rest, []) -> return (Foldable.foldl' (flip id) mkDisasmOptions optsActions, rest)
+    (_,           _,    errs) -> mapM_ (hPutStrLn stderr) errs
+                                 >> return (InvalidDisasm, [])
+
+mkDisasmOptions :: DisasmOptions
+mkDisasmOptions = DisasmOptions { guidanceFile = "" }
+
+disasmOptions :: [OptDescr (DisasmOptions -> DisasmOptions)]
+disasmOptions =
+  [ Option [] ["guidance"] (ReqArg (\arg flags -> flags { guidanceFile = arg }) "FILE")
+                           "Disassembler guidance file"
+  ]
+
+disasmUsage :: IO ()
+disasmUsage =
+  do
+    hPutStrLn stderr (usageInfo "Disassembler options" disasmOptions)
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Disassemble the TRS-80 ROM (with annotations, known symbols, ...)
 trs80Rom :: ModelISystem

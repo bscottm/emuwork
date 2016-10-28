@@ -1,9 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module TRS80.Disasm.Guidance
-  ( Guidance(..)
+  ( GuidanceContainer
+  , Guidance(..)
   , Directive(..)
   , ToJSON(..)
   -- , FromJSON(..)
@@ -15,18 +17,19 @@ import           Data.Bits
 import qualified Data.ByteString.Lazy as BCL
 import qualified Data.Char as C
 import           Data.Digest.Pure.MD5
+import qualified Data.Foldable as Foldable
 import qualified Data.HashMap.Strict as H
+import qualified Data.HashSet as HS
+import           Data.Hashable
 import           Data.Maybe
 import qualified Data.Scientific as S
 import qualified Data.Text as T
 import           Data.Yaml (FromJSON(..), ToJSON(..), (.=))
 import qualified Data.Yaml as Y
-import Debug.Trace
+import           Debug.Trace
 
 import           Machine.Utils (as0xHex)
 import           Z80 (Z80addr, Z80disp)
-
--- import Debug.Trace
 
 -- | Disassembler "guidance": When to disassemble, when to dump bytes, ... basically guidance to the drive
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
@@ -42,7 +45,16 @@ data Guidance where
                  -> [Directive]
                  -- List of directives to apply
                  -> Guidance
+  deriving (Eq, Show)
 
+type GuidanceContainer = HS.HashSet Guidance 
+
+instance Hashable Guidance where
+  hashWithSalt s (SetOrigin o) = s `hashWithSalt` (0 :: Int) `hashWithSalt` o
+  hashWithSalt s (EndAddr ea)  = s `hashWithSalt` (1 :: Int) `hashWithSalt` ea
+  hashWithSalt s (Section sect dirs) = let seed = s `hashWithSalt` (2 :: Int) `hashWithSalt` sect
+                                       in  Foldable.foldl' hashWithSalt seed dirs
+  
 data Directive where
   MD5Sum         :: BCL.ByteString
                  -- MD5 signature: Conditionally apply the directives iff the section's signature matches
@@ -83,7 +95,32 @@ data Directive where
                  -> Z80disp
                  -- Jump table length
                  -> Directive
-  deriving (Show)
+  deriving (Eq, Show)
+
+instance Hashable Directive where
+  hashWithSalt s (MD5Sum md5str)     = s `hashWithSalt` (0 :: Int) `hashWithSalt` md5str
+  hashWithSalt s (SymEquate sym val) = s `hashWithSalt`
+                                         (1 :: Int) `hashWithSalt`
+                                         sym `hashWithSalt`
+                                         val
+  hashWithSalt s (Comment cmnt)      = s `hashWithSalt` (2 :: Int) `hashWithSalt` cmnt
+  hashWithSalt s (DoDisasm sa nb)    = s `hashWithSalt`
+                                         (3 :: Int) `hashWithSalt`
+                                         sa `hashWithSalt` nb
+  hashWithSalt s (GrabBytes sa nb)   = s `hashWithSalt`
+                                         (4 :: Int) `hashWithSalt`
+                                         sa `hashWithSalt` nb
+  hashWithSalt s (GrabAsciiZ sa)     = s `hashWithSalt`
+                                         (5 :: Int) `hashWithSalt` sa
+  hashWithSalt s (GrabAscii sa nb)   = s `hashWithSalt`
+                                         (6 :: Int) `hashWithSalt`
+                                         sa `hashWithSalt` nb
+  hashWithSalt s (HighBitTable sa nb) = s `hashWithSalt`
+                                         (7 :: Int) `hashWithSalt`
+                                         sa `hashWithSalt` nb
+  hashWithSalt s (JumpTable sa nb)   = s `hashWithSalt`
+                                         (8 :: Int) `hashWithSalt`
+                                         sa `hashWithSalt` nb
 
 instance ToJSON Guidance where
   toJSON (SetOrigin addr)          = Y.object ["origin" .= as0xHex addr]
@@ -91,6 +128,7 @@ instance ToJSON Guidance where
   toJSON (Section name directives) = Y.object [ name .= directives]
 
 instance ToJSON Directive where
+  toJSON (MD5Sum _sum)            = Y.object [("md5" :: T.Text) .= ("0x00--" :: T.Text)]
   toJSON (SymEquate sym addr)     = Y.object ["equate" .= Y.object [ "name" .= sym
                                                                    , "value" .= as0xHex addr]
                                              ]
@@ -130,12 +168,15 @@ instance ToJSON Directive where
 
 instance FromJSON Guidance where
   parseJSON (Y.Object o)
-    | trace ("FromJSON object: " ++ (show o)) False = undefined
-{-
+    {-  | trace ("FromJSON object: " ++ (show o)) False = undefined -}
     | (v, exists) <- probe "origin" o
     , exists
     -- , trace ("origin: v = " ++ (show v)) True
-    = repackage $ mkOrigin v
+    = repackage $ mkOrigin (fromJust v)
+    | (v, exists) <- probe "end" o
+    , exists
+    = repackage $ mkEndAddr (fromJust v)
+{-
     | (v, exists) <- probe "comment" o
     , exists
     -- , trace ("comment: v = " ++ (show v)) True
@@ -170,8 +211,7 @@ instance FromJSON Guidance where
     = repackage $ mkJumpTable v
 -}
     | otherwise
-    = fail ("Guidance expected, got: " ++ (show o))
-{-
+    = trace "Guidance failure case" $ fail ("Guidance expected, got: " ++ (show o))
     where
       probe k h   = let v = H.lookup k h
                     in  (v, isJust v)
@@ -180,20 +220,27 @@ instance FromJSON Guidance where
   {- Catchall -}
   parseJSON invalid = AT.typeMismatch "Guidance" invalid
 
-mkOrigin :: Maybe AT.Value -> Either T.Text Guidance
-mkOrigin (Just (Y.String s))  = SetOrigin <$> convertWord16 s
-mkOrigin (Just (Y.Number n))  = maybe (outOfRange minZ80addr maxZ80addr ((T.pack . show) n))
-                                      (\n' -> Right $ SetOrigin n')
-                                      (S.toBoundedInteger n)
-mkOrigin (Just something)     = Left $ T.concat ["origin expected a numeric value, got '"
-                                                , T.pack (show something)
-                                                , singleQuote
-                                                ]
-mkOrigin something            = Left $ T.concat ["origin expected a value, got '"
-                                                , T.pack (show something)
-                                                , singleQuote
-                                                ]
+mkOrigin :: AT.Value -> Either T.Text Guidance
+mkOrigin (Y.String s)  = SetOrigin <$> convertWord16 s
+mkOrigin (Y.Number n)  = maybe (outOfRange minZ80addr maxZ80addr ((T.pack . show) n))
+                               (\n' -> Right $ SetOrigin n')
+                               (S.toBoundedInteger n)
+mkOrigin something     = Left $ T.concat ["origin expected a numeric value, got '"
+                                         , T.pack (show something)
+                                         , singleQuote
+                                         ]
 
+mkEndAddr :: AT.Value -> Either T.Text Guidance
+mkEndAddr (Y.String s) = EndAddr <$> convertWord16 s
+mkEndAddr (Y.Number n) = maybe (outOfRange minZ80addr maxZ80addr ((T.pack . show) n))
+                               (\n' -> Right $ SetOrigin n')
+                               (S.toBoundedInteger n)
+mkEndAddr something    = Left $ T.concat ["end expected a numeric value, got '"
+                                         , T.pack (show something)
+                                         , singleQuote
+                                         ]
+
+{-
 mkComment :: Maybe AT.Value -> Either T.Text Guidance
 mkComment (Just (Y.String s)) = Right $ Comment s
 mkComment _                   = Left "Comment guidance expects a string."
@@ -240,6 +287,7 @@ mkHighBitTable = rdStartAndLength (HighBitTable)
 
 mkJumpTable :: Maybe AT.Value -> Either T.Text Guidance
 mkJumpTable = rdStartAndLength (JumpTable)
+-}
 
 convertWord16 :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
 convertWord16 t
@@ -313,7 +361,7 @@ validSymName sym = let validChar x = (C.isLetter x || x == '$' || x == '_' || x 
                        && T.all (\x -> validChar x || C.isDigit x || x == '?') (T.tail sym)
 
 outOfRange :: forall b a. (Show a) => Int -> Int -> a -> Either T.Text b
-outOfRange minRange maxRange thing = Left $ T.concat ["16-bit range exceeded ("
+outOfRange minRange maxRange thing = Left $ T.concat ["Value range exceeded ("
                                                      , T.pack (show minRange)
                                                      , " <= x <= "
                                                      , T.pack (show maxRange)
@@ -324,6 +372,7 @@ outOfRange minRange maxRange thing = Left $ T.concat ["16-bit range exceeded ("
 singleQuote :: T.Text
 singleQuote = T.singleton '\''
 
+{-
 rdStartAndLength :: (Z80addr -> Z80disp -> Guidance) -> Maybe AT.Value -> Either T.Text Guidance
 rdStartAndLength tyCon (Just (Y.Object o)) =
   let endAddr = H.lookup "end" o

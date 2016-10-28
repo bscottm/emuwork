@@ -19,7 +19,6 @@ import qualified Data.Foldable as Foldable
 import           Data.Vector.Unboxed (Vector)
 import           Data.Word
 import           System.Console.GetOpt
-import           System.Environment
 import           System.IO
 
 import           Reader
@@ -50,13 +49,12 @@ data CommonOptions where
 
 getCommonOptions :: [String] -> IO (CommonOptions, [String])
 getCommonOptions opts =
-  do
-    case getOpt RequireOrder commonOptions opts of
-      (optsActions, rest, [])   -> validateOptions (Foldable.foldl' (flip id) mkCommonOptions optsActions)
-                                   >>= (\opts' -> return (opts', rest))
-      (_,           _,    errs) -> mapM_ (hPutStrLn stderr) errs
-                                   >> commonOptionUsage
-                                   >> return (InvalidOptions, [])
+  case getOpt RequireOrder commonOptions opts of
+    (optsActions, rest, [])   -> validateOptions (Foldable.foldl' (flip id) mkCommonOptions optsActions)
+                                 >>= (\opts' -> return (opts', rest))
+    (_,           _,    errs) -> mapM_ (hPutStrLn stderr) errs
+                                 >> commonOptionUsage
+                                 >> return (InvalidOptions, [])
                 
 mkCommonOptions :: CommonOptions
 mkCommonOptions = CommonOptions
@@ -88,20 +86,31 @@ commonOptions =
 validateOptions :: CommonOptions
                 -> IO CommonOptions
 validateOptions (InvalidReader rdr) =
-  hPutStrLn stderr ("Invalid ROM reader format: " ++ rdr)
-  >> hPutStrLn stderr "Valid formats are 'ihex', 'intelhex' or 'raw'"
+  (hPutStr stderr $ unlines [ ("Invalid ROM reader format: " ++ rdr)
+                            , "Valid formats are 'ihex', 'intelhex' or 'raw'"
+                            , ""
+                            ])
   >> commonOptionUsage
   >> return InvalidOptions
 validateOptions InvalidOptions =
   hPutStrLn stderr "InvalidOptions while validating options?"
   >> return InvalidOptions
 validateOptions (InvalidMemSize msize) =
-  hPutStrLn stderr ("Invalid memory size (" ++ msize ++ "), expected 16, 32 or 48")
+  (hPutStr stderr $ unlines [ "Invalid memory size (" ++ msize ++ "), expected 16, 32 or 48"
+                            , ""
+                            ])
   >> commonOptionUsage
   >> return InvalidOptions
-validateOptions opts = return opts
+validateOptions opts
+  | null (romPath opts)
+  = (hPutStr stderr $ unlines [ "TRS-80 ROM file name missing."
+                              , ""
+                              ])
+    >> commonOptionUsage
+    >> return InvalidOptions
+  | otherwise
+  = return opts
 
 commonOptionUsage :: IO ()
 commonOptionUsage = do
-  prog <- getProgName
-  hPutStrLn stderr ("Usage: " ++ prog ++ " <--format=(ihex|intelhex|raw)> image")
+  hPutStrLn stderr (usageInfo "Common options:" commonOptions)
