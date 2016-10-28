@@ -37,11 +37,16 @@ import Prelude hiding (replicate)
 
 import Machine
 
-type Z80word          = Word8                           -- ^ Basic word type on a Z80: byte
-type Z80addr          = Word16                          -- ^ Memory addresses are 16-bit quantities
-type Z80disp          = Int16                           -- ^ Program counter displacements are 16 bits
-type Z80PC            = ProgramCounter Z80addr          -- ^ Z80 program counter
-type Z80memory        = MemorySystem Z80addr Z80word    -- ^ Z80 memory system type
+-- | Basic word type on a Z80: byte
+type Z80word          = Word8
+-- | Memory addresses are 16-bit quantities
+type Z80addr          = Word16
+-- | Program counter displacements are 16 bits
+type Z80disp          = Int16
+-- | Z80 program counter
+type Z80PC            = ProgramCounter Z80addr
+-- | Z80 memory system type
+type Z80memory        = MemorySystem Z80addr Z80word
 
 instance GenericPC Z80addr where
   pcInc pc = pc + 1
