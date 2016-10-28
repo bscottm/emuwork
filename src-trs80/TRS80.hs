@@ -1,13 +1,13 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# OPTIONS_HADDOCK ignore-exports #-}
 
 {- |
 The TRS-80 Model I system (and maybe, someday, a Model III and Model 4P as well.)
 -}
 
 module TRS80
-  ( module TRS80.System
+  ( module TRS80.Types
+  , module TRS80.System
   ) where
 
 import System.IO
@@ -15,6 +15,7 @@ import Control.Lens ((^.))
 
 import Machine
 
+import TRS80.Types
 import TRS80.System
 import TRS80.Disasm
 

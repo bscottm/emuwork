@@ -7,7 +7,6 @@ module TRS80.Disasm
   ) where
 
 import           Control.Lens ((^.), (%~), (.~), (&))
-import           Control.Monad (unless)
 import           Data.Binary
 import           Data.Bits
 import qualified Data.ByteString.Lazy as BCL
@@ -31,6 +30,7 @@ import           TRS80.CommonOptions
 import           TRS80.Disasm.Guidance
 import           TRS80.Disasm.KnownSymbols
 import           TRS80.System
+import           TRS80.Types
 import           Z80
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=

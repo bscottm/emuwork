@@ -19,15 +19,7 @@ import qualified Data.Vector.Unboxed as DVU (replicate, generate)
 import           Machine
 import           Z80
 
--- | The TRS-80 Model I's memory system.
-data ModelIMemory where
-  ModelIMemory ::
-    { rom :: Vector Z80word
-    , ram :: Vector Z80word
-    } -> ModelIMemory
-
--- | Type synonym for the TRS-80 Model I emulator
-type ModelISystem = EmulatedSystem Z80state Z80addr Z80word Z80instruction
+import           TRS80.Types
 
 -- | A very basic (and completely unusable) TRS-80 Model I system
 trs80generic :: EmulatedSystem Z80state Z80addr Z80word Z80instruction

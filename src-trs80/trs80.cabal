@@ -42,6 +42,7 @@ library
         TRS80
 
   other-modules:
+                TRS80.Types
                 TRS80.System
                 TRS80.Disasm
                 TRS80.CommonOptions
