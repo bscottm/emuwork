@@ -5,7 +5,6 @@ module Z80.InsnDecode
     Z80decodedInsn
 
     -- * Functions
-  , z80insnDecode
   , z80getAddr
 
   -- * Instances

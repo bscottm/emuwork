@@ -117,7 +117,7 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
     addrInDisasmF = dstate    ^. addrInDisasmRange
 
     disasm' pc curDState
-      {- | trace ("disasm " ++ (show pc)) False = undefined -}
+      --   | trace ("disasm " ++ (show pc)) False = undefined
       | pc <= lastpc =
         let DecodedInsn newpc insn = idecode pc theMem
             -- Identify symbols where absolute addresses are found and build up a symbol table for a later

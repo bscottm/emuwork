@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 
-{-- |
+{- |
 The venerable TRS-80 (aka "the Trash 80") system.
 -}
 
@@ -10,8 +10,6 @@ module TRS80.System
   , ModelISystem
   , ModelIMemory
   , trs80System
-  , rom
-  , ram
   ) where
 
 import           Control.Lens
@@ -21,15 +19,7 @@ import qualified Data.Vector.Unboxed as DVU (replicate, generate)
 import           Machine
 import           Z80
 
--- | The TRS-80 Model I's memory system.
-data ModelIMemory where
-  ModelIMemory ::
-    { rom :: Vector Z80word
-    , ram :: Vector Z80word
-    } -> ModelIMemory
-
--- | Type synonym for the TRS-80 Model I emulator
-type ModelISystem = EmulatedSystem Z80state Z80addr Z80word Z80instruction
+import           TRS80.Types
 
 -- | A very basic (and completely unusable) TRS-80 Model I system
 trs80generic :: EmulatedSystem Z80state Z80addr Z80word Z80instruction
@@ -50,7 +40,7 @@ installMem sys memSize newROM =
                                             , ram = DVU.replicate (fromIntegral (memSize * 1024)) 0
                                             }
 
-{- ! Fetch a byte from memory. The TRS-80 has a very simple memory layout:
+{- | Fetch a byte from memory. The TRS-80 has a very simple memory layout:
 
 Address (hex) 	Description
 0000-2FFF 	Level II ROM
@@ -66,7 +56,7 @@ C000-FFFF 	Still more in a 48K machine
 -}
 modelIfetch :: ModelIMemory -> Z80addr -> Z80word
 modelIfetch msys addr
-  {- | trace ("modelIfetch " ++ (T.unpack $ as0xHex addr)) False = undefined -}
+  {-  | trace ("modelIfetch " ++ (T.unpack $ as0xHex addr)) False = undefined -}
   | addr < romSize
   = theROM ! fromIntegral addr
   | addr >= mmapIOStart && addr < mmapIOEnd
@@ -85,21 +75,33 @@ modelIfetchN msys start nbytes = let fetchByte idx = modelIfetch msys (start + f
                                  in  DVU.generate nbytes fetchByte
 
 instance MemoryOps ModelIMemory Z80addr Z80word where
+  -- |
   mFetch = modelIfetch
   mFetchN = modelIfetchN
   
 romSize, mmapIOStart, mmapIOEnd, ramStart, ramEnd :: Z80addr
+-- | ROM size (12K)
 romSize     = (12 * 1024)
+-- | Start of memory mapped I/O adress space.
 mmapIOStart = 0x3000
+-- | End of memory mapped I/O address space.
 mmapIOEnd   = mmapIOStart + 0x1000
+-- | Start of usable RAM
 ramStart    = (16 * 1024)
+-- | Top RAM address (64K) -> 48K system if maximally configured.
 ramEnd      = (64 * 1024) - 1
 
+-- | TRS-80 Model I constructor: install a ROM image and configure the system's RAM.
 trs80System :: FilePath
+            -- ^ File path to the ROM image
             -> (FilePath -> IO (Vector Z80word))
+            -- ^ ROM image reader (RAW vs. Intel Hex vs. Hex strings)
             -> Int
+            -- ^ Memory size: 16K, 32K or 48K
             -> ModelISystem
+            -- ^ Initial Model I system (should be 'trs80generic')
             -> IO ModelISystem
+            -- ^ Fully constructed TRS-80 Model I
 trs80System romPath reader memSize trs80 =
     reader romPath
     >>= (\romImage -> return $ installMem trs80 memSize romImage)
