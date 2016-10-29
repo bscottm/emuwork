@@ -25,28 +25,22 @@ import Z80.InstructionSet
 type Z80decodedInsn = DecodedInsn Z80instruction Z80addr
 
 instance ProcessorOps Z80instruction Z80addr Z80word where
-  idecode    = z80insnDecode
-
--- | Decode one instruction, returning the new program counter and disassembly state.
-z80insnDecode :: Z80PC                  -- ^ Current program counter
-              -> Z80memory              -- ^ The memory system from which bytes are fetched
-              -> Z80decodedInsn         -- ^ The decoded instruction
-z80insnDecode pc mem =
-  let opc = getOpcode pc mem
-      indexedPrefix xForms = let pc'    = pcInc pc
-                                 newOpc = getOpcode pc' mem
-                             in  case newOpc of
-                                   -- Deal with "weird" IX/IY bit operation layout
-                                   0xcb       -> error "Z80 IX/IY bit instructions not decoded yet."
-                                   _otherwise -> decodeF newOpc mem pc' xForms
-      -- N.B. The opcode 'x' is passed through to the decoding function
-      decodeF x = case (x `shiftR` 6) .&. 3 of
-                    0          -> group0decode x
-                    1          -> group1decode x
-                    2          -> group2decode x
-                    3          -> group3decode x
-                    _otherwise -> undefined
-  in  case opc of
+  idecode pc mem = 
+    let opc = getOpcode pc mem
+        indexedPrefix xForms = let pc'    = pcInc pc
+                                   newOpc = getOpcode pc' mem
+                               in  case newOpc of
+                                     -- Deal with "weird" IX/IY bit operation layout
+                                     0xcb       -> error "Z80 IX/IY bit instructions not decoded yet."
+                                     _otherwise -> decodeF newOpc mem pc' xForms
+        -- N.B. The opcode 'x' is passed through to the decoding function
+        decodeF x = case (x `shiftR` 6) .&. 3 of
+                      0          -> group0decode x
+                      1          -> group1decode x
+                      2          -> group2decode x
+                      3          -> group3decode x
+                      _otherwise -> undefined
+    in  case opc of
           0xdd       -> indexedPrefix z80ixTransform
           0xfd       -> indexedPrefix z80iyTransform
           _otherwise -> decodeF opc mem pc z80nullTransform
