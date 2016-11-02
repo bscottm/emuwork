@@ -8,6 +8,7 @@ The TRS-80 Model I system (and maybe, someday, a Model III and Model 4P as well.
 module TRS80
   ( module TRS80.Types
   , module TRS80.System
+  , EmulatorDriver(..)
   ) where
 
 import System.IO

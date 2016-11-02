@@ -117,11 +117,11 @@ mkYAMLTests :: TestArgs -> IO Test
 mkYAMLTests opts =
   let sc = showContent opts
       sr = showResult  opts
-  in return $ test [ "origin"   ~: test [ {- "bad origin (1)"    ~: (badOrigin00 opts)     @!? "bad origin (1) succeeded."
+  in return $ test [ "origin"   ~: test [ "bad origin (1)"    ~: (badOrigin00 opts)     @!? "bad origin (1) succeeded."
                                         , "bad origin (2)"    ~: (badOrigin01 opts)     @!? "bad origin (2) succeeded."
-                                        , -} "origin+end"        ~: (goodGuidance opts)    @?  "origin+end failed."
+                                        , "origin+end"        ~: (goodGuidance opts)    @?  "origin+end failed."
+                                        , "one section"       ~: (oneSection opts)      @?  "one section failed."
                                         ]
-{-
                    , "equates"  ~: test [ "valid equate"       ~: (validEquate opts)    @?  "valid equate failed."
                                         , "invalid equate"     ~: (invalidEquate opts)  @!? "invalid equate succeeded."
                                         , "invalid hex value"  ~: (invalidHex opts)     @!? "invalid hex succeeded."
@@ -136,7 +136,6 @@ mkYAMLTests opts =
                                         ]
                    , "highbits" ~: test [ "valid highbits"     ~: (validHighBits opts)  @? "highbits directive failed."
                                         ]
--}
                    ]
 
 doYAMLTest :: TestArgs -> ByteString -> IO Bool
@@ -147,10 +146,12 @@ doYAMLTest opts testString =
      putStrLn "~~~~"
      putStrLn $ (T.unpack . decodeUtf8) testString
      putStrLn "~~~~")
-  >> (case Y.decodeEither' testString :: Either Y.ParseException GuidanceContainer of
+  >> (case Y.decodeEither' testString :: Either Y.ParseException Guidance of
         Left  err ->
           do
-            when (showFail opts) $ putStrLn (Y.prettyPrintParseException err)
+            when (showFail opts) $
+              do
+                putStrLn (Y.prettyPrintParseException err)
             return False
         Right res ->
           do
@@ -164,7 +165,7 @@ badOrigin01 :: TestArgs -> IO Bool
 badOrigin01 opts = doYAMLTest opts [r|---
 origin:
     key1: val1
----
+...
 |]
 
 goodGuidance :: TestArgs -> IO Bool
@@ -173,55 +174,84 @@ origin: 0x2e00
 end: 0x2fff
 |]
 
+oneSection :: TestArgs -> IO Bool
+oneSection opts = doYAMLTest opts [r|
+origin: 0x2e00
+end: 0x2fff
+secton 1:
+  - comment: |
+      This is a multiline comment.
+      Fun should ensue!
+|]
+
 validEquate :: TestArgs -> IO Bool
-validEquate opts = doYAMLTest opts [r|- origin: 0x0
-- comment: |
-    multiline comment
-    comment line 2
-- equate:
-    name: RST08VEC
-    value: 0x4000
-- comment: RST10 vector - this is a JP instruction
-- equate:
-    name: RST10VEC
-    value: 0x4003
+validEquate opts = doYAMLTest opts [r|---
+origin: 0x0000
+end:    0x0001
+section 1:
+    - comment: |
+        multiline comment
+        comment line 2
+    - equate:
+        name: RST08VEC
+        value: 0x4000
+    - comment: RST10 vector - this is a JP instruction
+    - equate:
+        name: RST10VEC
+        value: 0x4003
+...
 |]
 
 -- | Invalid equate name
 invalidEquate :: TestArgs -> IO Bool
 invalidEquate opts = doYAMLTest opts [r|
-- equate:
-    name: 0RST10VEC
-    value: 0x4003
+origin: 0x0000
+end:    0x0001
+section:
+    - equate:
+        name: 0RST10VEC
+        value: 0x4003
 |]
 
 
 -- | Invalid equate name
 invalidHex :: TestArgs -> IO Bool
 invalidHex opts = doYAMLTest opts [r|
-- equate:
-    name:  RST10VEC
-    value: 0xg
+origin: 0x0000
+end:    0x0001
+section:
+    - equate:
+        name:  RST10VEC
+        value: 0xg
 |]
 
 -- | Invalid value
 invalidValue :: TestArgs -> IO Bool
 invalidValue opts = doYAMLTest opts [r|
-- equate:
-    name:  RST10VEC
-    value: 65536
+origin: 0x0000
+end:    0x0001
+section:
+    - equate:
+        name:  RST10VEC
+        value: 65536
 |]
 
 -- | Missing equate name
 missingEquName :: TestArgs -> IO Bool
 missingEquName opts = doYAMLTest opts [r|
-- equate:
-    value: 65536
+origin: 0x0000
+end:    0x0001
+section:
+    - equate:
+        value: 65536
 |]
 
 -- | Valid disasm directive
 validDisasm :: TestArgs -> IO Bool
 validDisasm opts = doYAMLTest opts [r|
+origin: 0x0000
+end:    0x0001
+section:
 - disasm:
     nbytes: 0x0a26
     addr: 0x25d9
@@ -230,6 +260,9 @@ validDisasm opts = doYAMLTest opts [r|
 -- | Valid bytes directive
 validBytes :: TestArgs -> IO Bool
 validBytes opts = doYAMLTest opts [r|
+origin: 0x0000
+end:    0x0001
+section:
 - bytes:
     nbytes: 0x0010
     addr: 0x0050
@@ -238,6 +271,9 @@ validBytes opts = doYAMLTest opts [r|
 -- | Valid ASCII directive
 validAscii :: TestArgs -> IO Bool
 validAscii opts = doYAMLTest opts [r|
+origin: 0x0000
+end:    0x0001
+section:
 - ascii:
     addr: 0x0105
     nBytes: 0x000b
@@ -246,6 +282,9 @@ validAscii opts = doYAMLTest opts [r|
 -- | Valid highbits directive
 validHighBits :: TestArgs -> IO Bool
 validHighBits opts = doYAMLTest opts [r|
+origin: 0x0000
+end:    0x0001
+section:
 - highbits:
     addr: 0x1650
     nbytes: 0x01d0

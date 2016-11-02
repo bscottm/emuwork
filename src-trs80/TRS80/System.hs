@@ -10,6 +10,7 @@ module TRS80.System
   , ModelISystem
   , ModelIMemory
   , trs80System
+  , MemoryOps(..)
   ) where
 
 import           Control.Lens

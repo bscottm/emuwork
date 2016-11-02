@@ -2,14 +2,13 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module TRS80.Disasm.Guidance
-  ( GuidanceContainer
-  , Guidance(..)
+  ( Guidance(..)
   , Directive(..)
   , ToJSON(..)
-  -- , FromJSON(..)
-  -- , actions
+  , FromJSON(..)
   ) where
 
 import qualified Data.Aeson.Types as AT
@@ -17,13 +16,13 @@ import           Data.Bits
 import qualified Data.ByteString.Lazy as BCL
 import qualified Data.Char as C
 import           Data.Digest.Pure.MD5
+import           Data.Either
 import qualified Data.Foldable as Foldable
 import qualified Data.HashMap.Strict as H
-import qualified Data.HashSet as HS
-import           Data.Hashable
 import           Data.Maybe
 import qualified Data.Scientific as S
 import qualified Data.Text as T
+import qualified Data.Vector as V
 import           Data.Yaml (FromJSON(..), ToJSON(..), (.=))
 import qualified Data.Yaml as Y
 import           Debug.Trace
@@ -34,27 +33,19 @@ import           Z80 (Z80addr, Z80disp)
 -- | Disassembler "guidance": When to disassemble, when to dump bytes, ... basically guidance to the drive
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
 data Guidance where
-  SetOrigin      :: Z80addr
-                 -- Disassembly origin address
-                 -> Guidance
-  EndAddr        :: Z80addr
-                 -- End disassembly address
-                 -> Guidance
-  Section        :: T.Text
-                 -- Disassembly section name
-                 -> [Directive]
-                 -- List of directives to apply
-                 -> Guidance
+  Guidance ::
+    { origin      :: Z80addr
+                  -- Disassembly origin address (where to start disassembling)
+    , haveOrigin  :: Bool
+                  -- Avoids using Maybe to test if the origin was specified
+    , endAddr     :: Z80addr
+                  -- End disassembly address
+    , haveEndAddr :: Bool
+    , sections    :: H.HashMap T.Text (V.Vector Directive)
+                  -- Map of section names to a list of directives to apply
+    } -> Guidance
   deriving (Eq, Show)
 
-type GuidanceContainer = HS.HashSet Guidance 
-
-instance Hashable Guidance where
-  hashWithSalt s (SetOrigin o) = s `hashWithSalt` (0 :: Int) `hashWithSalt` o
-  hashWithSalt s (EndAddr ea)  = s `hashWithSalt` (1 :: Int) `hashWithSalt` ea
-  hashWithSalt s (Section sect dirs) = let seed = s `hashWithSalt` (2 :: Int) `hashWithSalt` sect
-                                       in  Foldable.foldl' hashWithSalt seed dirs
-  
 data Directive where
   MD5Sum         :: BCL.ByteString
                  -- MD5 signature: Conditionally apply the directives iff the section's signature matches
@@ -97,35 +88,78 @@ data Directive where
                  -> Directive
   deriving (Eq, Show)
 
-instance Hashable Directive where
-  hashWithSalt s (MD5Sum md5str)     = s `hashWithSalt` (0 :: Int) `hashWithSalt` md5str
-  hashWithSalt s (SymEquate sym val) = s `hashWithSalt`
-                                         (1 :: Int) `hashWithSalt`
-                                         sym `hashWithSalt`
-                                         val
-  hashWithSalt s (Comment cmnt)      = s `hashWithSalt` (2 :: Int) `hashWithSalt` cmnt
-  hashWithSalt s (DoDisasm sa nb)    = s `hashWithSalt`
-                                         (3 :: Int) `hashWithSalt`
-                                         sa `hashWithSalt` nb
-  hashWithSalt s (GrabBytes sa nb)   = s `hashWithSalt`
-                                         (4 :: Int) `hashWithSalt`
-                                         sa `hashWithSalt` nb
-  hashWithSalt s (GrabAsciiZ sa)     = s `hashWithSalt`
-                                         (5 :: Int) `hashWithSalt` sa
-  hashWithSalt s (GrabAscii sa nb)   = s `hashWithSalt`
-                                         (6 :: Int) `hashWithSalt`
-                                         sa `hashWithSalt` nb
-  hashWithSalt s (HighBitTable sa nb) = s `hashWithSalt`
-                                         (7 :: Int) `hashWithSalt`
-                                         sa `hashWithSalt` nb
-  hashWithSalt s (JumpTable sa nb)   = s `hashWithSalt`
-                                         (8 :: Int) `hashWithSalt`
-                                         sa `hashWithSalt` nb
-
 instance ToJSON Guidance where
-  toJSON (SetOrigin addr)          = Y.object ["origin" .= as0xHex addr]
-  toJSON (EndAddr addr)            = Y.object ["end" .= as0xHex addr]
-  toJSON (Section name directives) = Y.object [ name .= directives]
+  toJSON (Guidance org _haveOrg ea _haveEA sects)  =
+    let theSections = H.map (\dirs -> Y.Array $ V.map toJSON dirs) sects
+    in  Y.Object $ H.insert "end" (Y.String $ as0xHex ea) $
+                   H.insert "origin" (Y.String $ as0xHex org) theSections
+
+instance FromJSON Guidance where
+  parseJSON (Y.Object o) =
+    {- trace ("FromJSON object: " ++ (show o)) -}
+    repackage $ Foldable.foldl' collectGuidance
+                                (return $ Guidance { origin      = 0x0
+                                                   , haveOrigin  = False
+                                                   , endAddr     = 0x0
+                                                   , haveEndAddr = False
+                                                   , sections    = H.empty
+                                                   })
+                                (H.toList o)
+    where
+      collectGuidance :: Either T.Text Guidance
+                      -> (T.Text, Y.Value)
+                      -> Either T.Text Guidance
+      collectGuidance guidance ("origin", orgAddr)   = either (fail . T.unpack) (mkOrigin orgAddr) guidance
+      collectGuidance guidance ("end", ea)           = either (fail . T.unpack) (mkEndAddr ea) guidance
+      collectGuidance guidance (section, directives) = either (fail . T.unpack) (mkSection section directives) guidance
+
+      repackage x = either (fail . T.unpack) (return) x
+
+  {- Catchall -}
+  parseJSON invalid = AT.typeMismatch "Guidance" invalid
+
+mkOrigin :: AT.Value
+         -> Guidance
+         -> Either T.Text Guidance
+mkOrigin (Y.String s) g = (\org -> g { origin = org, haveOrigin = True }) <$> convertWord16 s
+mkOrigin (Y.Number n) g = maybe (outOfRange minZ80addr maxZ80addr ((T.pack . show) n))
+                               (\n' -> return $ g { origin = n', haveOrigin = True })
+                               (S.toBoundedInteger n)
+mkOrigin something _g   = Left $ T.concat ["origin expected a numeric value, got '"
+                                          , T.pack (show something)
+                                          , singleQuote
+                                          ]
+
+mkEndAddr :: AT.Value
+          -> Guidance
+          -> Either T.Text Guidance
+mkEndAddr (Y.String s) g = (\ea -> g { endAddr = ea, haveEndAddr = True }) <$> convertWord16 s
+mkEndAddr (Y.Number n) g = maybe (outOfRange minZ80addr maxZ80addr ((T.pack . show) n))
+                                 (\n' -> Right $ g { endAddr =  n', haveEndAddr = True})
+                                 (S.toBoundedInteger n)
+mkEndAddr something _g   = Left $ T.concat ["end expected a numeric value, got '"
+                                           , T.pack (show something)
+                                           , singleQuote
+                                           ]
+
+mkSection :: T.Text
+          -> Y.Value
+          -> Guidance
+          -> Either T.Text Guidance
+mkSection sectName (Y.Array directives) g
+  {- | trace ("directives = " ++ (show directives)) False = undefined -}
+  | otherwise
+  = let dirs   = V.toList $ V.map parseDirective directives
+        errs   = lefts dirs
+        result = (V.fromList . rights) dirs
+    in  if null errs
+        then Right $ g { sections = H.insert sectName result (sections g) }
+        else Left (T.unlines errs)
+mkSection sectName _directives _ = fail (T.unpack $ T.concat [ "Section '"
+                                                             , sectName
+                                                             , singleQuote
+                                                             , " expects a directive list."
+                                                             ])
 
 instance ToJSON Directive where
   toJSON (MD5Sum _sum)            = Y.object [("md5" :: T.Text) .= ("0x00--" :: T.Text)]
@@ -166,33 +200,29 @@ instance ToJSON Directive where
   toEncoding (JumpTable addr disp) = pairs ("jumptable" .= object ["addr" .= addr, "nbytes" .= disp])
 -}
 
-instance FromJSON Guidance where
-  parseJSON (Y.Object o)
-    {-  | trace ("FromJSON object: " ++ (show o)) False = undefined -}
-    | (v, exists) <- probe "origin" o
-    , exists
-    -- , trace ("origin: v = " ++ (show v)) True
-    = repackage $ mkOrigin (fromJust v)
-    | (v, exists) <- probe "end" o
-    , exists
-    = repackage $ mkEndAddr (fromJust v)
-{-
+instance FromJSON Directive where
+  parseJSON val@(Y.Object _) = either (fail . T.unpack) (return) (parseDirective val)
+  parseJSON invalid          = AT.typeMismatch "Directive" invalid
+
+parseDirective :: Y.Value
+                -> Either T.Text Directive
+parseDirective (Y.Object o)
     | (v, exists) <- probe "comment" o
     , exists
     -- , trace ("comment: v = " ++ (show v)) True
-    = repackage $ mkComment v
+    = mkComment v
     | (v, exists) <- probe "equate" o
     -- , trace ("comment: v = " ++ (show v)) True
     , exists
-    = repackage $ mkEquate v
+    = mkEquate v
     | (v, exists) <- probe "disasm" o
     -- , trace ("disasm: v = " ++ (show v)) True
     , exists
-    = repackage $ mkDisasm v
+    = mkDisasm v
     | (v, exists) <- probe "bytes" o
     -- , trace ("bytes: v = " ++ (show v)) True
     , exists
-    = repackage $ mkGrabBytes v
+    = mkGrabBytes v
     | (v, exists) <- probe "asciiz" o
     -- , trace ("asciiz: v = " ++ (show v)) True
     , exists
@@ -200,52 +230,28 @@ instance FromJSON Guidance where
     | (v, exists) <- probe "ascii" o
     -- , trace ("ascii: v = " ++ (show v)) True
     , exists
-    = repackage $ mkGrabAscii v
+    = mkGrabAscii v
     | (v, exists) <- probe "highbits" o
     -- , trace ("highbits: v = " ++ (show v)) True
     , exists
-    = repackage $ mkHighBitTable v
+    = mkHighBitTable v
     | (v, exists) <- probe "jumptable" o
     -- , trace ("jumptable: v = " ++ (show v)) True
     , exists
-    = repackage $ mkJumpTable v
--}
+    = mkJumpTable v
     | otherwise
-    = trace "Guidance failure case" $ fail ("Guidance expected, got: " ++ (show o))
+    = fail ("Valid directive expected, got: " ++ (show o))
     where
       probe k h   = let v = H.lookup k h
                     in  (v, isJust v)
-      repackage x = either (fail . T.unpack) (return) x
 
-  {- Catchall -}
-  parseJSON invalid = AT.typeMismatch "Guidance" invalid
+parseDirective _invalid = Left "Expected a directive (key: value) pair."
 
-mkOrigin :: AT.Value -> Either T.Text Guidance
-mkOrigin (Y.String s)  = SetOrigin <$> convertWord16 s
-mkOrigin (Y.Number n)  = maybe (outOfRange minZ80addr maxZ80addr ((T.pack . show) n))
-                               (\n' -> Right $ SetOrigin n')
-                               (S.toBoundedInteger n)
-mkOrigin something     = Left $ T.concat ["origin expected a numeric value, got '"
-                                         , T.pack (show something)
-                                         , singleQuote
-                                         ]
-
-mkEndAddr :: AT.Value -> Either T.Text Guidance
-mkEndAddr (Y.String s) = EndAddr <$> convertWord16 s
-mkEndAddr (Y.Number n) = maybe (outOfRange minZ80addr maxZ80addr ((T.pack . show) n))
-                               (\n' -> Right $ SetOrigin n')
-                               (S.toBoundedInteger n)
-mkEndAddr something    = Left $ T.concat ["end expected a numeric value, got '"
-                                         , T.pack (show something)
-                                         , singleQuote
-                                         ]
-
-{-
-mkComment :: Maybe AT.Value -> Either T.Text Guidance
+mkComment :: Maybe AT.Value -> Either T.Text Directive
 mkComment (Just (Y.String s)) = Right $ Comment s
 mkComment _                   = Left "Comment guidance expects a string."
 
-mkEquate :: Maybe AT.Value -> Either T.Text Guidance
+mkEquate :: Maybe AT.Value -> Either T.Text Directive
 mkEquate (Just (Y.Object o'))  =
   let symname = H.lookup "name" o'
       symval  = H.lookup "value" o'
@@ -261,7 +267,7 @@ mkEquate (Just (Y.Object o'))  =
                                                                                        , T.pack (show something)
                                                                                        , singleQuote
                                                                                        ]
-                                           Nothing                    -> Left "Missing symbol value in equate"
+                                           Nothing                  -> Left "Missing symbol value in equate"
                                     else Left $ T.concat ["Invalid equate name (max 15 chars, '[A-Z]$_@' first char)': '"
                                                          , symname'
                                                          , singleQuote
@@ -271,23 +277,22 @@ mkEquate (Just (Y.Object o'))  =
                                                     , singleQuote
                                                     ]
        Nothing                   -> Left "Missing symbol name in equate"
-mkEquate _                    = fail "equate guidance expects a name and a value (name, value dict.)"
+mkEquate _                    = Left "equate directive expects a name and a value (name, value dict.)"
 
-mkDisasm :: Maybe AT.Value -> Either T.Text Guidance
+mkDisasm :: Maybe AT.Value -> Either T.Text Directive
 mkDisasm = rdStartAndLength (DoDisasm)
 
-mkGrabBytes :: Maybe AT.Value -> Either T.Text Guidance
+mkGrabBytes :: Maybe AT.Value -> Either T.Text Directive
 mkGrabBytes = rdStartAndLength (GrabBytes)
 
-mkGrabAscii :: Maybe AT.Value -> Either T.Text Guidance
+mkGrabAscii :: Maybe AT.Value -> Either T.Text Directive
 mkGrabAscii = rdStartAndLength (GrabAscii)
 
-mkHighBitTable :: Maybe AT.Value -> Either T.Text Guidance
+mkHighBitTable :: Maybe AT.Value -> Either T.Text Directive
 mkHighBitTable = rdStartAndLength (HighBitTable)
 
-mkJumpTable :: Maybe AT.Value -> Either T.Text Guidance
+mkJumpTable :: Maybe AT.Value -> Either T.Text Directive
 mkJumpTable = rdStartAndLength (JumpTable)
--}
 
 convertWord16 :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
 convertWord16 t
@@ -368,12 +373,11 @@ outOfRange minRange maxRange thing = Left $ T.concat ["Value range exceeded ("
                                                      , "): "
                                                      , T.pack (show thing)
                                                      ]
-               
+
 singleQuote :: T.Text
 singleQuote = T.singleton '\''
 
-{-
-rdStartAndLength :: (Z80addr -> Z80disp -> Guidance) -> Maybe AT.Value -> Either T.Text Guidance
+rdStartAndLength :: (Z80addr -> Z80disp -> Directive) -> Maybe AT.Value -> Either T.Text Directive
 rdStartAndLength tyCon (Just (Y.Object o)) =
   let endAddr = H.lookup "end" o
       nBytes  = let nb' = H.lookup "nBytes" o
@@ -381,7 +385,7 @@ rdStartAndLength tyCon (Just (Y.Object o)) =
                          (Just _) -> nb'
                          Nothing  -> H.lookup "nbytes" o
 
-      rdLength :: Maybe AT.Value -> Maybe AT.Value -> Either T.Text Z80addr -> Either T.Text Guidance
+      rdLength :: Maybe AT.Value -> Maybe AT.Value -> Either T.Text Z80addr -> Either T.Text Directive
       -- Pass errors through... quickly.
       rdLength _                    _                    (Left err)   = Left err
       rdLength (Just _)             (Just _)             _            = Left "Only one of 'end' or 'nBytes' can be specified."
@@ -416,4 +420,3 @@ rdStartAndLength tyCon (Just (Y.Object o)) =
         Nothing                   -> Left "start address ('addr') key required."
 
 rdStartAndLength _tyCon _anything = Left "Expected a dictionary with 'start' and 'end'/'nBytes'"
--}

@@ -65,6 +65,7 @@ test-suite yamltest
                         aeson,
                         scientific,
                         yaml,
+                        vector,
                         zilog-emu,
                         emubase
     Main-is:            TRS80/Disasm/YamlTest.hs

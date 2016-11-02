@@ -160,6 +160,8 @@ data EmulatedSystem procInternals addrType wordType instructionSet where
                   -- emulator.
     } -> EmulatedSystem procInternals addrType wordType instructionSet
 
+-- Need to manually generate the lenses due to the constraint on EmulatedSystem
+
 processor :: Lens' (EmulatedSystem procType addrType wordType insnSet) (EmulatedProcessor procType addrType insnSet)
 processor f sys = (\proc -> sys { _processor = proc }) <$> f (_processor sys)
 
