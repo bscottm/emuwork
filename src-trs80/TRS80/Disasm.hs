@@ -21,7 +21,8 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import           Data.Vector.Unboxed (Vector, (!))
 import qualified Data.Vector.Unboxed as DVU
--- import           Debug.Trace
+import           Debug.Trace
+import qualified Data.Yaml as Y
 import           System.Console.GetOpt
 import           System.Exit
 import           System.IO
@@ -44,19 +45,28 @@ disasmCmd sys opts =
   do
     options <- getCommonOptions opts
     case options of
-      (CommonOptions imgRdr image msize, rest) ->
+      (CommonOptions imgRdr image msize, rest, unOpts) ->
         do
-          disopts <- getDisasmOptions rest
+          disopts <- getDisasmOptions unOpts
           case disopts of
-            (DisasmOptions gFile, []) -> trs80Rom sys imgRdr image msize
-            (_, _)                    -> hPutStrLn stderr "Invalid disassembler options. Exiting."
-                                         >> showUsage
-      (InvalidOptions, _) ->
+            (DisasmOptions gFile, []) ->
+              do
+                geither <- Y.decodeFileEither gFile :: IO (Either Y.ParseException Guidance)
+                case geither of
+                  Right guidance -> trs80Rom sys imgRdr image msize
+                  Left  err      -> hPutStrLn stderr "Invalid guidance, error is:"
+                                    >> hPutStrLn stderr (Y.prettyPrintParseException err)
+
+            (_, _) -> hPutStrLn stderr "Invalid disassembler options. Exiting."
+                      >> showUsage
+      (InvalidOptions, _, _) ->
           disasmUsage
           >> exitFailure
 
-      (_, rest) ->
-        hPutStrLn stderr ("Extra arguments: " ++ (show rest))
+      (_, rest, unOpts) ->
+        hPutStrLn stderr ("Unrecognized options:")
+        >> mapM_ (\s -> hPutStrLn stderr ("  " ++ s)) unOpts
+        >> hPutStrLn stderr ("Extra arguments: " ++ (show rest))
         >> showUsage
   where
     showUsage = commonOptionUsage
@@ -75,8 +85,8 @@ data DisasmOptions where
 getDisasmOptions :: [String]
                  -> IO (DisasmOptions, [String])
 getDisasmOptions opts =
-  case getOpt RequireOrder disasmOptions opts of
-    (optsActions, rest, []) -> return (Foldable.foldl' (flip id) mkDisasmOptions optsActions, rest)
+  case getOpt Permute disasmOptions opts of
+    (optsActions, rest, [])   -> return (Foldable.foldl' (flip id) mkDisasmOptions optsActions, rest)
     (_,           _,    errs) -> mapM_ (hPutStrLn stderr) errs
                                  >> return (InvalidDisasm, [])
 

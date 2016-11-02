@@ -226,7 +226,7 @@ parseDirective (Y.Object o)
     | (v, exists) <- probe "asciiz" o
     -- , trace ("asciiz: v = " ++ (show v)) True
     , exists
-    = undefined
+    = mkAsciiZ v
     | (v, exists) <- probe "ascii" o
     -- , trace ("ascii: v = " ++ (show v)) True
     , exists
@@ -278,6 +278,14 @@ mkEquate (Just (Y.Object o'))  =
                                                     ]
        Nothing                   -> Left "Missing symbol name in equate"
 mkEquate _                    = Left "equate directive expects a name and a value (name, value dict.)"
+
+mkAsciiZ :: Maybe AT.Value -> Either T.Text Directive
+mkAsciiZ (Just (Y.String addr)) = either (\err   -> Left err)
+                                         (\addr' -> Right $ GrabAsciiZ addr')
+                                         (convertWord16 addr)
+mkAsciiZ (Just (Y.Number addr)) = case (S.toBoundedInteger addr) of
+                                    Just (addr' :: Z80addr) -> Right $ GrabAsciiZ addr'
+                                    Nothing -> outOfRange minZ80addr maxZ80addr addr
 
 mkDisasm :: Maybe AT.Value -> Either T.Text Directive
 mkDisasm = rdStartAndLength (DoDisasm)

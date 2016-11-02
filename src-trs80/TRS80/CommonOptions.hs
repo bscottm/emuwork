@@ -47,14 +47,15 @@ data CommonOptions where
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-getCommonOptions :: [String] -> IO (CommonOptions, [String])
+getCommonOptions :: [String] -> IO (CommonOptions, [String], [String])
 getCommonOptions opts =
-  case getOpt RequireOrder commonOptions opts of
-    (optsActions, rest, [])   -> validateOptions (Foldable.foldl' (flip id) mkCommonOptions optsActions)
-                                 >>= (\opts' -> return (opts', rest))
-    (_,           _,    errs) -> mapM_ (hPutStrLn stderr) errs
-                                 >> commonOptionUsage
-                                 >> return (InvalidOptions, [])
+  case getOpt' RequireOrder commonOptions opts of
+    (optsActions, rest, unOpts, [])   -> validateOptions (Foldable.foldl' (flip id) mkCommonOptions optsActions)
+                                         >>= (\opts' -> return (opts', rest, unOpts))
+    (_,           _,    _,      errs) -> hPutStrLn stderr "TRS-80 common options:"
+                                         >> mapM_ (hPutStrLn stderr) errs
+                                         >> commonOptionUsage
+                                         >> return (InvalidOptions, [], [])
                 
 mkCommonOptions :: CommonOptions
 mkCommonOptions = CommonOptions
