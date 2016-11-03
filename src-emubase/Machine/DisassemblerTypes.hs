@@ -86,7 +86,7 @@ mkDisasmInsn  :: addrType                       -- ^ Instruction address
               -> insnType                       -- ^ The instruction
               -> T.Text                         -- ^ Optional comment
               -> DisElement insnType addrType wordType extPseudoType
-mkDisasmInsn addr opBytes insn cmnt = DisasmInsn (mkPlainAddress addr) opBytes insn cmnt
+mkDisasmInsn addr = DisasmInsn (mkPlainAddress addr)
 
 mkDisOrigin   :: addrType
               -> DisElement insnType addrType wordType extPseudoType
@@ -96,26 +96,26 @@ mkDisOrigin = DisOrigin
 mkByteRange   :: addrType                       -- ^ Start address
               -> Vector Word8                   -- ^ Bytes
               -> DisElement insnType addrType wordType extPseudoType
-mkByteRange addr bytes = ByteRange (mkPlainAddress addr) bytes
+mkByteRange addr = ByteRange (mkPlainAddress addr)
 
 -- | Make a new 'Addr'. The optional address label is set to empty.
 mkAddr        :: addrType                       -- Adress of where this address is stored
               -> SymAbsAddr addrType            -- The address to be annotated
               -> Vector Word8                   -- The actual address bytes
               -> DisElement insnType addrType wordType extPseudoType
-mkAddr addr theAddr bytes = Addr (mkPlainAddress addr) theAddr bytes
+mkAddr addr     = Addr (mkPlainAddress addr)
 
 -- | Make a new 'AsciiZ'. The optional address label is set to empty.
 mkAsciiZ      :: addrType                       -- Start of string
               -> Vector Word8                   -- The string, not including the zero terminator
               -> DisElement insnType addrType wordType extPseudoType
-mkAsciiZ addr str = AsciiZ (mkPlainAddress addr) str
+mkAsciiZ addr   = AsciiZ (mkPlainAddress addr)
 
 -- | Make a new 'Ascii'. The optional address label is set to empty.
 mkAscii       :: addrType
               -> Vector Word8
               -> DisElement insnType addrType wordType extPseudoType
-mkAscii addr str = Ascii (mkPlainAddress addr) str
+mkAscii addr    = Ascii (mkPlainAddress addr)
 
 -- | Make a new 'Equate' for the disassembler's symbl table.
 mkEquate      :: T.Text
@@ -205,12 +205,12 @@ data NullPseudoOp = NullPseudoOp
 -- comments or equates.)
 disEltHasAddr :: DisElement insnType addrType wordType extPseudoType
               -> Bool
-disEltHasAddr (DisasmInsn _ _ _ _) = True
-disEltHasAddr (ByteRange _ _)      = True
-disEltHasAddr (Addr _ _ _)         = True
-disEltHasAddr (AsciiZ _ _)         = True
-disEltHasAddr (Ascii _ _)          = True
-disEltHasAddr _                    = False
+disEltHasAddr DisasmInsn{}    = True
+disEltHasAddr (ByteRange _ _) = True
+disEltHasAddr Addr{}          = True
+disEltHasAddr (AsciiZ _ _)    = True
+disEltHasAddr (Ascii _ _)     = True
+disEltHasAddr _               = False
 
 -- | Extract an address from an instruction or pseudo-operation.
 disEltGetAddr :: DisElement insnType addrType wordType extPseudoType
@@ -228,7 +228,7 @@ disEltGetLength :: ( Unbox wordType ) =>
                 -> Int
 disEltGetLength (DisasmInsn _ bytes _ _) = DVU.length bytes
 disEltGetLength (ByteRange _ bytes)      = DVU.length bytes
-disEltGetLength (Addr _ _ _)             = 2
+disEltGetLength Addr{}             = 2
 disEltGetLength (AsciiZ _ bytes)         = DVU.length bytes
 disEltGetLength (Ascii _ bytes)          = DVU.length bytes
 disEltGetLength _                        = 0

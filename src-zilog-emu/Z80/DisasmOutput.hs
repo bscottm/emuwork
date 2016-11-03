@@ -19,11 +19,13 @@ import           Data.Generics.Aliases
 import           Data.Generics.Schemes
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
+import           Data.List (sortBy)
+import           Data.Maybe (maybe)
 import           Data.Sequence (Seq, (|>), (<|), (><))
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
-import           Data.Tuple
+import           Data.Tuple ()
 import           Data.Vector.Unboxed (Vector)
 import qualified Data.Vector.Unboxed as DVU
 import           System.IO
@@ -43,7 +45,7 @@ z80AnalyticDisassembly dstate =
   -- Unfortunately (maybe not...?) the foldl results in the concatenation of many singletons.
   dstate ^. symbolTab & formatSymTab $ formattedDisSeq dstate
   where
-    formattedDisSeq z80dstate = (fixupSymbols z80dstate) ^. disasmSeq & Foldable.foldl formatElem Seq.empty
+    formattedDisSeq z80dstate = fixupSymbols z80dstate ^. disasmSeq & Foldable.foldl formatElem Seq.empty
     formatElem accSeq (DisasmInsn addr bytes ins cmnt) = accSeq >< formatLinePrefix bytes addr (formatIns ins cmnt)
     formatElem accSeq pseudo                           = accSeq >< formatPseudo pseudo
 
@@ -60,43 +62,39 @@ fixupSymbols z80dstate =
   let symtab = z80dstate ^. symbolTab
       -- Translate an absolute address, generally hidden inside an instruction operand, into a symbolic address
       -- if present in the symbol table.
-      fixupSymbol addr@(AbsAddr absAddr)    =
-        case absAddr `H.lookup` symtab of
-          Nothing      -> addr
-          Just symName -> SymAddr symName
+      fixupSymbol addr@(AbsAddr absAddr)    = maybe addr SymAddr (absAddr `H.lookup` symtab)
       fixupSymbol symAddr                   = symAddr
 
       -- Lookup address labels in the symbol table
-      fixupEltAddress plain@(Plain absAddr) =
-        case absAddr `H.lookup` symtab of
-          Nothing      -> plain
-          Just symName -> Labeled absAddr symName
+      fixupEltAddress plain@(Plain absAddr) = maybe plain (Labeled absAddr) (absAddr `H.lookup` symtab)
       fixupEltAddress labeled               = labeled
   in  -- Note the cool use of composed functions in a SYB transformation!
-      disasmSeq %~ (everywhere $ (mkT fixupSymbol) . (mkT fixupEltAddress)) $ z80dstate
+      disasmSeq %~ everywhere (mkT fixupSymbol . mkT fixupEltAddress) $ z80dstate
 
 -- | Format the accumulated symbol table as a sequence of 'T.Text's, in columnar format
 formatSymTab :: HashMap Z80addr T.Text
              -> Seq T.Text
              -> Seq T.Text
 formatSymTab symTab outSeq =
-  let maxsym     = H.foldl' (\len str -> if len < T.length str; then T.length str; else len) 0 symTab
+  let maxsym     = H.foldl' (\len str -> max len (T.length str)) 0 symTab
       totalCols  = fromIntegral(((lenOutputLine - maxsym) `div` (maxsym + extraSymPad)) + 1) :: Int
-      byNameSyms =  H.fromList $ map swap $ H.toList symTab
-      byAddrSeq = T.empty
-                  <| T.empty
-                  <| "Symbol Table (numeric):"
-                  <| T.empty
-                  <| (columnar$ H.foldlWithKey' formatSymbol Seq.empty symTab)
+      symsAsList = H.toList symTab
+      byNameSyms = sortBy compareByName symsAsList
+      byAddrSyms = sortBy compareByAddr symsAsList
+      byAddrSeq  = T.empty
+                   <| T.empty
+                   <| "Symbol Table (numeric):"
+                   <| T.empty
+                   <| columnar (Foldable.foldl formatSymbol Seq.empty byAddrSyms)
       byNameSeq = T.empty
-                   <| T.empty
-                   <| "Symbol Table (alpha):"
-                   <| T.empty
-                   <| (columnar $ H.foldlWithKey' (\acc sym addr -> formatSymbol acc addr sym) Seq.empty byNameSyms)
+                  <| T.empty
+                  <| "Symbol Table (alpha):"
+                  <| T.empty
+                  <| columnar (Foldable.foldl formatSymbol Seq.empty byNameSyms)
       -- Consolidate sequence into columnar format
       columnar symSeq = if Seq.length symSeq >= totalCols then 
                           let (thisCol, rest) = Seq.splitAt totalCols symSeq
-                          in  (T.intercalate "  " $ Foldable.toList thisCol) <| (columnar rest)
+                          in  T.intercalate "  " (Foldable.toList thisCol) <| columnar rest
                         else
                           Seq.singleton $ T.intercalate "  " $ Foldable.toList symSeq
 
@@ -104,10 +102,14 @@ formatSymTab symTab outSeq =
       extraSymPad = 4 + 3 + 2
 
       -- Format the symbol:
-      formatSymbol theSeq addr sym = theSeq |> T.concat [ padTo maxsym sym
-                                                         , " = "
-                                                         , upperHex addr
-                                                         ]
+      formatSymbol theSeq (addr, sym) = theSeq |> T.concat [ padTo maxsym sym
+                                                           , " = "
+                                                           , upperHex addr
+                                                           ]
+      -- Comparison functions
+      compareByName (_, n1) (_, n2) = compare n1 n2
+      compareByAddr (a1, _) (a2, _) = compare a1 a2
+
     in  outSeq >< byNameSeq >< byAddrSeq
 
 -- | Format a Z80 instruction
@@ -154,25 +156,23 @@ formatLinePrefix bytes addr outString =
                                       , "| "
                                       ]
   in  if T.length label < (lenSymLabel - 2) then
-        Seq.singleton $ T.concat [ linePrefix
+        Seq.singleton (T.concat [ linePrefix
                                   , padTo lenSymLabel label
                                   , outString
-                                  ]
+                                  ])
       else
-        ( Seq.singleton $ T.concat [ upperHex (disEltAddress addr)
+        Seq.singleton (T.concat [ upperHex (disEltAddress addr)
                                     , ": "
                                     , T.replicate lenInsBytes textSpace
                                     , "|"
                                     , T.replicate lenAsChars textSpace
                                     , "| "
                                     , label
-                                    ]
-        )
-        |> ( T.concat [ linePrefix
-                       , T.replicate lenSymLabel textSpace
-                       , outString
-                       ]
-             )
+                                    ])
+        |> T.concat [ linePrefix
+                    , T.replicate lenSymLabel textSpace
+                    , outString
+                    ]
 
 -- | Format a series of bytes
 formatBytes :: Vector Z80word
@@ -183,13 +183,13 @@ formatBytes bytes = padTo lenInsBytes $ T.intercalate " " [ upperHex x | x <- DV
 
 -- | Length of instruction opcode output: 8 bytes max to dump, 3 spaces per byte
 lenInsBytes :: Int
-lenInsBytes = (lenAsChars * 3)
+lenInsBytes = lenAsChars * 3
 -- | Length of opcode-as-characters output: 8 characters, as the bytes are dumped as characters
 lenAsChars :: Int
 lenAsChars = 8
 -- | Length of the label colum: 8 characters plus ": "
 lenSymLabel :: Int
-lenSymLabel = T.length("XXXXXXXXXXXX") + 2
+lenSymLabel = T.length "XXXXXXXXXXXX" + 2
 -- | Total length of the instruction+operands output
 lenInstruction :: Int
 lenInstruction = 24
@@ -255,7 +255,7 @@ formatInstruction RET                     = zeroOperands "RET"
 formatInstruction (RETCC cc)              = oneOperand "RET" cc
 formatInstruction (PUSH r)                = oneOperand "PUSH" r
 formatInstruction (POP r)                 = oneOperand "POP" r
-formatInstruction (RST rst)               = ("RST", (upperHex rst))
+formatInstruction (RST rst)               = ("RST", upperHex rst)
 formatInstruction (RLC r)                 = oneOperand "RLC" r
 formatInstruction (RRC r)                 = oneOperand "RRC" r
 formatInstruction (RL r)                  = oneOperand "RL" r
@@ -351,7 +351,7 @@ instance DisOperandFormat OperLD where
   formatOperand AccBCIndirect             = "A, (BC)"
   formatOperand AccDEIndirect             = "A, (DE)"
   formatOperand (AccImm16Indirect addr)   = T.concat [ "A, ("
-                                                     , (formatOperand addr)
+                                                     , formatOperand addr
                                                      , ")"
                                                      ]
   formatOperand AccIReg                   = "A, I"
@@ -363,11 +363,11 @@ instance DisOperandFormat OperLD where
   formatOperand RRegAcc                   = "R, A"
   formatOperand (RPair16ImmLoad rp imm)   = T.append (T.append (formatOperand rp) ", ") (formatOperand imm)
   formatOperand (HLIndirectStore addr)    = T.concat [ "("
-                                                     , (formatOperand addr)
+                                                     , formatOperand addr
                                                      , "), HL"
                                                      ]
   formatOperand (HLIndirectLoad  addr)    = T.concat [ "HL, ("
-                                                     , (formatOperand addr)
+                                                     , formatOperand addr
                                                      , ")"
                                                      ]
   formatOperand (RPIndirectLoad rp addr)  = T.concat [ formatOperand rp
@@ -384,7 +384,7 @@ instance DisOperandFormat OperLD where
 instance DisOperandFormat OperALU where
   formatOperand (ALUimm imm)    = formatOperand imm
   formatOperand (ALUreg8 r)     = formatOperand r
-  formatOperand (ALUHLindirect) = "(HL)"
+  formatOperand ALUHLindirect   = "(HL)"
 
 instance DisOperandFormat OperExtendedALU where
   formatOperand (ALU8 opnd) = formatOperand opnd
@@ -478,22 +478,24 @@ formatPseudo (Ascii sAddr str) =
       >< fmtByteGroup str (disEltAddress sAddr + 8) 8 outF
 
 formatPseudo (DisOrigin origin) = Seq.singleton $ T.concat [ T.replicate (lenOutputPrefix + lenSymLabel) textSpace
-                                                                      , padTo lenMnemonic "ORG"
-                                                                      , asHex origin
-                                                                      ]
+                                                           , padTo lenMnemonic "ORG"
+                                                           , asHex origin
+                                                           ]
 
 formatPseudo (Equate label addr) = Seq.singleton $ T.concat [ T.replicate lenOutputPrefix textSpace
-                                                                         , padTo lenSymLabel label
-                                                                         , padTo lenMnemonic "="
-                                                                         , oldStyleHex addr
-                                                                         ]
+                                                            , padTo lenSymLabel label
+                                                            , padTo lenMnemonic "="
+                                                            , oldStyleHex addr
+                                                            ]
 
-formatPseudo (LineComment comment) = Seq.singleton $ T.concat [ T.replicate lenOutputPrefix textSpace
-                                                                       , "; "
-                                                                       , comment
-                                                                       ]
+formatPseudo (LineComment comment) = Foldable.foldl (\acc cmnt -> acc |> T.concat [ T.replicate lenOutputPrefix textSpace
+                                                                                  , "; "
+                                                                                  , cmnt
+                                                                                  ])
+                                                    Seq.empty
+                                                    (T.lines comment)
 
-formatPseudo _unknownPseudo = Seq.singleton $ "[!!Unknown pseudo instruction]"
+formatPseudo _unknownPseudo = Seq.singleton "[!!Unknown pseudo instruction]"
 
 -- | Format groups of bytes by groups of 8
 fmtByteGroup :: Vector Z80word
@@ -510,7 +512,7 @@ fmtByteGroup bytes addr idx outF
   | otherwise =
     -- dump a group of 8 bytes
     let outString = outF (DVU.slice idx 8 bytes)
-    in  (formatLinePrefix (DVU.slice idx 8 bytes) (mkPlainAddress addr) outString)
+    in  formatLinePrefix (DVU.slice idx 8 bytes) (mkPlainAddress addr) outString
         >< fmtByteGroup bytes (addr + 8) (idx + 8) outF
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=

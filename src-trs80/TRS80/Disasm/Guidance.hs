@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 
 module TRS80.Disasm.Guidance
@@ -26,7 +25,7 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 import           Data.Yaml (FromJSON(..), ToJSON(..), (.=))
 import qualified Data.Yaml as Y
-import           Debug.Trace
+-- import           Debug.Trace
 
 import           Machine.Utils (as0xHex, asHex)
 import           Z80 (Z80addr, Z80disp)
@@ -53,19 +52,19 @@ instance ToJSON Guidance where
   toJSON (Guidance org _haveOrg ea _haveEA sects)  =
     Y.Object $ H.insert "end" (Y.String $ as0xHex ea) $
                H.insert "origin" (Y.String $ as0xHex org) $
-               H.map (\dirs -> Y.Array $ V.map toJSON dirs) sects
+               H.map (Y.Array . V.map toJSON) sects
 
 instance FromJSON Guidance where
   parseJSON (Y.Object o) =
     {- trace ("FromJSON object: " ++ (show o)) -}
-    repackage $ Foldable.foldl' collectGuidance
-                                (return $ Guidance { origin      = 0x0
-                                                   , haveOrigin  = False
-                                                   , endAddr     = 0x0
-                                                   , haveEndAddr = False
-                                                   , sections    = H.empty
-                                                   })
-                                (H.toList o)
+    repackage $ Foldable.foldl collectGuidance
+                               (return Guidance { origin      = 0x0
+                                                , haveOrigin  = False
+                                                , endAddr     = 0x0
+                                                , haveEndAddr = False
+                                                , sections    = H.empty
+                                                })
+                               (H.toList o)
     where
       collectGuidance :: Either T.Text Guidance
                       -> (T.Text, Y.Value)
@@ -74,7 +73,7 @@ instance FromJSON Guidance where
       collectGuidance guidance ("end", ea)           = either (fail . T.unpack) (mkEndAddr ea) guidance
       collectGuidance guidance (section, directives) = either (fail . T.unpack) (mkSection section directives) guidance
 
-      repackage x = either (fail . T.unpack) (return) x
+      repackage = either (fail . T.unpack) return
 
   {- Catchall -}
   parseJSON invalid = AT.typeMismatch "Guidance" invalid
@@ -107,15 +106,14 @@ mkSection :: T.Text
           -> Y.Value
           -> Guidance
           -> Either T.Text Guidance
-mkSection sectName (Y.Array directives) g
-  {- | trace ("directives = " ++ (show directives)) False = undefined -}
-  | otherwise
-  = let dirs   = V.toList $ V.map parseDirective directives
-        errs   = lefts dirs
-        result = (V.fromList . rights) dirs
-    in  if null errs
-        then Right $ g { sections = H.insert sectName result (sections g) }
-        else Left (T.unlines errs)
+mkSection sectName (Y.Array directives) g =
+  let dirs   = V.toList $ V.map parseDirective directives
+      errs   = lefts dirs
+      result = (V.fromList . rights) dirs
+  in  {- | trace ("directives = " ++ (show directives)) -}
+    if null errs
+    then Right $ g { sections = H.insert sectName result (sections g) }
+    else Left (T.unlines errs)
 mkSection sectName _directives _ = fail (T.unpack $ T.concat [ "Section '"
                                                              , sectName
                                                              , singleQuote
@@ -210,10 +208,10 @@ instance ToJSON Directive where
 -}
 
 md5AsText :: BCL.ByteString -> T.Text
-md5AsText md5sum = BCL.foldl (\accum digit -> T.append accum $ asHex digit) T.empty md5sum
+md5AsText = BCL.foldl (\accum digit -> T.append accum $ asHex digit) T.empty
   
 instance FromJSON Directive where
-  parseJSON val@(Y.Object _) = either (fail . T.unpack) (return) (parseDirective val)
+  parseJSON val@(Y.Object _) = either (fail . T.unpack) return (parseDirective val)
   parseJSON invalid          = AT.typeMismatch "Directive" invalid
 
 parseDirective :: Y.Value
@@ -260,7 +258,7 @@ parseDirective (Y.Object o)
     , exists
     = mkMD5Sum v
     | otherwise
-    = fail ("Valid directive expected, got: " ++ (show o))
+    = fail ("Valid directive expected, got: " ++ show o)
     where
       probe k h   = let v = H.lookup k h
                     in  (v, isJust v)
@@ -281,7 +279,7 @@ mkEquate (Just (Y.Object o'))  =
                                            Just (AT.String symval') -> SymEquate symname' <$> convertWord16 symval'
                                            Just (AT.Number symval') -> maybe (outOfRange minZ80addr maxZ80addr
                                                                                         ((T.pack . show ) symval'))
-                                                                             (\n -> Right $ SymEquate symname' n)
+                                                                             (Right . SymEquate symname')
                                                                              (S.toBoundedInteger symval')
                                            Just something           -> Left $ T.concat ["String expected for equate value: '"
                                                                                        , T.pack (show something)
@@ -300,37 +298,31 @@ mkEquate (Just (Y.Object o'))  =
 mkEquate _                    = Left "equate directive expects a name and a value (name, value dict.)"
 
 mkAsciiZ :: Maybe AT.Value -> Either T.Text Directive
-mkAsciiZ (Just (Y.String addr)) = either (\err   -> Left err)
-                                         (\addr' -> Right $ GrabAsciiZ addr')
-                                         (convertWord16 addr)
-mkAsciiZ (Just (Y.Number addr)) = case (S.toBoundedInteger addr) of
-                                    Just (addr' :: Z80addr) -> Right $ GrabAsciiZ addr'
-                                    Nothing -> outOfRange minZ80addr maxZ80addr addr
+mkAsciiZ (Just (Y.String addr)) = GrabAsciiZ <$> convertWord16 addr
+mkAsciiZ (Just (Y.Number addr)) = maybe (outOfRange minZ80addr maxZ80addr addr) (Right . GrabAsciiZ) (S.toBoundedInteger addr)
 mkAsciiZ _                      = Left "asciiz expects an address"
 
 mkDisasm :: Maybe AT.Value -> Either T.Text Directive
-mkDisasm = rdStartAndLength (DoDisasm)
+mkDisasm = rdStartAndLength DoDisasm
 
 mkGrabBytes :: Maybe AT.Value -> Either T.Text Directive
-mkGrabBytes = rdStartAndLength (GrabBytes)
+mkGrabBytes = rdStartAndLength GrabBytes
 
 mkGrabAscii :: Maybe AT.Value -> Either T.Text Directive
-mkGrabAscii = rdStartAndLength (GrabAscii)
+mkGrabAscii = rdStartAndLength GrabAscii
 
 mkHighBitTable :: Maybe AT.Value -> Either T.Text Directive
-mkHighBitTable = rdStartAndLength (HighBitTable)
+mkHighBitTable = rdStartAndLength HighBitTable
 
 mkJumpTable :: Maybe AT.Value -> Either T.Text Directive
-mkJumpTable = rdStartAndLength (JumpTable)
+mkJumpTable = rdStartAndLength JumpTable
 
 mkKnownSymbols :: Maybe AT.Value -> Either T.Text Directive
 mkKnownSymbols (Just (Y.Object syms)) =
-  let syms'                      = H.toList $ H.mapWithKey (symConvert) syms
+  let syms'                      = H.toList $ H.mapWithKey symConvert syms
 
       symConvert _k (Y.String s) = convertWord16 s
-      symConvert _k (Y.Number n) = maybe (outOfRange minZ80addr maxZ80addr n)
-                                         (\n' -> Right $ n')
-                                         (S.toBoundedInteger n)
+      symConvert _k (Y.Number n) = maybe (outOfRange minZ80addr maxZ80addr n) Right (S.toBoundedInteger n)
       symConvert k  something    = Left $ T.concat [ "Expected an address in '"
                                                    , k
                                                    , singleQuote
@@ -348,17 +340,17 @@ mkKnownSymbols (Just (Y.Object syms)) =
   in  if   null cvtErrs
       then Right $ KnownSymbols $ H.fromList goodElts
       else Left $ T.unlines cvtErrs
-mkKnownSymbols _ = Left $ "symbols expects a map of symbol names to addresses"
+mkKnownSymbols _ = Left "symbols expects a map of symbol names to addresses"
 
 mkMD5Sum ::  Maybe AT.Value -> Either T.Text Directive
 mkMD5Sum (Just (Y.String s)) =
   let strBytes = T.chunksOf 2 s
       bytes    = map convertHex strBytes
       errs     = lefts bytes
-  in  if all (\x -> T.compareLength x 2 == EQ) strBytes && null errs
-      then Right $ (MD5Sum . BCL.pack . rights) bytes
-      else Left $ T.unlines errs
-mkMD5Sum _                   = Left $ "md5 expects a 16 byte hex string (no '0x')"
+  in  if all (\x -> T.compareLength x 2 == EQ) strBytes && length bytes == 16 && null errs
+      then (Right . MD5Sum . BCL.pack . rights) bytes
+      else Left (T.unlines errs)
+mkMD5Sum _                   = Left "md5 expects a 16 byte hex string (no '0x')"
   
 convertWord16 :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
 convertWord16 t
@@ -393,11 +385,10 @@ convertHex t =
       vMin = fromIntegral (minBound :: a)
       vMax = fromIntegral (maxBound :: a)
   in if T.all (\c -> let c' = fromEnum c
-                             in (c' >= fromEnum('0') && (c' <= fromEnum('9'))) ||
-                                (c' >= fromEnum('a') && (c' <= fromEnum('f'))) ||
-                                (c' >= fromEnum('A') && (c' <= fromEnum('F')))) t
-      then if val >= vMin && val <= vMax
-           then Right $ fromIntegral val
+                             in (c' >= fromEnum '0' && (c' <= fromEnum '9')) ||
+                                (c' >= fromEnum 'a' && (c' <= fromEnum 'f')) ||
+                                (c' >= fromEnum 'A' && (c' <= fromEnum 'F'))) t
+      then if val >= vMin && val <= vMax           then Right $ fromIntegral val
            else outOfRange vMin vMax t
      else Left $ T.concat ["Invalid hexadecimal constant: '", t, singleQuote]
 
@@ -405,7 +396,7 @@ convertOctal :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
 convertOctal octstr =
   let val = fst $ T.mapAccumR (\v c -> (v * 8 + (fromEnum c .&. 0xf), c)) 0 (T.reverse octstr)
       validOctal = T.all (\c -> let c' = fromEnum c
-                                in  (c' >= fromEnum('0') && c' <= fromEnum('7')))
+                                in  (c' >= fromEnum '0' && c' <= fromEnum '7'))
       vMin = fromIntegral (minBound :: a)
       vMax = fromIntegral (maxBound :: a)
   in  if validOctal octstr

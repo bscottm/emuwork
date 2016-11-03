@@ -8,6 +8,7 @@ module TRS80.Disasm
   ) where
 
 import           Control.Lens ((^.), (%~), (.~), (&))
+import           Control.Monad (unless)
 import           Data.Binary
 import           Data.Bits
 import qualified Data.ByteString.Lazy as BCL
@@ -23,8 +24,8 @@ import qualified Data.Text.IO as TIO
 import qualified Data.Vector as V
 import           Data.Vector.Unboxed (Vector, (!))
 import qualified Data.Vector.Unboxed as DVU
-import           Debug.Trace
 import qualified Data.Yaml as Y
+import           Debug.Trace
 import           System.Console.GetOpt
 import           System.Exit
 import           System.IO
@@ -87,7 +88,7 @@ getDisasmOptions :: [String]
                  -> IO (DisasmOptions, [String])
 getDisasmOptions opts =
   case getOpt Permute disasmOptions opts of
-    (optsActions, rest, [])   -> return (Foldable.foldl' (flip id) mkDisasmOptions optsActions, rest)
+    (optsActions, rest, [])   -> return (Foldable.foldl (flip id) mkDisasmOptions optsActions, rest)
     (_,           _,    errs) -> mapM_ (hPutStrLn stderr) errs
                                  >> return (InvalidDisasm, [])
 
@@ -101,9 +102,7 @@ disasmOptions =
   ]
 
 disasmUsage :: IO ()
-disasmUsage =
-  do
-    hPutStrLn stderr (usageInfo "Disassembler options" disasmOptions)
+disasmUsage = hPutStrLn stderr (usageInfo "Disassembler options" disasmOptions)
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -121,12 +120,9 @@ trs80disassemble sys imgReader imgName msize guidance =
                                           in  case getMatchingSection guidance (romMD5 img) of
                                                 Just dirs ->
                                                   let dis = collectRom trs80 (initialDisassembly img dirs) dirs
-                                                  in  if (not . DVU.null) img
-                                                      then
+                                                  in  unless (DVU.null img) $
                                                         checkAddrContinuity dis
                                                         >> z80AnalyticDisassemblyOutput stdout dis
-                                                      else
-                                                        return ()
                                                 Nothing ->
                                                   hPutStrLn stderr ("Could not find guidance section for " ++
                                                                      (T.unpack $ romMD5Hex img))
@@ -140,27 +136,23 @@ trs80disassemble sys imgReader imgName msize guidance =
     theEndAddr             = endAddr guidance
     -- Initial disassembly state: known symbols and disassembly address range predicate
     initialDisassembly img dirs =
-      disasmSeq %~ (\s -> s |> (mkLineComment commentBreak)
-                            |> (mkLineComment (T.append "ROM MD5 checksum: " (romMD5Hex img)))
-                            |> (mkLineComment ((identifyROM . romMD5) img))
-                            |> (mkLineComment commentBreak)
-                            |> (mkLineComment T.empty)) $
-                   symbolTab .~ (fromMaybe H.empty $ getKnownSymbols dirs) $
-                   addrInDisasmRange .~ trs80RomRange $
+      disasmSeq %~ (\s -> s |> mkLineComment commentBreak
+                            |> mkLineComment (T.append "ROM MD5 checksum: " (romMD5Hex img))
+                            |> mkLineComment ((identifyROM . romMD5) img)
+                            |> mkLineComment commentBreak
+                            |> mkLineComment T.empty) $
+                   symbolTab .~ fromMaybe H.empty (getKnownSymbols dirs) $
+                   addrInDisasmRange .~ (\addr -> addr >= theOrigin && addr <= theEndAddr) $
                    mkInitialDisassembly
     commentBreak           = "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-    romMD5 img             = (encode . md5 . BCL.pack . DVU.toList) img
+    romMD5                 = encode . md5 . BCL.pack . DVU.toList
     romMD5Hex img          = BCL.foldl (\a x -> T.append a (asHex x)) T.empty (romMD5 img)
-    -- ROM range for 'addrInDisasmRange' predicate
-    trs80RomRange addr     = addr >= (origin guidance) && addr <= (endAddr guidance)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Identify a ROM from its MD5 signature.
 identifyROM :: BCL.ByteString
             -> T.Text
-identifyROM md5sig = case md5sig `H.lookup` romSigs of
-                       Nothing      -> "Unknown ROM signature"
-                       Just romName -> romName
+identifyROM md5sig = fromMaybe "Unknown ROM signature" (md5sig `H.lookup` romSigs)
 
 romSigs :: H.HashMap BCL.ByteString T.Text
 romSigs = H.fromList [ ( BCL.pack [ 0xca, 0x74, 0x82, 0x2e, 0xbc, 0x28, 0x03, 0xc6, 0x63, 0x5a, 0x55, 0x11
@@ -188,7 +180,7 @@ collectRom :: ModelISystem
            -> Z80disassembly
               -- ^ Resulting disassembler state, symbol table and disassembly
               -- sequence.
-collectRom sys = Foldable.foldl' (doAction sys)
+collectRom sys = Foldable.foldl (doAction sys)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -199,10 +191,9 @@ doAction :: ModelISystem
 
 doAction sys dstate guide
   {-  | trace ("disasm: guide = " ++ (show guide)) False = undefined -}
-  --  | (SetOrigin origin)         <- guide = disasmSeq %~ (|> (mkDisOrigin origin)) $ dstate
   | (SymEquate label addr)     <- guide = 
-    (symbolTab %~ (H.insert addr label)) . (disasmSeq %~ (|> (mkEquate label addr))) $ dstate
-  | (Comment comment)          <- guide = disasmSeq %~ (|> (mkLineComment comment)) $ dstate
+    (symbolTab %~ H.insert addr label) . (disasmSeq %~ (|> mkEquate label addr)) $ dstate
+  | (Comment comment)          <- guide = disasmSeq %~ (|> mkLineComment comment) $ dstate
   | (DoDisasm sAddr nBytes)    <- guide = disassemble dstate sys (PC sAddr) (PC $ sAddr + fromIntegral nBytes)
                                                       trs80RomPostProcessor
   | (GrabBytes sAddr nBytes)   <- guide = z80disbytes dstate mem (PC sAddr) nBytes
@@ -235,9 +226,9 @@ highbitCharTable (MemorySystem memSys) sAddr nBytes z80dstate =
       -- Fetch the block from memory as a 'Vector'
       memBlock = mFetchN memSys sAddr nBytes'
       -- Look for the high bit characters within the address range, then convert back to addresses
-      byteidxs = DVU.findIndices (\x -> x >= 0x80) memBlock
+      byteidxs = DVU.findIndices (>= 0x80) memBlock
       -- Set up a secondary index vector to make a working zipper
-      byteidx2 = (DVU.drop 1 byteidxs) `DVU.snoc` nBytes'
+      byteidx2 = DVU.drop 1 byteidxs `DVU.snoc` nBytes'
       -- Grab an individual string from a memory range
       grabString :: Int -> Int -> Seq Z80DisasmElt
       grabString memidx memidx' =
@@ -255,7 +246,7 @@ highbitCharTable (MemorySystem memSys) sAddr nBytes z80dstate =
             else
               Seq.singleton firstBytePseudo
       -- Zip the two index vectors to a sequence
-      disasmElts   = Foldable.foldl' (><) Seq.empty (zipWith grabString (DVU.toList byteidxs) (DVU.toList byteidx2))
+      disasmElts   = Foldable.foldl (><) Seq.empty (zipWith grabString (DVU.toList byteidxs) (DVU.toList byteidx2))
   in  disasmSeq %~ (>< disasmElts) $ z80dstate
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -271,7 +262,7 @@ jumpTable :: Z80memory
           -> Z80disassembly
           -- ^ Resulting diassembly state
 jumpTable mem@(MemorySystem memSys) sAddr nBytes dstate =
-  let endAddr = sAddr + (fromIntegral nBytes)
+  let endAddr = sAddr + fromIntegral nBytes
       generateAddr addr z80dstate
         | addr < endAddr - 2  = let DecodedAddr newAddr operand = z80getAddr mem (PC addr)
                                 in  withPC newAddr (\pc -> generateAddr pc (operAddrPseudo operand))

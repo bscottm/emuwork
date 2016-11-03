@@ -31,14 +31,14 @@ import qualified Data.HashMap.Strict as H
 import           Data.Sequence (Seq, (|>))
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
-import           Debug.Trace
+-- import           Debug.Trace
 import qualified Data.Vector.Unboxed as DVU
 import           Data.Word
 
 import           Machine
 import           Z80.Processor
 import           Z80.InstructionSet
-import           Z80.InsnDecode
+import           Z80.InsnDecode()
 
 -- | Disassembly elements for the Z80
 type Z80DisasmElt = DisElement Z80instruction Z80addr Z80word Z80PseudoOps

@@ -50,7 +50,7 @@ data CommonOptions where
 getCommonOptions :: [String] -> IO (CommonOptions, [String], [String])
 getCommonOptions opts =
   case getOpt' RequireOrder commonOptions opts of
-    (optsActions, rest, unOpts, [])   -> validateOptions (Foldable.foldl' (flip id) mkCommonOptions optsActions)
+    (optsActions, rest, unOpts, [])   -> validateOptions (Foldable.foldl (flip id) mkCommonOptions optsActions)
                                          >>= (\opts' -> return (opts', rest, unOpts))
     (_,           _,    _,      errs) -> hPutStrLn stderr "TRS-80 common options:"
                                          >> mapM_ (hPutStrLn stderr) errs

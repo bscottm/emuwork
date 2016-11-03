@@ -48,4 +48,4 @@ instance ProcessorOps NullProcState Word32 Word32 where
 instance EmulatorDriver NullSystemT where
   formalName sys             = sys ^. sysName
   identityNames sys          = sys ^. sysAliases
-  cmdDispatch _state options = putStrLn $ "Null processor dispatch invoked, args = " ++ (show options)
+  cmdDispatch _state options = putStrLn ("Null processor dispatch invoked, args = " ++ show options)

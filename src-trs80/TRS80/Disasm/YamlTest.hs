@@ -32,7 +32,7 @@ main =
          (unless (null errs) $ mapM_ (hPutStrLn stderr) errs
            >> showUsage
            >> exitFailure)
-         >> Foldable.foldl' (>>=) (return mkTestArgs) optsActions
+         >> Foldable.foldl (>>=) (return mkTestArgs) optsActions
          >>= (\options ->
                 if null rest
                 then

@@ -138,13 +138,13 @@ constExpr signRequired srcpos =
 
     binary txt
       | T.null h  = Left "input does not start with a digit"
-      | otherwise = Right (T.foldl' go 0 h, t)
+      | otherwise = Right (T.foldl go 0 h, t)
       where (h,t)  = T.span (\c -> c == '0' || c == '1') txt
             go n d = (n * 2 + fromIntegral (digitToInt d))
 
     octal txt
       | T.null h  = Left "input does not start with a digit"
-      | otherwise = Right (T.foldl' go 0 h, t)
+      | otherwise = Right (T.foldl go 0 h, t)
       where (h,t)  = T.span C.isDigit txt
             go n d = (n * 8 + fromIntegral (digitToInt d))
 

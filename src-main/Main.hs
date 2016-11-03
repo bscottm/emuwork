@@ -76,11 +76,11 @@ parseOptions =
         --
         -- When getOpt processes the command line options, it will create a list
         -- of the options that are actually present on the command line. The
-        -- getOpt-generated list is then combined via foldl', which only modifies
+        -- getOpt-generated list is then combined via foldl, which only modifies
         -- the parts of the record that occurred on the command line. The result
         -- is a single (IO Machine.CommonEmulatorOptions) object that has the
         -- default options set, modified by the options present in getArgs
-        foldArgsAndDefaults = foldl' (>>=) (return defaultCommonEmulatorOptions)
+        foldArgsAndDefaults = foldl (>>=) (return defaultCommonEmulatorOptions)
         -- Yell at the user if there were option/flag processing errors
         checkErrors errors  = unless (null errors) $ do
                                 mapM_ (hPutStrLn stderr) errors

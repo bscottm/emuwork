@@ -1,14 +1,8 @@
 -- | Re-export module for 'Machine'-related code.
-module Machine
-       ( module Machine.EmulatedSystem
-       , module Machine.DisassemblerTypes
-       , module Machine.NullProcessor
-       , module Machine.Utils
-       , module Machine.EmulatorDriver
-       ) where
+module Machine (module MachineExports) where
 
-import Machine.DisassemblerTypes
-import Machine.EmulatedSystem
-import Machine.EmulatorDriver
-import Machine.NullProcessor
-import Machine.Utils
+import Machine.DisassemblerTypes as MachineExports
+import Machine.EmulatedSystem as MachineExports
+import Machine.EmulatorDriver as MachineExports
+import Machine.NullProcessor as MachineExports
+import Machine.Utils as MachineExports
