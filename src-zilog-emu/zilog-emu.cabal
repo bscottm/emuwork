@@ -27,6 +27,7 @@ library
                         transformers,
                         syb,
                         parsec,
+                        unordered-containers,
                         emubase
 
   ghc-options:          -Wall -O2

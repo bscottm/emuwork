@@ -6,6 +6,136 @@ origin: 0x0000
 end: 0x2fff
 
 Model I Level II:
+- symbols:
+    RST00: 0x0000
+    RST08: 0x0008
+    RST10: 0x0010
+    WANTDCBGET: 0x0013
+    RST18: 0x0018
+    WANTDCBPUT: 0x001b
+    RST20: 0x0020
+    RST28: 0x0028
+    KBDSCN: 0x002b
+    RST30: 0x0030
+    CHARPRINT: 0x0033
+    RST38: 0x0038
+    LPRINTCHAR: 0x003b
+    KBLINE: 0x0040
+    KBWAIT: 0x0049
+    CTRLCHARS: 0x0050
+    DELAY: 0x0060
+    NMI_RESET: 0x0066
+    HAVEDISK: 0x0069
+    L2INIRESRVD: 0x0075
+    SETIOB: 0x008b
+    L2INIT2: 0x0091
+    MEMSIZE: 0x0105
+    L2LOGO: 0x0111
+    L3ERROR: 0x012d
+    CMDPOINT: 0x0132
+    BASSET: 0x0135
+    BASRESET: 0x0138
+    GRSTART: 0x0150
+    CLS: 0x01c9
+    BASRANDOM: 0x01d3
+    CASSPULSE1: 0x01d9
+    CASSDLY1: 0x01df
+    CASSPULSE2: 0x01e3
+    CASSDLY2: 0x01e9
+    CASSPULSE3: 0x01ed
+    CASSDLY3: 0x01f3
+    CASSOFF: 0x01f8
+    COUT: 0x033a
+    OUTDCB: 0x03c2
+    OUTDCBFINISH: 0x03dd
+    KBDREAD: 0x03e3
+    NXTKEYLINE: 0x03eb
+    DODCBFN: 0x0458
+    REGCHAR: 0x0480
+    CURCON: 0x0506
+    PRDCBFN: 0x058d
+    LPREADY: 0x05d1
+    DOKBLINE: 0x05d9
+    INITRSTVECS: 0x0674
+    RSTVECTABLE: 0x06d2
+    HADD_SPHALF: 0x0708
+    SPADD_IND_HL: 0x070b
+    SPSUB_IND_HL: 0x0710
+    SPSUB_BCDE: 0x0713
+    SPADD_BCDE: 0x0716
+    SPMUL_BCDE: 0x0847
+    SPDIV_BCDE: 0x08a2
+    NEG_MANTISSA: 0x0982
+    BCDE_VIA_HL: 0x09c2
+    CPHL2DE: 0x09d2
+    CPDE2HL: 0x09d3
+    # Integer math functions
+    INTADD: 0x0bd2
+    INTSUB: 0x0bc7
+    INTMPY: 0x0bf2
+    # Floating point constants
+    SFPZERO: 0x137c
+    SFPHALF: 0x1380
+    # BASIC trancendental functions
+    BASCOS: 0x1541
+    BASSIN: 0x1547
+    PI_OVER_2: 0x158b
+    BASTAN: 0x15a8
+    BASATN: 0x15bd
+    # BASIC's high-bit verb table
+    VERBS: 0x1650
+    VERBDISPATCH: 0x1822
+    # BASIC's error strings
+    ERRNOFOR: 0x18c9
+    ERRSYNTAX: 0x18cb
+    ERRRANGE: 0x18cd
+    ERROUTOFDATA: 0x18cf
+    ERRBADFUNC: 0x18d1
+    ERROVERFLOW: 0x18d3
+    ERROUTOFMEM: 0x18d5
+    ERRUNDEFLINE: 0x18d7
+    ERRBADSUBSCR: 0x18d9
+    ERRBADDIM: 0x18db
+    ERRDIV0: 0x18dd
+    ERRILLEGALDIRECT: 0x18df
+    ERRTYPEMISMATCH: 0x18e1
+    ERRNOSTRSPACE: 0x18e3
+    ERRLONGSTRING: 0x18e5
+    ERRCOMPLEXSTR: 0x18e7
+    ERRNOCONT: 0x18e9
+    ERRNORESUME: 0x18eb
+    ERRRESUMENOERR: 0x18ed
+    ERRUNPRINTERR: 0x18ef
+    ERRMISSOPERAND: 0x18f1
+    ERRFILEDATA: 0x18f3
+    ERRL3DOS: 0x18f5
+    BASRSVINIT: 0x18f7
+    READYPMT: 0x1929
+    BREAKMSG: 0x1930
+    ERORORIN: 0x191d
+    CMPDEHL: 0x1c90
+    DEFRST08: 0x1c96
+    BASFOR: 0x1ca1
+    DEFRST10: 0x1d78
+    BASRESTORE: 0x1d91
+    BASEND: 0x1dae
+    BASSTOP: 0x1da9
+    BASTRON: 0x1df7
+    BASTROFF: 0x1df8
+    BASGOSUB: 0x1eb1
+    BASRETURN: 0x1ede
+    BASGOTO: 0x1ec2
+    BASRUN: 0x1ea3
+    BASDATA: 0x1f05
+    BASREM: 0x1f07
+    BASLET: 0x1f21
+    BASIF: 0x2039
+    BASINPUT: 0x219a
+    BASREAD: 0x21ef
+    BASNEXT: 0x22b6
+    INTDIV: 0x2490
+    NUMTYPE: 0x25d9
+    BASDIM: 0x2608
 - comment: Restart vector redirections. These are 'JP' instructions
 - equate:
     value: 0x4000
@@ -34,7 +164,7 @@ Model I Level II:
 - equate:
     value: 0x401c
     name: CURSBLINK
-- comment: Video device control block
+- comment: Video device control block ('DO' == Direct Output)
 - equate:
     value: 0x401d
     name: DODCB
@@ -99,7 +229,7 @@ Model I Level II:
 - equate:
     value: 0x409c
     name: DEVTYPEFLAG
-- comment: PRINT# scratch space
+- comment: ! 'PRINT# scratch space'
 - equate:
     value: 0x409d
     name: PRNUMWORK
@@ -127,17 +257,19 @@ Model I Level II:
 - equate:
     value: 0x40aa
     name: RNDSEED
-- comment: ! 'NTF: Numberic Type Flag'
-- comment: ! '2: Integer'
-- comment: ! '3: String'
-- comment: ! '4: Single precision floating point'
-- comment: ! '8: Double precision floating point'
-- comment: (see CPDE2HL)
+- comment: |
+    NTF: Numeric Type Flag
+    2: Integer
+    3: String
+    4: Single precision floating point
+    8: Double precision floating point
+    (see CPDE2HL)
 - equate:
     value: 0x40af
     name: NTF
-- comment: Top of memory/highest memory address available for string
-- comment: storage. Memory above this address pointer is 'reserved'.
+- comment: |
+    Top of memory/highest memory address available for string
+    storage. Memory above this address pointer is 'reserved'.
 - equate:
     value: 0x40b1
     name: MEMTOP

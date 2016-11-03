@@ -15,7 +15,6 @@ import qualified Data.Aeson.Types as AT
 import           Data.Bits
 import qualified Data.ByteString.Lazy as BCL
 import qualified Data.Char as C
-import           Data.Digest.Pure.MD5
 import           Data.Either
 import qualified Data.Foldable as Foldable
 import qualified Data.HashMap.Strict as H
@@ -27,8 +26,10 @@ import           Data.Yaml (FromJSON(..), ToJSON(..), (.=))
 import qualified Data.Yaml as Y
 import           Debug.Trace
 
-import           Machine.Utils (as0xHex)
+import           Machine.Utils (as0xHex, asHex)
 import           Z80 (Z80addr, Z80disp)
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Disassembler "guidance": When to disassemble, when to dump bytes, ... basically guidance to the drive
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
@@ -46,53 +47,11 @@ data Guidance where
     } -> Guidance
   deriving (Eq, Show)
 
-data Directive where
-  MD5Sum         :: BCL.ByteString
-                 -- MD5 signature: Conditionally apply the directives iff the section's signature matches
-                 -> Directive
-  SymEquate      :: T.Text
-                 -- Symbolic name
-                 -> Z80addr
-                 -- Value associated iwth with the symbolic name
-                 -> Directive
-  Comment        :: T.Text
-                 -- Comment text
-                 -> Directive
-  DoDisasm       :: Z80addr
-                 -- Start disassembly address
-                 -> Z80disp
-                 -- Number of bytes to disassemble
-                 -> Directive
-  GrabBytes      :: Z80addr
-                 -- Start of range
-                 -> Z80disp
-                 -- Number of bytes to grab
-                 -> Directive
-  GrabAsciiZ     :: Z80addr
-                    -- Start address to start grabbing 0-terminated ASCII string
-                 -> Directive
-  GrabAscii      :: Z80addr
-                 -- Start of range
-                 -> Z80disp
-                 -- Number of bytes to grab
-                 -> Directive
-  HighBitTable   :: Z80addr
-                 -- Start of table
-                 -> Z80disp
-                 -- Table length
-                 -> Directive
-  JumpTable      :: Z80addr
-                 -- Jump table start
-                 -> Z80disp
-                 -- Jump table length
-                 -> Directive
-  deriving (Eq, Show)
-
 instance ToJSON Guidance where
   toJSON (Guidance org _haveOrg ea _haveEA sects)  =
-    let theSections = H.map (\dirs -> Y.Array $ V.map toJSON dirs) sects
-    in  Y.Object $ H.insert "end" (Y.String $ as0xHex ea) $
-                   H.insert "origin" (Y.String $ as0xHex org) theSections
+    Y.Object $ H.insert "end" (Y.String $ as0xHex ea) $
+               H.insert "origin" (Y.String $ as0xHex org) $
+               H.map (\dirs -> Y.Array $ V.map toJSON dirs) sects
 
 instance FromJSON Guidance where
   parseJSON (Y.Object o) =
@@ -161,8 +120,55 @@ mkSection sectName _directives _ = fail (T.unpack $ T.concat [ "Section '"
                                                              , " expects a directive list."
                                                              ])
 
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+data Directive where
+  MD5Sum         :: BCL.ByteString
+                 -- MD5 signature: Conditionally apply the directives iff the section's signature matches
+                 -> Directive
+  SymEquate      :: T.Text
+                 -- Symbolic name
+                 -> Z80addr
+                 -- Value associated iwth with the symbolic name
+                 -> Directive
+  Comment        :: T.Text
+                 -- Comment text
+                 -> Directive
+  DoDisasm       :: Z80addr
+                 -- Start disassembly address
+                 -> Z80disp
+                 -- Number of bytes to disassemble
+                 -> Directive
+  GrabBytes      :: Z80addr
+                 -- Start of range
+                 -> Z80disp
+                 -- Number of bytes to grab
+                 -> Directive
+  GrabAsciiZ     :: Z80addr
+                    -- Start address to start grabbing 0-terminated ASCII string
+                 -> Directive
+  GrabAscii      :: Z80addr
+                 -- Start of range
+                 -> Z80disp
+                 -- Number of bytes to grab
+                 -> Directive
+  HighBitTable   :: Z80addr
+                 -- Start of table
+                 -> Z80disp
+                 -- Table length
+                 -> Directive
+  JumpTable      :: Z80addr
+                 -- Jump table start
+                 -> Z80disp
+                 -- Jump table length
+                 -> Directive
+  KnownSymbols   :: H.HashMap Z80addr T.Text
+                    -- Mapping between addresses and symbols, more user friendly output
+                 -> Directive
+  deriving (Eq, Show)
+
 instance ToJSON Directive where
-  toJSON (MD5Sum _sum)            = Y.object [("md5" :: T.Text) .= ("0x00--" :: T.Text)]
+  toJSON (MD5Sum md5sum)          = Y.object ["md5" .= md5AsText md5sum]
   toJSON (SymEquate sym addr)     = Y.object ["equate" .= Y.object [ "name" .= sym
                                                                    , "value" .= as0xHex addr]
                                              ]
@@ -187,6 +193,7 @@ instance ToJSON Directive where
                                                                       , "nbytes" .= as0xHex disp
                                                                       ]
                                              ]
+  toJSON (KnownSymbols _syms)     = undefined
 
 {-
   toEncoding (SetOrigin addr) = pairs ("addr" .= addr)
@@ -200,6 +207,9 @@ instance ToJSON Directive where
   toEncoding (JumpTable addr disp) = pairs ("jumptable" .= object ["addr" .= addr, "nbytes" .= disp])
 -}
 
+md5AsText :: BCL.ByteString -> T.Text
+md5AsText md5sum = BCL.foldl (\accum digit -> T.append accum $ asHex digit) T.empty md5sum
+  
 instance FromJSON Directive where
   parseJSON val@(Y.Object _) = either (fail . T.unpack) (return) (parseDirective val)
   parseJSON invalid          = AT.typeMismatch "Directive" invalid
@@ -239,6 +249,10 @@ parseDirective (Y.Object o)
     -- , trace ("jumptable: v = " ++ (show v)) True
     , exists
     = mkJumpTable v
+    | (v, exists) <- probe "symbols" o
+    {-  , trace ("symbols: v = " ++ (show v)) True -}
+    , exists
+    = mkKnownSymbols v
     | otherwise
     = fail ("Valid directive expected, got: " ++ (show o))
     where
@@ -286,6 +300,7 @@ mkAsciiZ (Just (Y.String addr)) = either (\err   -> Left err)
 mkAsciiZ (Just (Y.Number addr)) = case (S.toBoundedInteger addr) of
                                     Just (addr' :: Z80addr) -> Right $ GrabAsciiZ addr'
                                     Nothing -> outOfRange minZ80addr maxZ80addr addr
+mkAsciiZ _                      = Left "asciiz expects an address"
 
 mkDisasm :: Maybe AT.Value -> Either T.Text Directive
 mkDisasm = rdStartAndLength (DoDisasm)
@@ -301,6 +316,33 @@ mkHighBitTable = rdStartAndLength (HighBitTable)
 
 mkJumpTable :: Maybe AT.Value -> Either T.Text Directive
 mkJumpTable = rdStartAndLength (JumpTable)
+
+mkKnownSymbols :: Maybe AT.Value -> Either T.Text Directive
+mkKnownSymbols (Just (Y.Object syms)) =
+  let syms'                      = H.toList $ H.mapWithKey (symConvert) syms
+
+      symConvert _k (Y.String s) = convertWord16 s
+      symConvert _k (Y.Number n) = maybe (outOfRange minZ80addr maxZ80addr n)
+                                         (\n' -> Right $ n')
+                                         (S.toBoundedInteger n)
+      symConvert k  something    = Left $ T.concat [ "Expected an address in '"
+                                                   , k
+                                                   , singleQuote
+                                                   , " mapping, got "
+                                                   , (T.pack . show) something
+                                                   ]
+
+      cvtErrs                    = [ getLeft (snd x)  | x <- syms', isLeft (snd x) ]
+      getLeft (Left x)           = x
+      getLeft (Right _)          = error "Should only have Left elements in this list."
+
+      goodElts                   = [ (getRight (snd x), fst x) | x <- syms', isRight (snd x) ]
+      getRight (Right x)         = x
+      getRight (Left _)          = error "Should only have Right elements in this list."
+  in  if   null cvtErrs
+      then Right $ KnownSymbols $ H.fromList goodElts
+      else Left $ T.unlines cvtErrs
+mkKnownSymbols _ = Left $ "symbols expects a map of symbol names to addresses"
 
 convertWord16 :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
 convertWord16 t
@@ -365,7 +407,7 @@ convertDecimal str =
       then if val >= vMin && val <= vMax
            then Right (fromIntegral val)
            else outOfRange minBound maxBound str
-      else Left $ T.concat ["Invalid decimal constant: '", str, singleQuote]
+      else Left $ T.concat ["Invalid constant: '", str, singleQuote]
 
 validSymName :: T.Text -> Bool
 validSymName sym = let validChar x = (C.isLetter x || x == '$' || x == '_' || x == '@')

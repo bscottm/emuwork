@@ -21,6 +21,13 @@ import           Machine
 import           Z80
 
 import           TRS80.Types
+--
+-- | The TRS-80 Model I's memory system.
+data ModelIMemory where
+  ModelIMemory ::
+    { rom :: Vector Z80word
+    , ram :: Vector Z80word
+    } -> ModelIMemory
 
 -- | A very basic (and completely unusable) TRS-80 Model I system
 trs80generic :: EmulatedSystem Z80state Z80addr Z80word Z80instruction

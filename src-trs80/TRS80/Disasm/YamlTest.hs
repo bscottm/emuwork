@@ -136,6 +136,8 @@ mkYAMLTests opts =
                                         ]
                    , "highbits" ~: test [ "valid highbits"     ~: (validHighBits opts)  @? "highbits directive failed."
                                         ]
+                   , "symbols"  ~: test [ "known symbols"      ~: (knownSymbols opts)   @? "known symbols failed."
+                                        ]
                    ]
 
 doYAMLTest :: TestArgs -> ByteString -> IO Bool
@@ -288,4 +290,14 @@ section:
 - highbits:
     addr: 0x1650
     nbytes: 0x01d0
+|]
+
+knownSymbols :: TestArgs -> IO Bool
+knownSymbols opts = doYAMLTest opts [r|
+origin: 0x0000
+end:    0x0001
+section:
+- symbols:
+    foo: 0x4000
+    bar: 0x4001
 |]

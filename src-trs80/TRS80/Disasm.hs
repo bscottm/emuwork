@@ -14,11 +14,12 @@ import qualified Data.ByteString.Lazy as BCL
 import           Data.Char
 import           Data.Digest.Pure.MD5
 import qualified Data.Foldable as Foldable
-import qualified Data.Map as Map
+import qualified Data.HashMap.Strict as H
 import           Data.Sequence (Seq, (|>), (><))
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
+import qualified Data.Vector as V
 import           Data.Vector.Unboxed (Vector, (!))
 import qualified Data.Vector.Unboxed as DVU
 import           Debug.Trace
@@ -30,7 +31,6 @@ import           System.IO
 import           Machine
 import           TRS80.CommonOptions
 import           TRS80.Disasm.Guidance
-import           TRS80.Disasm.KnownSymbols
 import           TRS80.System
 import           TRS80.Types
 import           Z80
@@ -51,10 +51,10 @@ disasmCmd sys opts =
           case disopts of
             (DisasmOptions gFile, []) ->
               do
-                geither <- Y.decodeFileEither gFile :: IO (Either Y.ParseException Guidance)
-                case geither of
-                  Right guidance -> trs80Rom sys imgRdr image msize
-                  Left  err      -> hPutStrLn stderr "Invalid guidance, error is:"
+                gresult <- Y.decodeFileEither gFile :: IO (Either Y.ParseException Guidance)
+                case gresult of
+                  Right guidance -> trs80disassemble sys imgRdr image msize guidance
+                  Left  err      -> hPutStrLn stderr (gFile ++ ":")
                                     >> hPutStrLn stderr (Y.prettyPrintParseException err)
 
             (_, _) -> hPutStrLn stderr "Invalid disassembler options. Exiting."
@@ -107,16 +107,14 @@ disasmUsage =
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Disassemble the TRS-80 ROM (with annotations, known symbols, ...)
-trs80Rom :: ModelISystem
-         -> (FilePath -> IO (Vector Word8))
-         -> FilePath
-         -> Int
-         -> IO ()
-trs80Rom sys imgReader imgName msize =
-  hPutStrLn stderr "TRS-80 Model I configuration:"
-  >> hPutStrLn stderr ("Memory size: " ++ (show msize))
-  >> hPutStrLn stderr ("ROM image:   " ++ imgName)
-  >> trs80System imgName imgReader (fromIntegral msize) sys
+trs80disassemble :: ModelISystem
+                 -> (FilePath -> IO (Vector Word8))
+                 -> FilePath
+                 -> Int
+                 -> Guidance
+                 -> IO ()
+trs80disassemble sys imgReader imgName msize guidance =
+  trs80System imgName imgReader (fromIntegral msize) sys
   >>= (\trs80 -> case trs80 ^. memory of
                    MemorySystem memSys -> let img = mFetchN memSys (0 :: Z80addr) (12 * 1024)
                                               dis = collectRom trs80 (initialDisassembly img) [] -- actions
@@ -134,7 +132,7 @@ trs80Rom sys imgReader imgName msize =
                                                    |> (mkLineComment ((identifyROM . romMD5) img))
                                                    |> (mkLineComment commentBreak)
                                                    |> (mkLineComment T.empty)) $
-                               symbolTab .~ knownSymbols $
+                               symbolTab .~ (knownSymbols guidance) $
                                addrInDisasmRange .~ trs80RomRange $
                                mkInitialDisassembly
     commentBreak           = "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
@@ -143,27 +141,28 @@ trs80Rom sys imgReader imgName msize =
     lastAddr               = 0x2fff
     -- ROM range for 'addrInDisasmRange' predicate
     trs80RomRange addr     = addr >= 0x0000 && addr <= lastAddr
+    knownSymbols g         = H.empty
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Identify a ROM from its MD5 signature.
 identifyROM :: BCL.ByteString
             -> T.Text
-identifyROM md5sig = case md5sig `Map.lookup` romSigs of
+identifyROM md5sig = case md5sig `H.lookup` romSigs of
                        Nothing      -> "Unknown ROM signature"
                        Just romName -> romName
 
-romSigs :: Map.Map BCL.ByteString T.Text
-romSigs = Map.fromList [ ( BCL.pack [ 0xca, 0x74, 0x82, 0x2e, 0xbc, 0x28, 0x03, 0xc6, 0x63, 0x5a, 0x55, 0x11
-                                    , 0x6e, 0xcd, 0x95, 0x39 ]
-                         , "Model I v1.2-3a" )
-                       -- This one is pretty elusive in the wild...
-                       , ( BCL.pack [ 0x6f, 0x0a, 0xc8, 0x17, 0x9f, 0xa0, 0x1c, 0xc4, 0x47, 0x20, 0xda, 0x31
-                                   , 0x9c, 0xe1, 0x2a, 0x92 ]
-                         , "Model I v1.3-1" )
-                       , ( BCL.pack [ 0x6c, 0x73, 0x4a, 0x96, 0x36, 0x5b, 0xae, 0x81, 0xc7, 0x29, 0xc2, 0xe4
-                                    , 0xf0, 0xf7, 0x02, 0x0e ]
-                         , "System-80 blue label" )
-                       ]
+romSigs :: H.HashMap BCL.ByteString T.Text
+romSigs = H.fromList [ ( BCL.pack [ 0xca, 0x74, 0x82, 0x2e, 0xbc, 0x28, 0x03, 0xc6, 0x63, 0x5a, 0x55, 0x11
+                                  , 0x6e, 0xcd, 0x95, 0x39 ]
+                       , "Model I v1.2-3a" )
+                     -- This one is pretty elusive in the wild...
+                     , ( BCL.pack [ 0x6f, 0x0a, 0xc8, 0x17, 0x9f, 0xa0, 0x1c, 0xc4, 0x47, 0x20, 0xda, 0x31
+                                 , 0x9c, 0xe1, 0x2a, 0x92 ]
+                       , "Model I v1.3-1" )
+                     , ( BCL.pack [ 0x6c, 0x73, 0x4a, 0x96, 0x36, 0x5b, 0xae, 0x81, 0xc7, 0x29, 0xc2, 0xe4
+                                  , 0xf0, 0xf7, 0x02, 0x0e ]
+                       , "System-80 blue label" )
+                     ]
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Collect the TRS-80 ROM (oh, this could sooo be generalized!) by left folding the disassembler guidance
@@ -191,7 +190,7 @@ doAction sys dstate guide
   {-  | trace ("disasm: guide = " ++ (show guide)) False = undefined -}
   --  | (SetOrigin origin)         <- guide = disasmSeq %~ (|> (mkDisOrigin origin)) $ dstate
   | (SymEquate label addr)     <- guide = 
-    (symbolTab %~ (Map.insert addr label)) . (disasmSeq %~ (|> (mkEquate label addr))) $ dstate
+    (symbolTab %~ (H.insert addr label)) . (disasmSeq %~ (|> (mkEquate label addr))) $ dstate
   | (Comment comment)          <- guide = disasmSeq %~ (|> (mkLineComment comment)) $ dstate
   | (DoDisasm sAddr nBytes)    <- guide = disassemble dstate sys (PC sAddr) (PC $ sAddr + fromIntegral nBytes)
                                                       trs80RomPostProcessor

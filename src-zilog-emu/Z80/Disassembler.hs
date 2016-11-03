@@ -26,8 +26,8 @@ module Z80.Disassembler
 
 import           Control.Lens hiding ((|>))
 import           Data.Data
-import           Data.Map (Map)
-import qualified Data.Map as Map
+import           Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as H
 import           Data.Sequence (Seq, (|>))
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -80,7 +80,7 @@ data Z80disassembly =
   , _addrInDisasmRange :: Z80addr               -- The address to test
                        -> Bool                  -- 'True' if in disassembler's range, 'False' otherwise.
     -- | The symbol table mapping between addresses and symbol names in 'disasmSeq'
-  , _symbolTab :: Map Z80addr  T.Text
+  , _symbolTab :: HashMap Z80addr  T.Text
     -- | The sequence of tuples, each of which is an address, words corresponding to the disassembled instruction, and the
     -- disassembled instruction.
   , _disasmSeq :: Seq Z80DisasmElt
@@ -94,7 +94,7 @@ mkInitialDisassembly :: Z80disassembly
 mkInitialDisassembly = Z80disassembly
                        { _labelNum           = 0
                        , _addrInDisasmRange  = (\_ -> True)
-                       , _symbolTab          = Map.empty
+                       , _symbolTab          = H.empty
                        , _disasmSeq          = Seq.empty
                        }
 
@@ -154,10 +154,10 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
     collectSymtab curDState destAddr prefix =
       let symTab       = curDState ^. symbolTab
           addrInRangeF = curDState ^. addrInDisasmRange
-          isInSymtab   = destAddr `Map.member` symTab
+          isInSymtab   = destAddr `H.member` symTab
           label        = T.append prefix (curDState ^. labelNum & (T.pack . show))
       in  if (addrInRangeF destAddr) && not isInSymtab then
-            (symbolTab %~ (Map.insert destAddr label)) . (labelNum +~ 1) $ curDState
+            (symbolTab %~ (H.insert destAddr label)) . (labelNum +~ 1) $ curDState
           else
             curDState
 

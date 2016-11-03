@@ -6,9 +6,9 @@
 -- The assembler part is Misosys EDAS-compatible, so, if the "analytic" part is stripped from the output, the resulting "assembler"
 -- part could be fed into the Misosys-EDAS compatible assembler to regenerate the object code.
 module Z80.DisasmOutput
-  ( z80AnalyticDisassembly
-  , z80AnalyticDisassemblyOutput
-  ) where
+( z80AnalyticDisassembly
+, z80AnalyticDisassemblyOutput
+) where
 
 -- import Debug.Trace
 
@@ -17,8 +17,8 @@ import           Data.Char
 import qualified Data.Foldable as Foldable
 import           Data.Generics.Aliases
 import           Data.Generics.Schemes
-import           Data.Map (Map)
-import qualified Data.Map as Map
+import           Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as H
 import           Data.Sequence (Seq, (|>), (<|), (><))
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -61,14 +61,14 @@ fixupSymbols z80dstate =
       -- Translate an absolute address, generally hidden inside an instruction operand, into a symbolic address
       -- if present in the symbol table.
       fixupSymbol addr@(AbsAddr absAddr)    =
-        case absAddr `Map.lookup` symtab of
+        case absAddr `H.lookup` symtab of
           Nothing      -> addr
           Just symName -> SymAddr symName
       fixupSymbol symAddr                   = symAddr
 
       -- Lookup address labels in the symbol table
       fixupEltAddress plain@(Plain absAddr) =
-        case absAddr `Map.lookup` symtab of
+        case absAddr `H.lookup` symtab of
           Nothing      -> plain
           Just symName -> Labeled absAddr symName
       fixupEltAddress labeled               = labeled
@@ -76,23 +76,23 @@ fixupSymbols z80dstate =
       disasmSeq %~ (everywhere $ (mkT fixupSymbol) . (mkT fixupEltAddress)) $ z80dstate
 
 -- | Format the accumulated symbol table as a sequence of 'T.Text's, in columnar format
-formatSymTab :: Map Z80addr T.Text
+formatSymTab :: HashMap Z80addr T.Text
              -> Seq T.Text
              -> Seq T.Text
 formatSymTab symTab outSeq =
-  let maxsym     = Map.foldl' (\len str -> if len < T.length str; then T.length str; else len) 0 symTab
+  let maxsym     = H.foldl' (\len str -> if len < T.length str; then T.length str; else len) 0 symTab
       totalCols  = fromIntegral(((lenOutputLine - maxsym) `div` (maxsym + extraSymPad)) + 1) :: Int
-      byNameSyms =  Map.fromList $ map swap $ Map.assocs symTab
+      byNameSyms =  H.fromList $ map swap $ H.toList symTab
       byAddrSeq = T.empty
                   <| T.empty
                   <| "Symbol Table (numeric):"
                   <| T.empty
-                  <| (columnar$ Map.foldlWithKey formatSymbol Seq.empty symTab)
+                  <| (columnar$ H.foldlWithKey' formatSymbol Seq.empty symTab)
       byNameSeq = T.empty
                    <| T.empty
                    <| "Symbol Table (alpha):"
                    <| T.empty
-                   <| (columnar $ Map.foldlWithKey (\acc sym addr -> formatSymbol acc addr sym) Seq.empty byNameSyms)
+                   <| (columnar $ H.foldlWithKey' (\acc sym addr -> formatSymbol acc addr sym) Seq.empty byNameSyms)
       -- Consolidate sequence into columnar format
       columnar symSeq = if Seq.length symSeq >= totalCols then 
                           let (thisCol, rest) = Seq.splitAt totalCols symSeq
