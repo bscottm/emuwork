@@ -6,6 +6,7 @@ origin: 0x0000
 end: 0x2fff
 
 Model I Level II:
+- md5: ca74822ebc2803c6635a55116ecd9539
 - symbols:
     RST00: 0x0000
     RST08: 0x0008

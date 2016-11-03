@@ -7,6 +7,8 @@
 module TRS80.Disasm.Guidance
   ( Guidance(..)
   , Directive(..)
+  , getKnownSymbols
+  , getMatchingSection
   , ToJSON(..)
   , FromJSON(..)
   ) where
@@ -253,6 +255,10 @@ parseDirective (Y.Object o)
     {-  , trace ("symbols: v = " ++ (show v)) True -}
     , exists
     = mkKnownSymbols v
+    | (v, exists) <- probe "md5" o
+    {-  , trace ("md5: v = " ++ (show v)) True -}
+    , exists
+    = mkMD5Sum v
     | otherwise
     = fail ("Valid directive expected, got: " ++ (show o))
     where
@@ -344,6 +350,16 @@ mkKnownSymbols (Just (Y.Object syms)) =
       else Left $ T.unlines cvtErrs
 mkKnownSymbols _ = Left $ "symbols expects a map of symbol names to addresses"
 
+mkMD5Sum ::  Maybe AT.Value -> Either T.Text Directive
+mkMD5Sum (Just (Y.String s)) =
+  let strBytes = T.chunksOf 2 s
+      bytes    = map convertHex strBytes
+      errs     = lefts bytes
+  in  if all (\x -> T.compareLength x 2 == EQ) strBytes && null errs
+      then Right $ (MD5Sum . BCL.pack . rights) bytes
+      else Left $ T.unlines errs
+mkMD5Sum _                   = Left $ "md5 expects a 16 byte hex string (no '0x')"
+  
 convertWord16 :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
 convertWord16 t
   | T.isPrefixOf "0x" t
@@ -470,3 +486,26 @@ rdStartAndLength tyCon (Just (Y.Object o)) =
         Nothing                   -> Left "start address ('addr') key required."
 
 rdStartAndLength _tyCon _anything = Left "Expected a dictionary with 'start' and 'end'/'nBytes'"
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+getKnownSymbols :: V.Vector Directive
+                -> Maybe (H.HashMap Z80addr T.Text)
+getKnownSymbols dirs = let knownSymbols (KnownSymbols _) = True
+                           knownSymbols _                = False
+                       in  case V.find knownSymbols dirs of
+                             Just (KnownSymbols syms) -> Just syms
+                             _                        -> Nothing
+
+getMatchingSection :: Guidance
+                   -> BCL.ByteString
+                   -> Maybe (V.Vector Directive)
+getMatchingSection g md5sum =
+  let matchesMD5 dirs = isJust $ V.find (\d -> case d of
+                                                 (MD5Sum md5) -> md5sum == md5
+                                                 _            -> False) dirs
+      filteredSects   = H.filter matchesMD5 (sections g)
+      sectKeys        = H.keys filteredSects
+  in  if not (null filteredSects) && length sectKeys == 1
+      then Just (filteredSects H.! (head sectKeys))
+      else Nothing

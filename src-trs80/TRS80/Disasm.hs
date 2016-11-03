@@ -15,6 +15,7 @@ import           Data.Char
 import           Data.Digest.Pure.MD5
 import qualified Data.Foldable as Foldable
 import qualified Data.HashMap.Strict as H
+import           Data.Maybe
 import           Data.Sequence (Seq, (|>), (><))
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
@@ -116,32 +117,42 @@ trs80disassemble :: ModelISystem
 trs80disassemble sys imgReader imgName msize guidance =
   trs80System imgName imgReader (fromIntegral msize) sys
   >>= (\trs80 -> case trs80 ^. memory of
-                   MemorySystem memSys -> let img = mFetchN memSys (0 :: Z80addr) (12 * 1024)
-                                              dis = collectRom trs80 (initialDisassembly img) [] -- actions
-                                          in  if (not . DVU.null) img
-                                              then
-                                                checkAddrContinuity dis
-                                                >> z80AnalyticDisassemblyOutput stdout dis
-                                              else
-                                                return ()
+                   MemorySystem memSys -> let img  = mFetchN memSys theOrigin (fromIntegral (theEndAddr - theOrigin) + 1)
+                                          in  case getMatchingSection guidance (romMD5 img) of
+                                                Just dirs ->
+                                                  let dis = collectRom trs80 (initialDisassembly img dirs) dirs
+                                                  in  if (not . DVU.null) img
+                                                      then
+                                                        checkAddrContinuity dis
+                                                        >> z80AnalyticDisassemblyOutput stdout dis
+                                                      else
+                                                        return ()
+                                                Nothing ->
+                                                  hPutStrLn stderr ("Could not find guidance section for " ++
+                                                                     (T.unpack $ romMD5Hex img))
+                                                  >> hPutStrLn stderr ("Origin = " ++ (as0xHexS theOrigin))
+                                                  >> hPutStrLn stderr ("End addr = " ++ (as0xHexS theEndAddr))
+                                                  >> hPutStrLn stderr ("img length = " ++ (show (DVU.length img)))
+                                                  >> return ()
       )
   where
+    theOrigin              = origin guidance
+    theEndAddr             = endAddr guidance
     -- Initial disassembly state: known symbols and disassembly address range predicate
-    initialDisassembly img = disasmSeq %~ (\s -> s |> (mkLineComment commentBreak)
-                                                   |> (mkLineComment (T.append "ROM MD5 checksum: " (romMD5Hex img)))
-                                                   |> (mkLineComment ((identifyROM . romMD5) img))
-                                                   |> (mkLineComment commentBreak)
-                                                   |> (mkLineComment T.empty)) $
-                               symbolTab .~ (knownSymbols guidance) $
-                               addrInDisasmRange .~ trs80RomRange $
-                               mkInitialDisassembly
+    initialDisassembly img dirs =
+      disasmSeq %~ (\s -> s |> (mkLineComment commentBreak)
+                            |> (mkLineComment (T.append "ROM MD5 checksum: " (romMD5Hex img)))
+                            |> (mkLineComment ((identifyROM . romMD5) img))
+                            |> (mkLineComment commentBreak)
+                            |> (mkLineComment T.empty)) $
+                   symbolTab .~ (fromMaybe H.empty $ getKnownSymbols dirs) $
+                   addrInDisasmRange .~ trs80RomRange $
+                   mkInitialDisassembly
     commentBreak           = "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
     romMD5 img             = (encode . md5 . BCL.pack . DVU.toList) img
     romMD5Hex img          = BCL.foldl (\a x -> T.append a (asHex x)) T.empty (romMD5 img)
-    lastAddr               = 0x2fff
     -- ROM range for 'addrInDisasmRange' predicate
-    trs80RomRange addr     = addr >= 0x0000 && addr <= lastAddr
-    knownSymbols g         = H.empty
+    trs80RomRange addr     = addr >= (origin guidance) && addr <= (endAddr guidance)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Identify a ROM from its MD5 signature.
@@ -172,7 +183,7 @@ collectRom :: ModelISystem
            -> Z80disassembly
               -- ^ Initial disassembler state. This is pre-populated with known
               -- symbols in the symbol table.
-           -> [Directive]
+           -> V.Vector Directive
               -- ^ Disassembler guidance
            -> Z80disassembly
               -- ^ Resulting disassembler state, symbol table and disassembly
