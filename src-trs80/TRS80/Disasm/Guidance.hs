@@ -1,7 +1,7 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE FlexibleContexts    #-}
+{-# LANGUAGE OverloadedStrings   #-}
+{-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module TRS80.Disasm.Guidance
   ( Guidance(..)
@@ -12,23 +12,23 @@ module TRS80.Disasm.Guidance
   , FromJSON(..)
   ) where
 
-import qualified Data.Aeson.Types as AT
+import qualified Data.Aeson.Types     as AT
 import           Data.Bits
 import qualified Data.ByteString.Lazy as BCL
-import qualified Data.Char as C
+import qualified Data.Char            as C
 import           Data.Either
-import qualified Data.Foldable as Foldable
-import qualified Data.HashMap.Strict as H
+import qualified Data.Foldable        as Foldable
+import qualified Data.HashMap.Strict  as H
 import           Data.Maybe
-import qualified Data.Scientific as S
-import qualified Data.Text as T
-import qualified Data.Vector as V
-import           Data.Yaml (FromJSON(..), ToJSON(..), (.=))
-import qualified Data.Yaml as Y
+import qualified Data.Scientific      as S
+import qualified Data.Text            as T
+import qualified Data.Vector          as V
+import           Data.Yaml            (FromJSON (..), ToJSON (..), (.=))
+import qualified Data.Yaml            as Y
 -- import           Debug.Trace
 
-import           Machine.Utils (as0xHex, asHex)
-import           Z80 (Z80addr, Z80disp)
+import           Machine.Utils        (as0xHex, asHex)
+import           Z80                  (Z80addr, Z80disp)
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -209,7 +209,7 @@ instance ToJSON Directive where
 
 md5AsText :: BCL.ByteString -> T.Text
 md5AsText = BCL.foldl (\accum digit -> T.append accum $ asHex digit) T.empty
-  
+
 instance FromJSON Directive where
   parseJSON val@(Y.Object _) = either (fail . T.unpack) return (parseDirective val)
   parseJSON invalid          = AT.typeMismatch "Directive" invalid
@@ -331,8 +331,8 @@ mkKnownSymbols (Just (Y.Object syms)) =
                                                    ]
 
       cvtErrs                    = [ getLeft (snd x)  | x <- syms', isLeft (snd x) ]
-      getLeft (Left x)           = x
-      getLeft (Right _)          = error "Should only have Left elements in this list."
+      getLeft (Left x)  = x
+      getLeft (Right _) = error "Should only have Left elements in this list."
 
       goodElts                   = [ (getRight (snd x), fst x) | x <- syms', isRight (snd x) ]
       getRight (Right x)         = x
@@ -351,7 +351,7 @@ mkMD5Sum (Just (Y.String s)) =
       then (Right . MD5Sum . BCL.pack . rights) bytes
       else Left (T.unlines errs)
 mkMD5Sum _                   = Left "md5 expects a 16 byte hex string (no '0x')"
-  
+
 convertWord16 :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
 convertWord16 t
   | T.isPrefixOf "0x" t
@@ -401,7 +401,7 @@ convertOctal octstr =
       vMax = fromIntegral (maxBound :: a)
   in  if validOctal octstr
       then if val >= vMin && val <= vMax
-           then Right $ fromIntegral val
+           then (Right . fromIntegral) val
            else outOfRange minBound maxBound octstr
       else Left $ T.concat ["Invalid octal constant: '", octstr, singleQuote]
 
@@ -436,7 +436,7 @@ singleQuote = T.singleton '\''
 
 rdStartAndLength :: (Z80addr -> Z80disp -> Directive) -> Maybe AT.Value -> Either T.Text Directive
 rdStartAndLength tyCon (Just (Y.Object o)) =
-  let endAddr = H.lookup "end" o
+  let endA    = H.lookup "end" o
       nBytes  = let nb' = H.lookup "nBytes" o
                     in case nb' of
                          (Just _) -> nb'
@@ -447,32 +447,28 @@ rdStartAndLength tyCon (Just (Y.Object o)) =
       rdLength _                    _                    (Left err)   = Left err
       rdLength (Just _)             (Just _)             _            = Left "Only one of 'end' or 'nBytes' can be specified."
       rdLength (Just (Y.String ea)) Nothing              (Right sa)   =
-        either (\err  -> Left err)
+        either Left
                (\ea'  -> Right $ tyCon sa (fromIntegral (ea' - sa)))
                (convertWord16 ea)
       rdLength (Just (Y.Number ea)) Nothing              (Right sa)   =
-        case (S.toBoundedInteger ea) of
-          Just (ea' :: Z80addr) -> Right $ tyCon sa (fromIntegral (ea' - sa))
-          Nothing -> outOfRange minZ80addr maxZ80addr ea
+        maybe (outOfRange minZ80addr maxZ80addr ea)
+              (\ea' -> Right (tyCon sa (fromIntegral (ea' - sa))))
+              (S.toBoundedInteger ea)
       rdLength (Just _)             Nothing              _            =
         Left "End address is not a number."
-      rdLength Nothing              (Just (Y.String nb)) (Right sa)   =
-        either (\err  -> Left err)
-               (\nb' -> Right $ tyCon sa nb')
-               (convertWord16 nb)
-      rdLength Nothing              (Just (Y.Number nb)) (Right sa)   =
-        case (S.toBoundedInteger nb) of
-          Just (nb' :: Z80disp) -> Right $ tyCon sa nb'
-          Nothing -> outOfRange minZ80disp maxZ80disp nb
+      rdLength Nothing              (Just (Y.String nb)) (Right sa)   = tyCon sa <$> convertWord16 nb
+      rdLength Nothing              (Just (Y.Number nb)) (Right sa)   = maybe (outOfRange minZ80disp maxZ80disp nb)
+                                                                              (Right . tyCon sa)
+                                                                              (S.toBoundedInteger nb)
       rdLength Nothing              (Just _)             _            =
         Left "Number of bytes ('nBytes') is an invalid number."
       rdLength Nothing              Nothing              _            =
-        Left $ T.pack "End address or number of btyes ('end'/'nBytes') missing."
+        Left (T.pack "End address or number of btyes ('end'/'nBytes') missing.")
   in  case H.lookup "addr" o of
-        Just (Y.String startAddr) -> rdLength endAddr nBytes $ convertWord16 startAddr
-        Just (Y.Number startAddr) -> case S.toBoundedInteger startAddr of
-                                       (Just (sa :: Z80addr)) -> rdLength endAddr nBytes (Right sa)
-                                       Nothing                -> outOfRange minZ80addr maxZ80addr startAddr
+        Just (Y.String startAddr) -> rdLength endA nBytes $ convertWord16 startAddr
+        Just (Y.Number startAddr) -> maybe (outOfRange minZ80addr maxZ80addr startAddr)
+                                           (rdLength endA nBytes . Right)
+                                           (S.toBoundedInteger startAddr)
         Just _something           -> Left "Invalid start address ('addr')."
         Nothing                   -> Left "start address ('addr') key required."
 
@@ -498,5 +494,5 @@ getMatchingSection g md5sum =
       filteredSects   = H.filter matchesMD5 (sections g)
       sectKeys        = H.keys filteredSects
   in  if not (null filteredSects) && length sectKeys == 1
-      then Just (filteredSects H.! (head sectKeys))
+      then Just (filteredSects H.! head sectKeys)
       else Nothing

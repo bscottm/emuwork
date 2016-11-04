@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 
 {- |
@@ -14,8 +14,8 @@ module TRS80.System
   ) where
 
 import           Control.Lens
-import           Data.Vector.Unboxed (Vector, (!), empty)
-import qualified Data.Vector.Unboxed as DVU (replicate, generate)
+import           Data.Vector.Unboxed (Vector, empty, (!))
+import qualified Data.Vector.Unboxed as DVU (generate, replicate)
 
 import           Machine
 import           Z80
@@ -27,6 +27,7 @@ data ModelIMemory where
   ModelIMemory ::
     { rom :: Vector Z80word
     , ram :: Vector Z80word
+    , topMem :: Z80addr
     } -> ModelIMemory
 
 -- | A very basic (and completely unusable) TRS-80 Model I system
@@ -34,6 +35,7 @@ trs80generic :: EmulatedSystem Z80state Z80addr Z80word Z80instruction
 trs80generic = z80generic &
                  memory .~ MemorySystem ModelIMemory { rom = empty
                                                      , ram = empty
+                                                     , topMem = 0
                                                      } &
                  sysName .~ "TRS-80 Model I" &
                  sysAliases .~ ["trs80-model-I", "trs80-model-1", "trs80-model-i"]
@@ -46,6 +48,7 @@ installMem :: ModelISystem
 installMem sys memSize newROM =
   sys & memory .~ MemorySystem ModelIMemory { rom = newROM
                                             , ram = DVU.replicate (fromIntegral (memSize * 1024)) 0
+                                            , topMem = fromIntegral ((memSize + 16) * 1024 - 1)
                                             }
 
 {- | Fetch a byte from memory. The TRS-80 has a very simple memory layout:
@@ -70,10 +73,10 @@ modelIfetch msys addr
   | addr >= mmapIOStart && addr < mmapIOEnd
   {- FIXME -}
   = 0
-  | addr >= ramStart && addr <= ramEnd
+  | addr >= ramStart && addr <= topMem msys
   = theRAM ! fromIntegral (addr - ramStart)
   | otherwise
-  = error ("TRS80.mfetch: Illegal address or invalid memory system: " ++ (show addr))
+  = error ("TRS80.mfetch: Illegal address or invalid memory system: " ++ show addr)
   where
     theROM = rom msys
     theRAM = ram msys
@@ -86,18 +89,16 @@ instance MemoryOps ModelIMemory Z80addr Z80word where
   -- |
   mFetch = modelIfetch
   mFetchN = modelIfetchN
-  
-romSize, mmapIOStart, mmapIOEnd, ramStart, ramEnd :: Z80addr
+
+romSize, mmapIOStart, mmapIOEnd, ramStart :: Z80addr
 -- | ROM size (12K)
-romSize     = (12 * 1024)
+romSize     = 12 * 1024
 -- | Start of memory mapped I/O adress space.
 mmapIOStart = 0x3000
 -- | End of memory mapped I/O address space.
 mmapIOEnd   = mmapIOStart + 0x1000
 -- | Start of usable RAM
-ramStart    = (16 * 1024)
--- | Top RAM address (64K) -> 48K system if maximally configured.
-ramEnd      = (64 * 1024) - 1
+ramStart    = 16 * 1024
 
 -- | TRS-80 Model I constructor: install a ROM image and configure the system's RAM.
 trs80System :: FilePath
@@ -111,5 +112,4 @@ trs80System :: FilePath
             -> IO ModelISystem
             -- ^ Fully constructed TRS-80 Model I
 trs80System romPath reader memSize trs80 =
-    reader romPath
-    >>= (\romImage -> return $ installMem trs80 memSize romImage)
+    installMem trs80 memSize <$> reader romPath

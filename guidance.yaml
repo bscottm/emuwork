@@ -7,136 +7,6 @@ end: 0x2fff
 
 Model I Level II:
 - md5: ca74822ebc2803c6635a55116ecd9539
-- symbols:
-    RST00: 0x0000
-    RST08: 0x0008
-    RST10: 0x0010
-    WANTDCBGET: 0x0013
-    RST18: 0x0018
-    WANTDCBPUT: 0x001b
-    RST20: 0x0020
-    RST28: 0x0028
-    KBDSCN: 0x002b
-    RST30: 0x0030
-    CHARPRINT: 0x0033
-    RST38: 0x0038
-    LPRINTCHAR: 0x003b
-    KBLINE: 0x0040
-    KBWAIT: 0x0049
-    CTRLCHARS: 0x0050
-    DELAY: 0x0060
-    NMI_RESET: 0x0066
-    HAVEDISK: 0x0069
-    L2INIRESRVD: 0x0075
-    SETIOB: 0x008b
-    L2INIT2: 0x0091
-    MEMSIZE: 0x0105
-    L2LOGO: 0x0111
-    L3ERROR: 0x012d
-    CMDPOINT: 0x0132
-    BASSET: 0x0135
-    BASRESET: 0x0138
-    GRSTART: 0x0150
-    CLS: 0x01c9
-    BASRANDOM: 0x01d3
-    CASSPULSE1: 0x01d9
-    CASSDLY1: 0x01df
-    CASSPULSE2: 0x01e3
-    CASSDLY2: 0x01e9
-    CASSPULSE3: 0x01ed
-    CASSDLY3: 0x01f3
-    CASSOFF: 0x01f8
-    COUT: 0x033a
-    OUTDCB: 0x03c2
-    OUTDCBFINISH: 0x03dd
-    KBDREAD: 0x03e3
-    NXTKEYLINE: 0x03eb
-    DODCBFN: 0x0458
-    REGCHAR: 0x0480
-    CURCON: 0x0506
-    PRDCBFN: 0x058d
-    LPREADY: 0x05d1
-    DOKBLINE: 0x05d9
-    INITRSTVECS: 0x0674
-    RSTVECTABLE: 0x06d2
-    HADD_SPHALF: 0x0708
-    SPADD_IND_HL: 0x070b
-    SPSUB_IND_HL: 0x0710
-    SPSUB_BCDE: 0x0713
-    SPADD_BCDE: 0x0716
-    SPMUL_BCDE: 0x0847
-    SPDIV_BCDE: 0x08a2
-    NEG_MANTISSA: 0x0982
-    BCDE_VIA_HL: 0x09c2
-    CPHL2DE: 0x09d2
-    CPDE2HL: 0x09d3
-    # Integer math functions
-    INTADD: 0x0bd2
-    INTSUB: 0x0bc7
-    INTMPY: 0x0bf2
-    # Floating point constants
-    SFPZERO: 0x137c
-    SFPHALF: 0x1380
-    # BASIC trancendental functions
-    BASCOS: 0x1541
-    BASSIN: 0x1547
-    PI_OVER_2: 0x158b
-    BASTAN: 0x15a8
-    BASATN: 0x15bd
-    # BASIC's high-bit verb table
-    VERBS: 0x1650
-    VERBDISPATCH: 0x1822
-    # BASIC's error strings
-    ERRNOFOR: 0x18c9
-    ERRSYNTAX: 0x18cb
-    ERRRANGE: 0x18cd
-    ERROUTOFDATA: 0x18cf
-    ERRBADFUNC: 0x18d1
-    ERROVERFLOW: 0x18d3
-    ERROUTOFMEM: 0x18d5
-    ERRUNDEFLINE: 0x18d7
-    ERRBADSUBSCR: 0x18d9
-    ERRBADDIM: 0x18db
-    ERRDIV0: 0x18dd
-    ERRILLEGALDIRECT: 0x18df
-    ERRTYPEMISMATCH: 0x18e1
-    ERRNOSTRSPACE: 0x18e3
-    ERRLONGSTRING: 0x18e5
-    ERRCOMPLEXSTR: 0x18e7
-    ERRNOCONT: 0x18e9
-    ERRNORESUME: 0x18eb
-    ERRRESUMENOERR: 0x18ed
-    ERRUNPRINTERR: 0x18ef
-    ERRMISSOPERAND: 0x18f1
-    ERRFILEDATA: 0x18f3
-    ERRL3DOS: 0x18f5
-    BASRSVINIT: 0x18f7
-    READYPMT: 0x1929
-    BREAKMSG: 0x1930
-    ERORORIN: 0x191d
-    CMPDEHL: 0x1c90
-    DEFRST08: 0x1c96
-    BASFOR: 0x1ca1
-    DEFRST10: 0x1d78
-    BASRESTORE: 0x1d91
-    BASEND: 0x1dae
-    BASSTOP: 0x1da9
-    BASTRON: 0x1df7
-    BASTROFF: 0x1df8
-    BASGOSUB: 0x1eb1
-    BASRETURN: 0x1ede
-    BASGOTO: 0x1ec2
-    BASRUN: 0x1ea3
-    BASDATA: 0x1f05
-    BASREM: 0x1f07
-    BASLET: 0x1f21
-    BASIF: 0x2039
-    BASINPUT: 0x219a
-    BASREAD: 0x21ef
-    BASNEXT: 0x22b6
-    INTDIV: 0x2490
-    NUMTYPE: 0x25d9
-    BASDIM: 0x2608
 - comment: Restart vector redirections. These are 'JP' instructions
 - equate:
     value: 0x4000
@@ -345,7 +215,7 @@ Model I Level II:
 - equate:
     value: 0x3c32
     name: VIDLINE0RIGHT2
-- comment: |
+- comment: |+
     =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     TRS-80 Model I Level II ROM disassembly:
     =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -380,7 +250,7 @@ Model I Level II:
 - disasm:
     nbytes: 0x0087
     addr: 0x033a
-- comment: |
+- comment: |+
     =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     Output character to a device, device control block is pointed to
     by DE, which is eventually transferred into IX. IX+1 -> L, IX + 2 -> H
@@ -398,11 +268,11 @@ Model I Level II:
     to the DCB's function, C has the character to be output.
     =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-     _______________________________________ 
+     _______________________________________
     | | | | | | | | |      |         |      |
     |    T Y P E    |VECTOR| SYSDATA | NAME |
     |_|_|_|_|_|_|_|_|______|_________|______|
-     7 6 5 4 3 2 1 0 15   0 23      0 15   0 
+     7 6 5 4 3 2 1 0 15   0 23      0 15   0
 
     The DCB follows a strict format that defines the utilization  of all four
     fields.  The  programmer  need  be  concerned only  with the TYPE  and  VECTOR
@@ -475,7 +345,6 @@ Model I Level II:
 
     SYSDATA Field - <Bytes 3-5>
     ---------------------------
-
     These three bytes are used by the system for routing and  linking and are
     unavailable for any other purpose.
 
@@ -495,42 +364,43 @@ Model I Level II:
     FCB.  In this case, byte 6  of the field will contain the  DRIVE number of the
     drive containing the file and  byte  7 will contain  the  Directory Entry Code
     (DEC) of the file.
-    
-    
+
 - disasm:
     nbytes: 0x0020
     addr: 0x03c2
-- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-- comment: Read the keyboard's memory locations, determining if a key has
-- comment: been pressed. The scan starts as KBDLINE0, with the C register
-- comment: multiplied by 2 (3801, 3802, 3804, ...) via a rotate left until
-- comment: location 3880 is reached.
-- comment: ''
-- comment: Address    |0 0x01|1 0x02|2 0x04|3 0x08|4 0x10|5 0x20|6 0x40|7 0x80|
-- comment: '-----------+------+------+------+------+------+------+------+-------'
-- comment: 3B01       |A     |B     |C     |D     |E     |F     |G     |      |
-- comment: 3B02       |H     |I     |J     |K     |L     |M     |N     |O     |
-- comment: 3B04       |P     |Q     |R     |S     |T     |U     |V     |W     |
-- comment: 3B08       |X     |Y     |Z     |      |      |      |      |      |
-- comment: 3B10       |0     |1     |2     |3     |4     |5     |6     |7     |
-- comment: ! '3B20       |8     |9     |:     |;     |,     |-     |.     |/     |'
-- comment: 3B40       |ENTER |CLR   |UP-ARW|DN-ARW|L-ARW |R-ARW |SPACE |      |
-- comment: 3B80       |RTSHFT|LTSHFT|      |      |      |      |      |      |
-- comment: '-----------+------+------+------+------+------+------+------+-------'
-- comment: ''
-- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: |+
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    Read the keyboard's memory locations, determining if a key has
+    been pressed. The scan starts as KBDLINE0, with the C register
+    multiplied by 2 (3801, 3802, 3804, ...) via a rotate left until
+    location 3880 is reached.
+
+    Address    |0 0x01|1 0x02|2 0x04|3 0x08|4 0x10|5 0x20|6 0x40|7 0x80|
+    -----------+------+------+------+------+------+------+------+-------
+    3B01       |A     |B     |C     |D     |E     |F     |G     |      |
+    3B02       |H     |I     |J     |K     |L     |M     |N     |O     |
+    3B04       |P     |Q     |R     |S     |T     |U     |V     |W     |
+    3B08       |X     |Y     |Z     |      |      |      |      |      |
+    3B10       |0     |1     |2     |3     |4     |5     |6     |7     |
+    3B20       |8     |9     |:     |;     |,     |-     |.     |/     |
+    3B40       |ENTER |CLR   |UP-ARW|DN-ARW|L-ARW |R-ARW |SPACE |      |
+    3B80       |RTSHFT|LTSHFT|      |      |      |      |      |      |
+    -----------+------+------+------+------+------+------+------+-------
+
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - disasm:
     nbytes: 0x0074
     addr: 0x03e3
-- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-- comment: DO (display output) DCB function
-- comment: ''
-- comment: C has the character to be output on entry.
-- comment: ! '(IX + 3), (IX + 4): Current memory location in VIDRAM where the'
-- comment: character is output (DCB SYSINFO bytes 1 and 2).
-- comment: ! '(IX + 5): If non-zero, don''t actually output the character, but'
-- comment: do the rest of the character processing.
-- comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+- comment: |+
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    DO (display output) DCB function
+
+    C has the character to be output on entry.
+    (IX + 3), (IX + 4): Current memory location in VIDRAM where the
+    character is output (DCB SYSINFO bytes 1 and 2).
+    (IX + 5): If non-zero, don''t actually output the character, but
+    do the rest of the character processing.
+    =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 - disasm:
     nbytes: 0x0134
     addr: 0x0458
@@ -835,4 +705,134 @@ Model I Level II:
 - disasm:
     nbytes: 0x0a26
     addr: 0x25d9
+- symbols:
+    RST00: 0x0000
+    RST08: 0x0008
+    RST10: 0x0010
+    WANTDCBGET: 0x0013
+    RST18: 0x0018
+    WANTDCBPUT: 0x001b
+    RST20: 0x0020
+    RST28: 0x0028
+    KBDSCN: 0x002b
+    RST30: 0x0030
+    CHARPRINT: 0x0033
+    RST38: 0x0038
+    LPRINTCHAR: 0x003b
+    KBLINE: 0x0040
+    KBWAIT: 0x0049
+    CTRLCHARS: 0x0050
+    DELAY: 0x0060
+    NMI_RESET: 0x0066
+    HAVEDISK: 0x0069
+    L2INIRESRVD: 0x0075
+    SETIOB: 0x008b
+    L2INIT2: 0x0091
+    MEMSIZE: 0x0105
+    L2LOGO: 0x0111
+    L3ERROR: 0x012d
+    CMDPOINT: 0x0132
+    BASSET: 0x0135
+    BASRESET: 0x0138
+    GRSTART: 0x0150
+    CLS: 0x01c9
+    BASRANDOM: 0x01d3
+    CASSPULSE1: 0x01d9
+    CASSDLY1: 0x01df
+    CASSPULSE2: 0x01e3
+    CASSDLY2: 0x01e9
+    CASSPULSE3: 0x01ed
+    CASSDLY3: 0x01f3
+    CASSOFF: 0x01f8
+    COUT: 0x033a
+    OUTDCB: 0x03c2
+    OUTDCBFINISH: 0x03dd
+    KBDREAD: 0x03e3
+    NXTKEYLINE: 0x03eb
+    DODCBFN: 0x0458
+    REGCHAR: 0x0480
+    CURCON: 0x0506
+    PRDCBFN: 0x058d
+    LPREADY: 0x05d1
+    DOKBLINE: 0x05d9
+    INITRSTVECS: 0x0674
+    RSTVECTABLE: 0x06d2
+    HADD_SPHALF: 0x0708
+    SPADD_IND_HL: 0x070b
+    SPSUB_IND_HL: 0x0710
+    SPSUB_BCDE: 0x0713
+    SPADD_BCDE: 0x0716
+    SPMUL_BCDE: 0x0847
+    SPDIV_BCDE: 0x08a2
+    NEG_MANTISSA: 0x0982
+    BCDE_VIA_HL: 0x09c2
+    CPHL2DE: 0x09d2
+    CPDE2HL: 0x09d3
+    # Integer math functions
+    INTADD: 0x0bd2
+    INTSUB: 0x0bc7
+    INTMPY: 0x0bf2
+    # Floating point constants
+    SFPZERO: 0x137c
+    SFPHALF: 0x1380
+    # BASIC trancendental functions
+    BASCOS: 0x1541
+    BASSIN: 0x1547
+    PI_OVER_2: 0x158b
+    BASTAN: 0x15a8
+    BASATN: 0x15bd
+    # BASIC's high-bit verb table
+    VERBS: 0x1650
+    VERBDISPATCH: 0x1822
+    # BASIC's error strings
+    ERRNOFOR: 0x18c9
+    ERRSYNTAX: 0x18cb
+    ERRRANGE: 0x18cd
+    ERROUTOFDATA: 0x18cf
+    ERRBADFUNC: 0x18d1
+    ERROVERFLOW: 0x18d3
+    ERROUTOFMEM: 0x18d5
+    ERRUNDEFLINE: 0x18d7
+    ERRBADSUBSCR: 0x18d9
+    ERRBADDIM: 0x18db
+    ERRDIV0: 0x18dd
+    ERRILLEGALDIRECT: 0x18df
+    ERRTYPEMISMATCH: 0x18e1
+    ERRNOSTRSPACE: 0x18e3
+    ERRLONGSTRING: 0x18e5
+    ERRCOMPLEXSTR: 0x18e7
+    ERRNOCONT: 0x18e9
+    ERRNORESUME: 0x18eb
+    ERRRESUMENOERR: 0x18ed
+    ERRUNPRINTERR: 0x18ef
+    ERRMISSOPERAND: 0x18f1
+    ERRFILEDATA: 0x18f3
+    ERRL3DOS: 0x18f5
+    BASRSVINIT: 0x18f7
+    READYPMT: 0x1929
+    BREAKMSG: 0x1930
+    ERORORIN: 0x191d
+    CMPDEHL: 0x1c90
+    DEFRST08: 0x1c96
+    BASFOR: 0x1ca1
+    DEFRST10: 0x1d78
+    BASRESTORE: 0x1d91
+    BASEND: 0x1dae
+    BASSTOP: 0x1da9
+    BASTRON: 0x1df7
+    BASTROFF: 0x1df8
+    BASGOSUB: 0x1eb1
+    BASRETURN: 0x1ede
+    BASGOTO: 0x1ec2
+    BASRUN: 0x1ea3
+    BASDATA: 0x1f05
+    BASREM: 0x1f07
+    BASLET: 0x1f21
+    BASIF: 0x2039
+    BASINPUT: 0x219a
+    BASREAD: 0x21ef
+    BASNEXT: 0x22b6
+    INTDIV: 0x2490
+    NUMTYPE: 0x25d9
+    BASDIM: 0x2608
 ...
