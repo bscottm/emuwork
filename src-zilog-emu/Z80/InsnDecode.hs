@@ -1,6 +1,6 @@
 {-# OPTIONS_HADDOCK ignore-exports #-}
 
-module Z80.InsnDecode 
+module Z80.InsnDecode
   ( -- * Types
     Z80decodedInsn
 
@@ -11,20 +11,20 @@ module Z80.InsnDecode
   , ProcessorOps(..)
   ) where
 
-import Control.Lens
-import Data.Bits
-import Data.IntMap (IntMap)
-import qualified Data.IntMap as IntMap
+import           Control.Lens
+import           Data.Bits
+import           Data.IntMap        (IntMap)
+import qualified Data.IntMap        as IntMap
 
-import Machine
-import Z80.Processor
-import Z80.InstructionSet
+import           Machine
+import           Z80.InstructionSet
+import           Z80.Processor
 
 -- | 'DecodedInsn' shorthand for Z80 decoded instructions
 type Z80decodedInsn = DecodedInsn Z80instruction Z80addr
 
 instance ProcessorOps Z80instruction Z80addr Z80word where
-  idecode pc mem = 
+  idecode pc mem =
     let opc = getOpcode pc mem
         indexedPrefix xForms = let pc'    = pcInc pc
                                    newOpc = getOpcode pc' mem
@@ -44,7 +44,7 @@ instance ProcessorOps Z80instruction Z80addr Z80word where
           0xfd       -> indexedPrefix z80iyTransform
           _otherwise -> decodeF opc mem pc z80nullTransform
 
--- | Instruction group 0 decoder: 
+-- | Instruction group 0 decoder:
 group0decode :: Z80word                         -- ^ Current opcode
              -> Z80memory                       -- ^ Memory image
              -> Z80PC                           -- ^ Current program counter
@@ -58,7 +58,7 @@ group0decode opc mem pc xForm
                2                  -> displacementInstruction mem pc DJNZ
                3                  -> displacementInstruction mem pc JR
                _otherwise         -> displacementInstruction mem pc $ JRCC (condC (y - 4))
-  | z == 1, q == 0 = mkAbsAddrIns (LD . (RPair16ImmLoad (pairSP reg16XFormF p))) mem pc
+  | z == 1, q == 0 = mkAbsAddrIns (LD . RPair16ImmLoad (pairSP reg16XFormF p)) mem pc
   | z == 1, q == 1 = defResult ((ADD . ALU16) $ pairSP reg16XFormF p)
   | z == 2, q == 0 = case p of
                        0          -> defResult (LD BCIndirectStore)
@@ -73,9 +73,9 @@ group0decode opc mem pc xForm
                        3          -> mkAbsAddrIns (LD . AccImm16Indirect) mem pc
                        _otherwise -> undefined
   | z == 3 = case q of
-               0                  -> defResult (INC16 (pairSP reg16XFormF p))
-               1                  -> defResult (DEC16 (pairSP reg16XFormF p))
-               _otherwise         -> undefined
+               0          -> defResult (INC16 (pairSP reg16XFormF p))
+               1          -> defResult (DEC16 (pairSP reg16XFormF p))
+               _otherwise -> undefined
   | z == 4 = let (newpc, theReg) = reg8 reg8XFormF mem pc y
              in  DecodedInsn (pcInc newpc) (INC theReg)
   | z == 5 = let (newpc, theReg) = reg8 reg8XFormF mem pc y
@@ -84,18 +84,17 @@ group0decode opc mem pc xForm
                  newpc'            = pcInc newpc
                  immval            = getOpcode newpc' mem
              in  DecodedInsn (pcInc newpc') (LD (Reg8Imm theReg immval))
-  | z == 7 = defResult (accumOps IntMap.! (fromIntegral y))
+  | z == 7 = defResult (accumOps IntMap.! fromIntegral y)
   | otherwise = defResult (Z80undef [opc])
   where
-    z             = (opc .&. 7)
-    y             = (shiftR opc 3) .&. 7
-    p             = (shiftR opc 4) .&. 3
-    q             = (shiftR opc 3) .&. 1
+    z             = opc .&. 7
+    y             = shiftR opc 3 .&. 7
+    p             = shiftR opc 4 .&. 3
+    q             = shiftR opc 3 .&. 1
     reg8XFormF    = reg8XForm xForm
     reg16XFormF   = reg16XForm xForm
     nextIns       = pcInc pc
-    defResult ins = DecodedInsn nextIns ins
-
+    defResult     = DecodedInsn nextIns
 -- | Accumulator operations map
 accumOps :: IntMap Z80instruction
 accumOps = IntMap.fromList [ (0, RLCA)
@@ -121,8 +120,8 @@ group1decode opc mem pc xform
                           (newpc', srcReg) = reg8 reg8XFormF mem newpc z
                       in  DecodedInsn (pcInc newpc') (LD (Reg8Reg8 dstReg srcReg))
   where
-    z = (opc .&. 7)
-    y = (shiftR opc 3) .&. 7
+    z = opc .&. 7
+    y = shiftR opc 3 .&. 7
 
 -- | ALU instruction decode (group 2)
 group2decode :: Z80word
@@ -132,7 +131,7 @@ group2decode :: Z80word
              -> Z80decodedInsn                          -- ^ Decoded result
 group2decode opc mem pc xForms =
   let (newpc, alu8operand) = aluReg8 (reg8XForm xForms) mem pc (opc .&. 7)
-      insCTor    = case opc `shiftR` 3 .&. 7 of 
+      insCTor    = case opc `shiftR` 3 .&. 7 of
                      0          -> ADD . ALU8
                      1          -> ADC . ALU8
                      2          -> SUB
@@ -152,7 +151,7 @@ group3decode :: Z80word
              -> Z80decodedInsn                  -- ^ Decoded result
 group3decode opc mem pc xForm
   | z == 0          = defResult (RETCC . condC $ y)
-  | z == 1, q == 0  = defResult ((POP . pairAF reg16XFormF) $ p)
+  | z == 1, q == 0  = defResult ((POP . pairAF reg16XFormF) p)
   | z == 1, q == 1  = case p of
                         0          -> defResult RET
                         1          -> defResult (EXC Primes)
@@ -168,10 +167,10 @@ group3decode opc mem pc xForm
                                       in  DecodedInsn (pcInc newpc) (bitopsDecode mem newpc nextOpc)
                         2          -> let newpc   = pcInc pc
                                           nextOpc = getOpcode newpc mem
-                                      in  DecodedInsn (pcInc newpc) ((OUT . PortImm) $ nextOpc)
+                                      in  DecodedInsn (pcInc newpc) ((OUT . PortImm) nextOpc)
                         3          -> let newpc = pcInc pc
                                           nextOpc = getOpcode newpc mem
-                                      in  DecodedInsn (pcInc newpc) ((IN . PortImm)  $ nextOpc)
+                                      in  DecodedInsn (pcInc newpc) ((IN . PortImm) nextOpc)
                         4          -> defResult (EXC SPHL)
                         5          -> defResult (EXC DEHL)
                         6          -> defResult DI
@@ -194,10 +193,10 @@ group3decode opc mem pc xForm
                            nextOpc = getOpcode newpc mem
                            imm     = ALUimm nextOpc
                            insCTor = case y of
-                                       0          -> (ADD . ALU8)
-                                       1          -> (ADC . ALU8)
+                                       0          -> ADD . ALU8
+                                       1          -> ADC . ALU8
                                        2          -> SUB
-                                       3          -> (SBC . ALU8)
+                                       3          -> SBC . ALU8
                                        4          -> AND
                                        5          -> XOR
                                        6          -> OR
@@ -207,14 +206,13 @@ group3decode opc mem pc xForm
   | z == 7           = defResult (RST (y * 8))
   | otherwise        = defResult (Z80undef [opc])
   where
-    z             = (opc .&. 7)
-    y             = (shiftR opc 3) .&. 7
-    p             = (shiftR opc 4) .&. 3
-    q             = (shiftR opc 3) .&. 1
+    z             = opc .&. 7
+    y             = shiftR opc 3 .&. 7
+    p             = shiftR opc 4 .&. 3
+    q             = shiftR opc 3 .&. 1
     reg16XFormF   = reg16XForm xForm
     nextIns       = pcInc pc
-    defResult ins = DecodedInsn nextIns ins
-
+    defResult     = DecodedInsn nextIns
 -- | The SET, RESet, BIT instructions and rotation operations. Note that this is not suitable for dealing with the
 -- IX and IY indexed instructions, since the instruction format is 'DDCB <displacement> <opcode>', and has to be
 -- handled seperately.
@@ -223,15 +221,15 @@ bitopsDecode :: Z80memory                       -- ^ Z80 memory (required to use
              -> Z80word                         -- ^ Bit/rotate operation opcode
              -> Z80instruction                  -- ^ The result
 bitopsDecode mem pc opc =
-  case (shiftR opc 6) .&. 3 of
-    0          -> (rotOps IntMap.! (fromIntegral y)) theReg
+  case shiftR opc 6 .&. 3 of
+    0          -> (rotOps IntMap.! fromIntegral y) theReg
     1          -> BIT y theReg
     2          -> RES y theReg
     3          -> SET y theReg
     _otherwise -> undefined
   where
-    z = (opc .&. 7)
-    y = (shiftR opc 3) .&. 7
+    z = opc .&. 7
+    y = shiftR opc 3 .&. 7
     -- Ignore any new program counter 'reg8' because we always apply the null transform
     (_, theReg) = reg8 (reg8XForm z80nullTransform) mem pc z
 
@@ -262,13 +260,13 @@ edPrefixDecode opc mem pc
   | x == 1, z == 2, q == 0 = defResult ((SBC . ALU16) $ pairSP nullReg16XFormF p)
   | x == 1, z == 2, q == 1 = defResult ((ADC . ALU16) $ pairSP nullReg16XFormF p)
   | x == 1, z == 2         = invalid
-  | x == 1, z == 3, q == 0 = mkAbsAddrIns (LD . (RPIndirectStore (pairSP nullReg16XFormF p))) mem (pcInc pc)
-  | x == 1, z == 3, q == 1 = mkAbsAddrIns (LD . (RPIndirectLoad (pairSP nullReg16XFormF p))) mem (pcInc pc) 
+  | x == 1, z == 3, q == 0 = mkAbsAddrIns (LD . RPIndirectStore (pairSP nullReg16XFormF p)) mem (pcInc pc)
+  | x == 1, z == 3, q == 1 = mkAbsAddrIns (LD . RPIndirectLoad (pairSP nullReg16XFormF p)) mem (pcInc pc)
   | x == 1, z == 3         = invalid
   | x == 1, z == 4         = defResult NEG
   | x == 1, z == 5, y == 1 = defResult RETI
   | x == 1, z == 5, y /= 1 = defResult RETN
-  | x == 1, z == 6         = defResult (IM (interruptMode IntMap.! (fromIntegral y)))
+  | x == 1, z == 6         = defResult (IM (interruptMode IntMap.! fromIntegral y))
   | x == 1, z == 7         = case y of
                                0          -> defResult (LD IRegAcc)
                                1          -> defResult (LD RRegAcc)
@@ -278,29 +276,29 @@ edPrefixDecode opc mem pc
                                5          -> defResult RRD
                                6          -> invalid
                                7          -> invalid
-                               _otherwise -> error ("edPrefixDecode, x = 1, z = 7: invalid y = " ++ (show y))
+                               _otherwise -> error ("edPrefixDecode, x = 1, z = 7: invalid y = " ++ show y)
   | x == 2, z <= 3, y >= 4 = -- Increment, Increment-Repeat instructions
-                             defResult $ (incdecOps IntMap.! (fromIntegral y)) IntMap.! (fromIntegral z)
+                             defResult $ (incdecOps IntMap.! fromIntegral y) IntMap.! fromIntegral z
   | x == 2                 = invalid
   | x == 3                 = invalid
   -- Should never be matched...
   | otherwise              = error ("edPrefixDecode: could not decode instruction, x == "
-                                    ++ (show x)
+                                    ++ show x
                                     ++ ", z == "
-                                    ++ (show z)
+                                    ++ show z
                                     ++ ", y == "
-                                    ++ (show y))
+                                    ++ show y)
   where
-    x               = (opc `shiftR` 6) .&. 3
-    y               = (opc `shiftR` 3) .&. 7
-    z               = (opc .&. 7)
-    p               = (y `shiftR` 1) .&. 3
+    x               = opc `shiftR` 6 .&. 3
+    y               = opc `shiftR` 3 .&. 7
+    z               = opc .&. 7
+    p               = y `shiftR` 1 .&. 3
     q               = y .&. 1
     invalid         = defResult (Z80undef [0xed, opc])
     nullXFormF      = reg8XForm z80nullTransform
     nullReg16XFormF = reg16XForm z80nullTransform
     nextIns         = pcInc pc
-    defResult ins   = DecodedInsn nextIns ins 
+    defResult       = DecodedInsn nextIns
 
 -- | Block/compare/input/output increment-decrement lookup table
 incdecOps :: IntMap (IntMap Z80instruction)
@@ -326,7 +324,7 @@ incdecOps = IntMap.fromList [ (4, IntMap.fromList [ (0, LDI )
                                                   ] )
                             ]
 
--- | Convert embedded interrupt mode to actual interrupt mode 
+-- | Convert embedded interrupt mode to actual interrupt mode
 interruptMode :: IntMap Z80word
 interruptMode = IntMap.fromList [ (0, 0)
                                 , (1, 0)        -- Could be either 0 or 1, not clear from instruction set description
@@ -346,7 +344,7 @@ pairSP _xform 0 = RPair16 BC
 pairSP _xform 1 = RPair16 DE
 pairSP  xform 2 = (RPair16 . xform) HL
 pairSP _xform 3 = SP
-pairSP _      x = error ("pairSP: invalid 16-bit register code " ++ (show x))
+pairSP _      x = error ("pairSP: invalid 16-bit register code " ++ show x)
 
 -- | Convert 16-bit register pair/SP index to a 'RegPairSP' operand
 pairAF :: (Z80reg16 -> Z80reg16)                -- ^ Transform function, when needed
@@ -356,7 +354,7 @@ pairAF _xform 0 = RPair16' BC
 pairAF _xform 1 = RPair16' DE
 pairAF  xform 2 = (RPair16' . xform) HL
 pairAF _xform 3 = AF
-pairAF _      x = error ("pairAF: invalid 16-bit register code " ++ (show x))
+pairAF _      x = error ("pairAF: invalid 16-bit register code " ++ show x)
 
 -- | Convert 8-bit register index to a 'Z80reg8' operand
 reg8 :: Z80reg8XForm                            -- ^ Register transform function, used for IX/IY transformations
@@ -372,7 +370,7 @@ reg8 _xform _mem  pc 4 = (pc, H)
 reg8 _xform _mem  pc 5 = (pc, L)
 reg8  xform  mem  pc 6 = xform mem pc HLindirect
 reg8 _xform _mem  pc 7 = (pc, A)
-reg8 _xform _mem _pc  x = error ("reg8: Invalid 8-bit register code " ++ (show x))
+reg8 _xform _mem _pc  x = error ("reg8: Invalid 8-bit register code " ++ show x)
 
 -- | Convert an 8-bit register index to an ALU operand 'OperALU'
 --
@@ -398,19 +396,19 @@ condC 4 = PO
 condC 5 = PE
 condC 6 = POS
 condC 7 = MI
-condC x = error ("condC: Invalid condition code index " ++ (show x))
+condC x = error ("condC: Invalid condition code index " ++ show x)
 
 -- | Compute signed, relative displacement address' absolute address, generating a label for it
 -- if not already in the disassembler's symbol table.
 displacementInstruction :: Z80memory
                         -> Z80PC
-                        -> ((SymAbsAddr Z80addr) -> Z80instruction)
+                        -> (SymAbsAddr Z80addr -> Z80instruction)
                         -> Z80decodedInsn
 displacementInstruction mem pc ins =
   let pc'     = pcInc pc
       disp    = getOpcode pc' mem
       disp'        = signExtend disp
-      destAddr     = fromIntegral ((withPC pc fromIntegral) + disp' + 2)
+      destAddr     = fromIntegral (withPC pc fromIntegral + disp' + 2)
       nextIns      = pcInc pc'
   in  DecodedInsn nextIns (ins . AbsAddr $ destAddr)
 
@@ -437,7 +435,7 @@ z80getAddr (MemorySystem mem) pc = let lo, hi     :: Z80word
                                        lo         = withPC pc (mFetch mem)
                                        pc'        = pcInc pc
                                        hi         = withPC pc' (mFetch mem)
-                                   in DecodedAddr (pcInc pc') ((shiftL (fromIntegral hi) 8) .|. (fromIntegral lo))
+                                   in DecodedAddr (pcInc pc') (shiftL (fromIntegral hi) 8 .|. fromIntegral lo)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Index register transform functions:
@@ -454,17 +452,22 @@ type Z80reg16XForm = (  Z80reg16                -- Register pair to be transform
                      -> Z80reg16)               -- Resulting transformed register pair
 
 -- | Transform the 8-bit register operand to the IX register and displacement, only
--- if the operand is indirect via HL
+-- if the operand is indirect via HL. Also include the cases where H and L registers
+-- are in the operand (undocumented instructions.)
 ixXFormReg8 :: Z80reg8XForm
-ixXFormReg8 (MemorySystem msys)  pc HLindirect = let (pc', disp) = (mIncPCAndFetch pc msys) :: (Z80PC, Z80word)
-                                                 in  (pc', IXindirect $ fromIntegral disp)
-ixXFormReg8 _msys pc operand                   = (pc, operand)
+ixXFormReg8 (MemorySystem msys) pc HLindirect = let (pc', disp) = mIncPCAndFetch pc msys :: (Z80PC, Z80word)
+                                                in  (pc', IXindirect $ fromIntegral disp)
+ixXFormReg8 _memsys             pc H           = (pc, IXh)
+ixXFormReg8 _memsys             pc L           = (pc, IXl)
+ixXFormReg8 _msys               pc operand     = (pc, operand)
 
 -- | Transform the 8-bit register operand to the IY register and displacement, only
 -- if the operand is indirect via HL
 iyXFormReg8 :: Z80reg8XForm
-iyXFormReg8 (MemorySystem msys) pc HLindirect = let (pc', disp) = (mFetchAndIncPC pc msys) :: (Z80PC, Z80word)
-                                                in  (pc', IYindirect $ fromIntegral disp)
+iyXFormReg8 (MemorySystem msys) pc HLindirect = let (pc', disp) = mFetchAndIncPC pc msys :: (Z80PC, Z80word)
+                                                 in  (pc', IYindirect $ fromIntegral disp)
+iyXFormReg8 _memsys             pc H          = (pc, IYh)
+iyXFormReg8 _memsys             pc L          = (pc, IYl)
 iyXFormReg8 _msys pc operand                  = (pc, operand)
 
 -- | Transform 16-bit register operands to an index register, only if HL happens
@@ -490,7 +493,7 @@ data Z80indexTransform =
 -- | Pass-through register transform: no transform required
 z80nullTransform :: Z80indexTransform
 z80nullTransform = Z80indexTransform
-                   { reg8XForm = (\_z80mem pc operand -> (pc, operand))
+                   { reg8XForm = \_z80mem pc operand -> (pc, operand)
                    , reg16XForm = id
                    }
 

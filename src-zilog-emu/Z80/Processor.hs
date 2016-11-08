@@ -52,7 +52,7 @@ instance GenericPC Z80addr where
   pcInc pc = pc + 1
   pcDec pc = pc - 1
   pcDisplace (RelativePC disp) pc = fromIntegral (fromIntegral pc + disp)
- 
+
 -- | The basic Z80 register file. The actual register file has two sides, the regular and prime. The prime
 -- registers are not generally visible except through the EXX instruction that exchanges the two sides.
 data Z80registers = Z80registers {
@@ -105,11 +105,11 @@ data Z80state =
         }
 
 -- Emit Template Haskell hair for lenses
-makeLenses ''Z80state
+$(makeLenses ''Z80state)
 
 -- | The address range, needed to calculate the size of a 'Data.Vector' data type
 z80MemSizeIntegral :: Int
-z80MemSizeIntegral = (fromIntegral z80MaxAddr) - (fromIntegral z80MinAddr) + 1
+z80MemSizeIntegral = fromIntegral z80MaxAddr - fromIntegral z80MinAddr + 1
 
 -- | Initial state for a Z80
 z80initialState :: Z80state
@@ -131,4 +131,4 @@ z80initialState = Z80state
 instance GenericPC Z80state where
   pcInc = z80pc +~ 1
   pcDec = z80pc -~ 1
-  pcDisplace (RelativePC disp) = (z80pc +~ (fromIntegral disp))
+  pcDisplace (RelativePC disp) = z80pc +~ fromIntegral disp

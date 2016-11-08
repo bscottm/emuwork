@@ -18,20 +18,6 @@ module Z80.InstructionSet
   , RegPairAF(..)
   , Z80ExchangeOper(..)
 
-{-  
-  -- * Index register transform functions
-  , Z80reg8XForm
-  , Z80reg16XForm
-  , Z80indexTransform(..)
-  , z80nullTransform
-  , z80ixTransform
-  , z80iyTransform
-
-  -- * Lens functions
-  , reg8XForm
-  , reg16XForm
--}
-  
   -- * Other utilities
   , reg8NameMap
   , reg8NameToReg
@@ -134,6 +120,7 @@ data Z80instruction where
   BIT, RES, SET                            :: Z80word                      -- Bit within byte to set/reset/test
                                            -> Z80reg8
                                            -> Z80instruction
+ -- 0xcb prefix, undocumented (IX and IY indexed)
 
   -- 0xed prefix instructions:
   -- Negate accumulator
@@ -153,7 +140,7 @@ data Z80instruction where
   LDI, CPI, INI, OUTI, LDD, CPD, IND, OUTD, LDIR, CPIR, INIR, OTIR, LDDR, CPDR, INDR, OTDR :: Z80instruction
 
   deriving (Show, Typeable, Data)
-        
+
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Unified load/store operands:
@@ -225,7 +212,6 @@ data OperIO where
   CIndIO0 :: OperIO
   deriving (Show, Typeable, Data)
 
-
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 data Z80condC where
@@ -255,6 +241,13 @@ data Z80reg8 where
              -> Z80reg8
   IYindirect :: Int8                            -- IY + byte displacement
              -> Z80reg8
+  -- Z80 actually implements IX and IY as two 8-bit registers each. Which means
+  -- that the instruction decoding transforms can also load constants into these
+  -- half-registers and other unworldly tricks involving the H and L registers.
+  IXh        :: Z80reg8
+  IXl        :: Z80reg8
+  IYh        :: Z80reg8
+  IYl        :: Z80reg8
   deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
