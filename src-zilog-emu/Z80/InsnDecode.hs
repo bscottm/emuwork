@@ -15,6 +15,7 @@ import           Control.Lens
 import           Data.Bits
 import           Data.IntMap        (IntMap)
 import qualified Data.IntMap        as IntMap
+import qualified Control.Comonad    as Comonad
 
 import           Machine
 import           Z80.InstructionSet
@@ -405,10 +406,9 @@ displacementInstruction :: Z80memory
                         -> (SymAbsAddr Z80addr -> Z80instruction)
                         -> Z80decodedInsn
 displacementInstruction mem pc ins =
-  let pc'     = pcInc pc
-      disp    = getOpcode pc' mem
-      disp'        = signExtend disp
-      destAddr     = fromIntegral (withPC pc fromIntegral + disp' + 2)
+  let pc'          = pcInc pc
+      disp         = getOpcode pc' mem
+      destAddr     = Comonad.extract pc + signExtend disp + 2
       nextIns      = pcInc pc'
   in  DecodedInsn nextIns (ins . AbsAddr $ destAddr)
 

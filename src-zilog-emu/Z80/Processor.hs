@@ -48,10 +48,8 @@ type Z80PC            = ProgramCounter Z80addr
 -- | Z80 memory system type
 type Z80memory        = MemorySystem Z80addr Z80word
 
-instance PCOperation Z80addr where
-  pcInc pc = pc + 1
-  pcDec pc = pc - 1
-  pcDisplace (RelativePC disp) pc = fromIntegral (fromIntegral pc + disp)
+-- Use default implementatiosn for 'Z80addr'
+instance PCOperation Z80addr
 
 -- | The basic Z80 register file. The actual register file has two sides, the regular and prime. The prime
 -- registers are not generally visible except through the EXX instruction that exchanges the two sides.
@@ -82,11 +80,11 @@ zeroedRegisters = Z80registers {
 
 -- | The minimum usable address
 z80MinAddr :: Z80addr
-z80MinAddr = 0
+z80MinAddr = minBound
 
 -- | The maximum usable address
 z80MaxAddr :: Z80addr
-z80MaxAddr = 0xffff
+z80MaxAddr = maxBound
 
 -- | The Z80's machine state and internals.
 data Z80state =

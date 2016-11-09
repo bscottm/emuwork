@@ -28,6 +28,7 @@ library
     syb,
     parsec,
     unordered-containers,
+    comonad,
     emubase
 
   ghc-options:          -Wall -O2
