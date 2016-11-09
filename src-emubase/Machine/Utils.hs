@@ -1,5 +1,5 @@
 -- | Various and sundry utility functions
-module Machine.Utils 
+module Machine.Utils
   ( -- * Types and classes
     ShowHex(..)
   , SignExtend(..)
@@ -15,7 +15,6 @@ module Machine.Utils
 import Data.Int
 import Data.Bits
 import qualified Data.Text as T
-import Numeric
 import Data.Char
 import Data.Word
 
@@ -25,7 +24,7 @@ class ShowHex x where
   asHex :: x -> T.Text          -- ^ Convert value to 0-filled byte string (e.g, "034e" for 0x34e :: Word16)
 
   as0xHex :: x -> T.Text        -- ^ Convert value to 0-filled byte string with "0x" prefix.
-  as0xHex = (T.append "0x") . asHex
+  as0xHex = T.append "0x" . asHex
   {-# INLINE as0xHex #-}
 
   -- | 'asHex' converted to a String, useful in 'Show' instances
@@ -38,14 +37,22 @@ class ShowHex x where
   as0xHexS = T.unpack . as0xHex
   {-# INLINE as0xHexS #-}
 
+-- | Output the lowest order byte of the input as 2 digit hex
+hexbyte :: (Integral a) => a -> T.Text
+hexbyte x = let zeroC = ord '0'
+                alphaC = ord 'a' - 10
+                hexdigit d = chr(d + if d < 10 then zeroC else alphaC)
+            in  T.cons (hexdigit (fromIntegral x `shiftR` 4 .&. 0xf)) ((T.singleton . hexdigit) (fromIntegral x .&. 0xf))
+
 instance ShowHex Word8 where
-  asHex x = let s = T.pack $ showHex x ""
-            in  T.justifyRight 2 '0' s
+  asHex = hexbyte
   {-# INLINE asHex #-}
 
+instance ShowHex Int8 where
+  asHex x = hexbyte (fromIntegral x :: Word8)
+
 instance ShowHex Word16 where
-  asHex x = let s = T.pack $ showHex x ""
-            in  T.justifyRight 4 '0' s
+  asHex x = T.append (hexbyte (x `shiftR` 8)) (hexbyte (x .&. 0xff))
   {-# INLINE asHex #-}
 
 instance ShowHex Int16 where
@@ -53,9 +60,9 @@ instance ShowHex Int16 where
   {-# INLINE asHex #-}
 
 instance (ShowHex x) => ShowHex [x] where
-  asHex   x = T.append "[" $ asHexList (asHex)   x T.empty
+  asHex   x = T.append "[" $ asHexList asHex   x T.empty
   {-# INLINE asHex #-}
-  as0xHex x = T.append "[" $ asHexList (as0xHex) x T.empty
+  as0xHex x = T.append "[" $ asHexList as0xHex x T.empty
 
 -- | Helper function for converting lists of things into hex
 asHexList :: ShowHex x => (x -> T.Text)
@@ -63,15 +70,15 @@ asHexList :: ShowHex x => (x -> T.Text)
           -> T.Text
           -> T.Text
 asHexList _asHexF [] s = T.append "]" s
-asHexList asHexF (x:[]) s = T.append (asHexF x) (asHexList asHexF [] s)
-asHexList asHexF (x:xs) s = T.append (asHexF x) (T.append ", " (asHexList asHexF xs s))
+asHexList asHexF  [x] s = T.append (asHexF x) (asHexList asHexF [] s)
+asHexList asHexF  (x:xs) s = T.append (asHexF x) (T.append ", " (asHexList asHexF xs s))
 
 -- | Zero fill the front of a number, up to a given width
 zeroFill :: Int
          -> T.Text
          -> T.Text
 zeroFill width s = let l = T.length s
-                   in  if (l < width) then
+                   in  if l < width then
                          T.replicate (width - l) textZero
                        else
                          T.empty
@@ -82,7 +89,7 @@ zeroFill width s = let l = T.length s
 padTo :: Int            -- ^ Width
       -> T.Text         -- ^ The incoming byte string
       -> T.Text         -- ^ The resulting byte string
-padTo width s = T.justifyLeft width ' ' s
+padTo width = T.justifyLeft width ' '
 
 -- | Make a 'T.Text' string all upper case.
 makeUpper :: T.Text                             -- ^ Input 'T.Text'
@@ -116,21 +123,21 @@ instance SignExtend Word8 where
                    in  if x' <= 0x7f then
                          x'
                        else
-                         x' .|. (complement 0xff)
+                         x' .|. complement 0xff
 
 instance SignExtend Int8 where
   signExtend64 x = let x' = fromIntegral x :: Int64
                    in  if x <= 0x7f then
                          x'
                        else
-                         x' .|. (complement 0xff)
+                         x' .|. complement 0xff
 
 instance SignExtend Word16 where
   signExtend64 x = let x' = fromIntegral x :: Int64
                    in  if x <= 0x7fff then
                          x'
                        else
-                         x' .|. (complement 0xffff)
+                         x' .|. complement 0xffff
 
 instance SignExtend Int16 where
   signExtend64 x = let x' = fromIntegral x :: Int64

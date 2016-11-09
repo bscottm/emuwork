@@ -30,7 +30,7 @@ module Z80.Processor
   , intmode
   ) where
 
-import Control.Lens (makeLenses, (+~), (-~))
+import Control.Lens (makeLenses)
 import Data.Int
 import Data.Word
 import Prelude hiding (replicate)
@@ -48,7 +48,7 @@ type Z80PC            = ProgramCounter Z80addr
 -- | Z80 memory system type
 type Z80memory        = MemorySystem Z80addr Z80word
 
-instance GenericPC Z80addr where
+instance PCOperation Z80addr where
   pcInc pc = pc + 1
   pcDec pc = pc - 1
   pcDisplace (RelativePC disp) pc = fromIntegral (fromIntegral pc + disp)
@@ -126,9 +126,3 @@ z80initialState = Z80state
                   , _iff2    = False
                   , _intmode = 0
                   }
-
--- | Instance for Z80's program counter operations:
-instance GenericPC Z80state where
-  pcInc = z80pc +~ 1
-  pcDec = z80pc -~ 1
-  pcDisplace (RelativePC disp) = z80pc +~ fromIntegral disp

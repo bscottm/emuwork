@@ -13,11 +13,6 @@ import           Machine.EmulatorDriver
 -- | There is no machine state for this processor.
 data NullProcState = NullProcState
 
-instance GenericPC NullProcState where
-  pcInc pc = pc
-  pcDec pc = pc
-  pcDisplace _ pc = pc
-
 type NullSystemT = EmulatedSystem NullProcState Word32 Word32 NullProcState
 
 nullProcessor :: NullSystemT

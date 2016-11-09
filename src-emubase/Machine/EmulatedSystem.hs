@@ -13,12 +13,18 @@ import Machine.Utils
 
 -- | Generic program counter
 data ProgramCounter addrType where
-  PC :: (Integral addrType) =>
-        addrType
+  PC :: addrType
      -> ProgramCounter addrType
 
+instance Functor ProgramCounter where
+  fmap f (PC pc) = PC (f pc)
+
+instance Applicative ProgramCounter where
+  pure = PC
+  (PC f) <*> (PC pc) = PC (f pc)
+
 -- | Make program counters behave like numeric types
-instance (Integral addrType) => Num (ProgramCounter addrType) where
+instance (Num addrType) => Num (ProgramCounter addrType) where
   (PC a) + (PC b) = PC (a + b)
   (PC a) - (PC b) = PC (a - b)
   (PC a) * (PC b) = PC (a * b)
@@ -27,16 +33,31 @@ instance (Integral addrType) => Num (ProgramCounter addrType) where
   fromInteger a   = PC (fromInteger a)
 
 -- | Make program counters comparable
-instance Ord (ProgramCounter addrType) where
+instance (Ord addrType) => Ord (ProgramCounter addrType) where
   compare (PC a) (PC b) = compare a b
 
 -- | Provide equality comparisons for program counters
-instance Eq (ProgramCounter addrType) where
+instance Eq addrType => Eq (ProgramCounter addrType) where
   (PC a) == (PC b) = a == b
 
 -- | Make program counters show-able as something coherent.
 instance (ShowHex addrType) => Show (ProgramCounter addrType) where
-  show (PC pc) = "PC " ++ (T.unpack . as0xHex $ pc)
+  show (PC pc) = "PC " ++ as0xHexS pc
+
+-- | Admit RelativePC into the Integral class
+instance (Integral addrType) => Integral (ProgramCounter addrType) where
+  quotRem (PC a) (PC b) = let res = quotRem a b
+                          in  ((PC . fst) res, (PC . snd) res)
+  toInteger (PC a) = toInteger a
+
+-- | Extra hair for Integral
+instance (Real addrType) => Real (ProgramCounter addrType) where
+  toRational (PC a) = toRational a
+
+-- | Extra hair for Integral
+instance (Enum addrType) => Enum (ProgramCounter addrType) where
+  toEnum a = (PC . toEnum) a
+  fromEnum (PC a) = fromEnum a
 
 -- | Relative program counter data; 'dispType' should be a signed type of the same size as 'ProgramCounter's 'addrType'
 data RelativePC dispType where
@@ -60,18 +81,36 @@ instance Ord (RelativePC dispType) where
 instance Eq (RelativePC dispType) where
   (RelativePC a) == (RelativePC b) = a == b
 
+-- | Admit RelativePC into the Integral class
+instance (Integral dispType, SignExtend dispType) => Integral (RelativePC dispType) where
+  quotRem (RelativePC a) (RelativePC b) = let res = quotRem a b
+                                          in  ((RelativePC . fst) res, (RelativePC . snd) res)
+  toInteger (RelativePC a) = toInteger a
+
+-- | Extra hair for Integral
+instance (Real dispType, Integral dispType, SignExtend dispType) => Real (RelativePC dispType) where
+  toRational (RelativePC a) = toRational a
+
+-- | Extra hair for Integral
+instance (Enum dispType, Integral dispType, SignExtend dispType) => Enum (RelativePC dispType) where
+  toEnum a = (RelativePC . toEnum) a
+  fromEnum (RelativePC a) = fromEnum a
+
 -- | Basic program counter type class: increment, decrement, and displace
-class GenericPC pcThing where
+class (Num pcType, Integral pcType) => PCOperation pcType where
   -- | Increment the program counter
-  pcInc      :: pcThing
-             -> pcThing
+  pcInc      :: pcType
+             -> pcType
+  pcInc pc = pc + 1
   -- | Decrement the program counter
-  pcDec      :: pcThing
-             -> pcThing
+  pcDec      :: pcType
+             -> pcType
+  pcDec pc = pc - 1
   -- | Displace the program counter by a displacement amount (positive or negative).
-  pcDisplace :: RelativePC dispType
-             -> pcThing
-             -> pcThing
+  pcDisplace :: (Integral dispType, SignExtend dispType) => RelativePC dispType
+             -> pcType
+             -> pcType
+  pcDisplace disp pc = fromIntegral pc + fromIntegral disp
 
 -- | Do an action on a program counter
 withPC :: ProgramCounter addrType -> (addrType -> value) -> value
@@ -103,7 +142,7 @@ class MemoryOps memSys addrType wordType where
 
   -- | Fetch an entity from memory at the current program counter, return the (incremented pc, contents)
   -- pair.
-  mFetchAndIncPC :: (GenericPC addrType) =>
+  mFetchAndIncPC :: (PCOperation addrType) =>
                     ProgramCounter addrType
                     -- ^ The program counter
                  -> memSys
@@ -112,7 +151,7 @@ class MemoryOps memSys addrType wordType where
   mFetchAndIncPC pc mem = (pcInc pc, withPC pc (mFetch mem))
 
   -- | Fetch an entity from memory, pre-incrementing the program counter, returning the (incremented pc, contents)
-  mIncPCAndFetch :: (GenericPC addrType) =>
+  mIncPCAndFetch :: (PCOperation addrType) =>
                     ProgramCounter addrType
                  -> memSys
                  -> (ProgramCounter addrType, wordType)
@@ -189,8 +228,8 @@ instance (ShowHex addrType) =>
   show (AbsAddr addr)  = as0xHexS addr
   show (SymAddr label) = show label
 
--- | Instantiate 'GenericPC' operations for 'ProgramCounter'
-instance GenericPC (ProgramCounter addrType) where
+-- | Instantiate 'PCOperation' operations for 'ProgramCounter'
+instance (Num addrType, Integral addrType) => PCOperation (ProgramCounter addrType) where
   pcInc (PC pc)                        = PC $ pc + 1
   pcDec (PC pc)                        = PC $ pc - 1
   pcDisplace (RelativePC disp) (PC pc) = PC (fromIntegral pc + fromIntegral disp)
