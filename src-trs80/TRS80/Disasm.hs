@@ -25,7 +25,7 @@ import qualified Data.Vector as V
 import           Data.Vector.Unboxed (Vector, (!))
 import qualified Data.Vector.Unboxed as DVU
 import qualified Data.Yaml as Y
-import           Debug.Trace
+-- import           Debug.Trace
 import           System.Console.GetOpt
 import           System.Exit
 import           System.IO
@@ -34,7 +34,6 @@ import           Machine
 import           TRS80.CommonOptions
 import           TRS80.Disasm.Guidance
 import           TRS80.System
-import           TRS80.Types
 import           Z80
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -47,7 +46,7 @@ disasmCmd sys opts =
   do
     options <- getCommonOptions opts
     case options of
-      (CommonOptions imgRdr image msize, rest, unOpts) ->
+      (CommonOptions imgRdr image msize, _rest, unOpts) ->
         do
           disopts <- getDisasmOptions unOpts
           case disopts of
@@ -66,9 +65,9 @@ disasmCmd sys opts =
           >> exitFailure
 
       (_, rest, unOpts) ->
-        hPutStrLn stderr ("Unrecognized options:")
+        hPutStrLn stderr "Unrecognized options:"
         >> mapM_ (\s -> hPutStrLn stderr ("  " ++ s)) unOpts
-        >> hPutStrLn stderr ("Extra arguments: " ++ (show rest))
+        >> hPutStrLn stderr ("Extra arguments: " ++ show rest)
         >> showUsage
   where
     showUsage = commonOptionUsage
@@ -124,11 +123,10 @@ trs80disassemble sys imgReader imgName msize guidance =
                                                         checkAddrContinuity dis
                                                         >> z80AnalyticDisassemblyOutput stdout dis
                                                 Nothing ->
-                                                  hPutStrLn stderr ("Could not find guidance section for " ++
-                                                                     (T.unpack $ romMD5Hex img))
-                                                  >> hPutStrLn stderr ("Origin = " ++ (as0xHexS theOrigin))
-                                                  >> hPutStrLn stderr ("End addr = " ++ (as0xHexS theEndAddr))
-                                                  >> hPutStrLn stderr ("img length = " ++ (show (DVU.length img)))
+                                                  hPutStrLn stderr ("Could not find guidance section for " ++ T.unpack (romMD5Hex img))
+                                                  >> hPutStrLn stderr ("Origin = " ++ as0xHexS theOrigin)
+                                                  >> hPutStrLn stderr ("End addr = " ++ as0xHexS theEndAddr)
+                                                  >> hPutStrLn stderr ("img length = " ++ show (DVU.length img))
                                                   >> return ()
       )
   where
@@ -191,7 +189,7 @@ doAction :: ModelISystem
 
 doAction sys dstate guide
   {-  | trace ("disasm: guide = " ++ (show guide)) False = undefined -}
-  | (SymEquate label addr)     <- guide = 
+  | (SymEquate label addr)     <- guide =
     (symbolTab %~ H.insert addr label) . (disasmSeq %~ (|> mkEquate label addr)) $ dstate
   | (Comment comment)          <- guide = disasmSeq %~ (|> mkLineComment comment) $ dstate
   | (DoDisasm sAddr nBytes)    <- guide = disassemble dstate sys (PC sAddr) (PC $ sAddr + fromIntegral nBytes)
@@ -262,15 +260,15 @@ jumpTable :: Z80memory
           -> Z80disassembly
           -- ^ Resulting diassembly state
 jumpTable mem@(MemorySystem memSys) sAddr nBytes dstate =
-  let endAddr = sAddr + fromIntegral nBytes
+  let ea = sAddr + fromIntegral nBytes
       generateAddr addr z80dstate
-        | addr < endAddr - 2  = let DecodedAddr newAddr operand = z80getAddr mem (PC addr)
+        | addr < ea - 2  = let DecodedAddr newAddr operand = z80getAddr mem (PC addr)
                                 in  withPC newAddr (\pc -> generateAddr pc (operAddrPseudo operand))
-        | addr == endAddr - 2 = let DecodedAddr _newAddr operand = z80getAddr mem (PC addr)
+        | addr == ea - 2 = let DecodedAddr _newAddr operand = z80getAddr mem (PC addr)
                                 in  operAddrPseudo operand
-        | otherwise           = z80disbytes z80dstate mem (PC addr) (fromIntegral $ endAddr - addr)
+        | otherwise           = z80disbytes z80dstate mem (PC addr) (fromIntegral $ ea - addr)
         where
-          operAddrPseudo theAddr = disasmSeq %~ (|> (operAddr theAddr)) $ z80dstate
+          operAddrPseudo theAddr = disasmSeq %~ (|> operAddr theAddr) $ z80dstate
           operAddr       theAddr = mkAddr addr (AbsAddr theAddr) (mFetchN memSys addr 2)
   in  generateAddr sAddr dstate
 
@@ -289,7 +287,7 @@ trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) (MemorySystem memSys) pc ds
                  mkAscii
                else
                  mkByteRange
-  in  (pcInc pc, (disasmSeq %~ (\s -> s |> ins |> (withPC pc (\pc' -> pseudo pc' (DVU.singleton byte)))) $ dstate))
+  in  (pc + pure 1, disasmSeq %~ (\s -> s |> ins |> withPC pc (\pc' -> pseudo pc' (DVU.singleton byte))) $ dstate)
 -- Otherwise, just append the instruction onto the disassembly sequence.
 trs80RomPostProcessor elt mem pc dstate = z80DefaultPostProcessor elt mem pc dstate
 
@@ -299,21 +297,19 @@ trs80RomPostProcessor elt mem pc dstate = z80DefaultPostProcessor elt mem pc dst
 checkAddrContinuity :: Z80disassembly
                     -> IO ()
 checkAddrContinuity dis =
-  let insOnly   = dis ^. disasmSeq & (Seq.filter isZ80AddrIns)
+  let insOnly   = dis ^. disasmSeq & Seq.filter isZ80AddrIns
       insAddrs  = fmap z80InsAddr insOnly
       nextAddrs = Seq.zipWith (+) (fmap (fromIntegral . z80InsLength) insOnly) insAddrs
-      nextAddrs'  = (Seq.drop 1 insAddrs) |> (fromIntegral $ Seq.index nextAddrs (Seq.length nextAddrs - 1))
+      nextAddrs'  = Seq.drop 1 insAddrs |> fromIntegral (Seq.index nextAddrs (Seq.length nextAddrs - 1))
 
-      checkSeq   = Seq.zipWith (\a1 a2 -> a1 == a2) nextAddrs' nextAddrs
+      checkSeq   = Seq.zipWith (==) nextAddrs' nextAddrs
 
-      formatDiscontinuity (expected, got) = 
+      formatDiscontinuity (expected, got) =
         TIO.hPutStrLn stderr $ T.concat [ "  expected "
                                         , as0xHex expected
                                         , ", got "
                                         , as0xHex got
                                         ]
-  in  if Foldable.and checkSeq then
-        return ()
-      else
+  in  unless (Foldable.and checkSeq) $
         hPutStrLn stderr "Discontinuities = "
-        >> (Foldable.traverse_ formatDiscontinuity $ Seq.filter (\(a, b) -> a /= b) $ (Seq.zip nextAddrs' nextAddrs))
+        >> Foldable.traverse_ formatDiscontinuity (Seq.filter (uncurry (/=)) (Seq.zip nextAddrs' nextAddrs))

@@ -27,7 +27,7 @@ type Z80decodedInsn = DecodedInsn Z80instruction Z80addr
 instance ProcessorOps Z80instruction Z80addr Z80word where
   idecode pc mem =
     let opc = getOpcode pc mem
-        indexedPrefix xForms = let pc'    = pcInc pc
+        indexedPrefix xForms = let pc'    = pc + 1
                                    newOpc = getOpcode pc' mem
                                in  case newOpc of
                                      -- Deal with "weird" IX/IY bit operation layout
@@ -78,13 +78,13 @@ group0decode opc mem pc xForm
                1          -> defResult (DEC16 (pairSP reg16XFormF p))
                _otherwise -> undefined
   | z == 4 = let (newpc, theReg) = reg8 reg8XFormF mem pc y
-             in  DecodedInsn (pcInc newpc) (INC theReg)
+             in  DecodedInsn (newpc + 1) (INC theReg)
   | z == 5 = let (newpc, theReg) = reg8 reg8XFormF mem pc y
-             in  DecodedInsn (pcInc newpc) (DEC theReg)
+             in  DecodedInsn (newpc + 1) (DEC theReg)
   | z == 6 = let (newpc, theReg)   = reg8 reg8XFormF mem pc y
-                 newpc'            = pcInc newpc
+                 newpc'            = newpc + 1
                  immval            = getOpcode newpc' mem
-             in  DecodedInsn (pcInc newpc') (LD (Reg8Imm theReg immval))
+             in  DecodedInsn (newpc' + 1) (LD (Reg8Imm theReg immval))
   | z == 7 = defResult (accumOps IntMap.! fromIntegral y)
   | otherwise = defResult (Z80undef [opc])
   where
@@ -94,7 +94,7 @@ group0decode opc mem pc xForm
     q             = shiftR opc 3 .&. 1
     reg8XFormF    = reg8XForm xForm
     reg16XFormF   = reg16XForm xForm
-    nextIns       = pcInc pc
+    nextIns       = pc + 1
     defResult     = DecodedInsn nextIns
 -- | Accumulator operations map
 accumOps :: IntMap Z80instruction
@@ -115,11 +115,11 @@ group1decode :: Z80word
              -> Z80indexTransform
              -> Z80decodedInsn
 group1decode opc mem pc xform
-  | z == 6, y == 6  = DecodedInsn (pcInc pc) HALT
+  | z == 6, y == 6  = DecodedInsn (pc + 1) HALT
   | otherwise       = let reg8XFormF       = reg8XForm xform
                           (newpc, dstReg)  = reg8 reg8XFormF mem pc y
                           (newpc', srcReg) = reg8 reg8XFormF mem newpc z
-                      in  DecodedInsn (pcInc newpc') (LD (Reg8Reg8 dstReg srcReg))
+                      in  DecodedInsn (newpc' + 1) (LD (Reg8Reg8 dstReg srcReg))
   where
     z = opc .&. 7
     y = shiftR opc 3 .&. 7
@@ -142,7 +142,7 @@ group2decode opc mem pc xForms =
                      6          -> OR
                      7          -> CP
                      _otherwise -> undefined
-  in  DecodedInsn (pcInc newpc) (insCTor alu8operand)
+  in  DecodedInsn (newpc + 1) (insCTor alu8operand)
 
 -- | Group 3 instructions
 group3decode :: Z80word
@@ -163,15 +163,15 @@ group3decode opc mem pc xForm
   | z == 3          = case y of
                         0          -> mkAbsAddrIns JP mem pc
                         -- CB instruction prefix
-                        1          -> let newpc   = pcInc pc
+                        1          -> let newpc   = pc + 1
                                           nextOpc = getOpcode newpc mem
-                                      in  DecodedInsn (pcInc newpc) (bitopsDecode mem newpc nextOpc)
-                        2          -> let newpc   = pcInc pc
+                                      in  DecodedInsn (newpc + 1) (bitopsDecode mem newpc nextOpc)
+                        2          -> let newpc   = pc + 1
                                           nextOpc = getOpcode newpc mem
-                                      in  DecodedInsn (pcInc newpc) ((OUT . PortImm) nextOpc)
-                        3          -> let newpc = pcInc pc
+                                      in  DecodedInsn (newpc + 1) ((OUT . PortImm) nextOpc)
+                        3          -> let newpc = pc + 1
                                           nextOpc = getOpcode newpc mem
-                                      in  DecodedInsn (pcInc newpc) ((IN . PortImm) nextOpc)
+                                      in  DecodedInsn (newpc + 1) ((IN . PortImm) nextOpc)
                         4          -> defResult (EXC SPHL)
                         5          -> defResult (EXC DEHL)
                         6          -> defResult DI
@@ -184,13 +184,13 @@ group3decode opc mem pc xForm
                          -- DD instruction prefix (should never reach here.)
                          1          -> undefined
                          -- ED instruction prefix
-                         2          -> let newpc   = pcInc pc
+                         2          -> let newpc   = pc + 1
                                            nextOpc = getOpcode newpc mem
                                       in  edPrefixDecode nextOpc mem newpc
                          -- FD instruction prefix (should never reach here.)
                          3          -> undefined
                          _otherwise -> undefined
-  | z == 6           = let newpc   = pcInc pc
+  | z == 6           = let newpc   = pc + 1
                            nextOpc = getOpcode newpc mem
                            imm     = ALUimm nextOpc
                            insCTor = case y of
@@ -203,7 +203,7 @@ group3decode opc mem pc xForm
                                        6          -> OR
                                        7          -> CP
                                        _otherwise -> undefined
-                       in  DecodedInsn (pcInc newpc) (insCTor imm)
+                       in  DecodedInsn (newpc + 1) (insCTor imm)
   | z == 7           = defResult (RST (y * 8))
   | otherwise        = defResult (Z80undef [opc])
   where
@@ -212,7 +212,7 @@ group3decode opc mem pc xForm
     p             = shiftR opc 4 .&. 3
     q             = shiftR opc 3 .&. 1
     reg16XFormF   = reg16XForm xForm
-    nextIns       = pcInc pc
+    nextIns       = pc + 1
     defResult     = DecodedInsn nextIns
 -- | The SET, RESet, BIT instructions and rotation operations. Note that this is not suitable for dealing with the
 -- IX and IY indexed instructions, since the instruction format is 'DDCB <displacement> <opcode>', and has to be
@@ -253,16 +253,16 @@ edPrefixDecode :: Z80word
 edPrefixDecode opc mem pc
   | x == 0 = invalid
   | x == 1, z == 0, y /= 6 = let (newpc, reg) = reg8 nullXFormF mem pc y
-                             in  DecodedInsn (pcInc newpc) (IN . CIndIO $ reg)
+                             in  DecodedInsn (newpc + 1) (IN . CIndIO $ reg)
   | x == 1, z == 0, y == 6 = defResult (IN CIndIO0)
-  | x == 1, z == 1, y /= 6 = let (newpc, reg) = reg8 nullXFormF mem (pcInc newpc) y
-                             in  DecodedInsn (pcInc newpc) ((OUT . CIndIO) reg)
+  | x == 1, z == 1, y /= 6 = let (newpc, reg) = reg8 nullXFormF mem (newpc + 1) y
+                             in  DecodedInsn (newpc + 1) ((OUT . CIndIO) reg)
   | x == 1, z == 1, y == 6 = defResult (OUT CIndIO0)
   | x == 1, z == 2, q == 0 = defResult ((SBC . ALU16) $ pairSP nullReg16XFormF p)
   | x == 1, z == 2, q == 1 = defResult ((ADC . ALU16) $ pairSP nullReg16XFormF p)
   | x == 1, z == 2         = invalid
-  | x == 1, z == 3, q == 0 = mkAbsAddrIns (LD . RPIndirectStore (pairSP nullReg16XFormF p)) mem (pcInc pc)
-  | x == 1, z == 3, q == 1 = mkAbsAddrIns (LD . RPIndirectLoad (pairSP nullReg16XFormF p)) mem (pcInc pc)
+  | x == 1, z == 3, q == 0 = mkAbsAddrIns (LD . RPIndirectStore (pairSP nullReg16XFormF p)) mem (pc + 1)
+  | x == 1, z == 3, q == 1 = mkAbsAddrIns (LD . RPIndirectLoad (pairSP nullReg16XFormF p)) mem (pc + 1)
   | x == 1, z == 3         = invalid
   | x == 1, z == 4         = defResult NEG
   | x == 1, z == 5, y == 1 = defResult RETI
@@ -298,7 +298,7 @@ edPrefixDecode opc mem pc
     invalid         = defResult (Z80undef [0xed, opc])
     nullXFormF      = reg8XForm z80nullTransform
     nullReg16XFormF = reg16XForm z80nullTransform
-    nextIns         = pcInc pc
+    nextIns         = pc + 1
     defResult       = DecodedInsn nextIns
 
 -- | Block/compare/input/output increment-decrement lookup table
@@ -406,10 +406,10 @@ displacementInstruction :: Z80memory
                         -> (SymAbsAddr Z80addr -> Z80instruction)
                         -> Z80decodedInsn
 displacementInstruction mem pc ins =
-  let pc'          = pcInc pc
+  let pc'          = pc + 1
       disp         = getOpcode pc' mem
       destAddr     = Comonad.extract pc + signExtend disp + 2
-      nextIns      = pcInc pc'
+      nextIns      = pc' + 1
   in  DecodedInsn nextIns (ins . AbsAddr $ destAddr)
 
 -- | Get opcode at current program counter
@@ -424,7 +424,7 @@ mkAbsAddrIns :: (SymAbsAddr Z80addr -> Z80instruction)
              -> Z80PC
              -> Z80decodedInsn
 mkAbsAddrIns ins mem pc =
-  let DecodedAddr pc' addr = z80getAddr mem (pcInc pc)
+  let DecodedAddr pc' addr = z80getAddr mem (pc + 1)
   in  DecodedInsn pc' ((ins . AbsAddr) addr)
 
 -- | Fetch an absolute (16-bit) little endian address
@@ -433,9 +433,9 @@ z80getAddr :: Z80memory                 -- ^ Memory from which address is fetche
            -> Z80decodedInsn
 z80getAddr (MemorySystem mem) pc = let lo, hi     :: Z80word
                                        lo         = withPC pc (mFetch mem)
-                                       pc'        = pcInc pc
+                                       pc'        = pc + 1
                                        hi         = withPC pc' (mFetch mem)
-                                   in DecodedAddr (pcInc pc') (shiftL (fromIntegral hi) 8 .|. fromIntegral lo)
+                                   in DecodedAddr (pc' + 1) (shiftL (fromIntegral hi) 8 .|. fromIntegral lo)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Index register transform functions:

@@ -173,14 +173,6 @@ instance (FiniteBits dispType) => FiniteBits (RelativePC dispType) where
 
 -- | Basic program counter type class: increment, decrement, and displace
 class (Num pcType, Integral pcType, FiniteBits pcType) => PCOperation pcType where
-  -- | Increment the program counter
-  pcInc      :: pcType
-             -> pcType
-  pcInc pc = pc + 1
-  -- | Decrement the program counter
-  pcDec      :: pcType
-             -> pcType
-  pcDec pc = pc - 1
   -- | Displace the program counter by a displacement amount (positive or negative).
   pcDisplace :: (Integral dispType, FiniteBits dispType, SignExtend dispType) =>
                 RelativePC dispType
@@ -224,14 +216,14 @@ class MemoryOps memSys addrType wordType where
                  -> memSys
                  -- ^ The memory system
                  -> (ProgramCounter addrType, wordType)
-  mFetchAndIncPC pc mem = (pcInc pc, withPC pc (mFetch mem))
+  mFetchAndIncPC pc mem = (pc + pure 1, withPC pc (mFetch mem))
 
   -- | Fetch an entity from memory, pre-incrementing the program counter, returning the (incremented pc, contents)
   mIncPCAndFetch :: (PCOperation addrType) =>
                     ProgramCounter addrType
                  -> memSys
                  -> (ProgramCounter addrType, wordType)
-  mIncPCAndFetch pc mem = let pc' = pcInc pc
+  mIncPCAndFetch pc mem = let pc' = pc + pure 1
                           in  (pc', withPC pc' (mFetch mem))
 
 -- | A memory system, for a given address type and word type.
@@ -305,6 +297,4 @@ instance (ShowHex addrType) => Show (SymAbsAddr addrType) where
 
 -- | Instantiate 'PCOperation' operations for 'ProgramCounter'
 instance (Num addrType, Integral addrType, FiniteBits addrType) => PCOperation (ProgramCounter addrType) where
-  pcInc pc                             = (+ 1) <$> pc
-  pcDec pc                             = (+ (negate 1)) <$> pc
   pcDisplace (RelativePC disp) (PC pc) = PC (pc + signExtend disp)
