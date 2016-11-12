@@ -6,52 +6,31 @@ The venerable TRS-80 (aka "the Trash 80") system.
 -}
 
 module TRS80.System
-  ( trs80generic
-  , ModelISystem
-  , ModelIMemory
-  , trs80System
-  , MemoryOps(..)
+  ( trs80System
+  , TRS80ModelISystem
   ) where
 
 import           Control.Lens
-import           Data.Vector.Unboxed (Vector, empty, (!))
-import qualified Data.Vector.Unboxed as DVU (generate, replicate)
+import           Data.Vector.Unboxed (Vector)
 
 import           Machine
 import           Z80
 
-import           TRS80.Types
---
--- | The TRS-80 Model I's memory system.
-data ModelIMemory where
-  ModelIMemory ::
-    { rom :: Vector Z80word
-    , ram :: Vector Z80word
-    , topMem :: Z80addr
-    } -> ModelIMemory
+-- | The *Z80system* system discriminant
+data TRS80ModelITag
 
--- | A very basic (and completely unusable) TRS-80 Model I system
-trs80generic :: EmulatedSystem Z80state Z80addr Z80word Z80instruction
-trs80generic = z80generic &
-                 memory .~ MemorySystem ModelIMemory { rom = empty
-                                                     , ram = empty
-                                                     , topMem = 0
-                                                     } &
-                 sysName .~ "TRS-80 Model I" &
-                 sysAliases .~ ["trs80-model-I", "trs80-model-1", "trs80-model-i"]
+-- | The TRS-80 Model I system type. It's a specific type of Z80-based system.
+type TRS80ModelISystem = Z80system TRS80ModelITag
 
 -- | Create the system's RAM
-installMem :: ModelISystem
+installMem :: TRS80ModelISystem
            -> Int
            -> Vector Z80word
-           -> ModelISystem
+           -> TRS80ModelISystem
 installMem sys memSize newROM =
-  sys & memory .~ MemorySystem ModelIMemory { rom = newROM
-                                            , ram = DVU.replicate (fromIntegral (memSize * 1024)) 0
-                                            , topMem = fromIntegral ((memSize + 16) * 1024 - 1)
-                                            }
+  sys & memory %~ mkROMRegion 0 newROM & memory %~ mkRAMRegion ramStart (memSize * 1024)
 
-{- | Fetch a byte from memory. The TRS-80 has a very simple memory layout:
+{- The TRS-80 has a very simple memory layout:
 
 Address (hex) 	Description
 0000-2FFF 	Level II ROM
@@ -65,34 +44,8 @@ Address (hex) 	Description
 8000-BFFF 	Additional RAM in a 32K machine
 C000-FFFF 	Still more in a 48K machine
 -}
-modelIfetch :: ModelIMemory -> Z80addr -> Z80word
-modelIfetch msys addr
-  {-  | trace ("modelIfetch " ++ (T.unpack $ as0xHex addr)) False = undefined -}
-  | addr < romSize
-  = theROM ! fromIntegral addr
-  | addr >= mmapIOStart && addr < mmapIOEnd
-  {- FIXME -}
-  = 0
-  | addr >= ramStart && addr <= topMem msys
-  = theRAM ! fromIntegral (addr - ramStart)
-  | otherwise
-  = error ("TRS80.mfetch: Illegal address or invalid memory system: " ++ show addr)
-  where
-    theROM = rom msys
-    theRAM = ram msys
 
-modelIfetchN :: ModelIMemory -> Z80addr -> Int -> Vector Z80word
-modelIfetchN msys start nbytes = let fetchByte idx = modelIfetch msys (start + fromIntegral idx)
-                                 in  DVU.generate nbytes fetchByte
-
-instance MemoryOps ModelIMemory Z80addr Z80word where
-  -- |
-  mFetch = modelIfetch
-  mFetchN = modelIfetchN
-
-romSize, mmapIOStart, mmapIOEnd, ramStart :: Z80addr
--- | ROM size (12K)
-romSize     = 12 * 1024
+mmapIOStart, mmapIOEnd, ramStart :: Z80addr
 -- | Start of memory mapped I/O adress space.
 mmapIOStart = 0x3000
 -- | End of memory mapped I/O address space.
@@ -107,9 +60,9 @@ trs80System :: FilePath
             -- ^ ROM image reader (RAW vs. Intel Hex vs. Hex strings)
             -> Int
             -- ^ Memory size: 16K, 32K or 48K
-            -> ModelISystem
+            -> TRS80ModelISystem
             -- ^ Initial Model I system (should be 'trs80generic')
-            -> IO ModelISystem
+            -> IO TRS80ModelISystem
             -- ^ Fully constructed TRS-80 Model I
 trs80System romPath reader memSize trs80 =
     installMem trs80 memSize <$> reader romPath

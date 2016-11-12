@@ -8,7 +8,6 @@ module Z80.Processor
   , Z80state(..)
   , Z80PC
   , Z80memory
-  , MemoryOps(..)
 
     -- * Functions
   , z80MinAddr
@@ -33,7 +32,6 @@ module Z80.Processor
 import Control.Lens (makeLenses)
 import Data.Int
 import Data.Word
-import Prelude hiding (replicate)
 
 import Machine
 

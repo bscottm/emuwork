@@ -92,7 +92,7 @@ formatSymTab symTab outSeq =
                   <| T.empty
                   <| columnar (Foldable.foldl formatSymbol Seq.empty byNameSyms)
       -- Consolidate sequence into columnar format
-      columnar symSeq = if Seq.length symSeq >= totalCols then 
+      columnar symSeq = if Seq.length symSeq >= totalCols then
                           let (thisCol, rest) = Seq.splitAt totalCols symSeq
                           in  T.intercalate "  " (Foldable.toList thisCol) <| columnar rest
                         else
@@ -124,7 +124,7 @@ formatIns ins cmnt = let (mnemonic, opers) = formatInstruction ins
                      in  T.append (padTo lenInstruction $ T.append (padTo lenMnemonic mnemonic) opers) cmnt'
 
 -- | Output a formatted address in uppercase hex
-upperHex :: ShowHex operand => 
+upperHex :: ShowHex operand =>
             operand
          -> T.Text
 upperHex = makeUpper . asHex
@@ -245,7 +245,7 @@ formatInstruction CCF                     = zeroOperands "CCF"
 formatInstruction (DJNZ addr)             = oneOperand "DJNZ" addr
 formatInstruction (JR addr)               = oneOperand "JR" addr
 formatInstruction (JRCC cc addr)          = twoOperands "JR" cc addr
-formatInstruction (JP addr)               = oneOperand "JP" addr 
+formatInstruction (JP addr)               = oneOperand "JP" addr
 formatInstruction (JPCC cc addr)          = twoOperands "JP" cc addr
 formatInstruction (IN port)               = ("IN", ioPortOperand port True)
 formatInstruction (OUT port)              = ("OUT", ioPortOperand port False)
@@ -293,7 +293,7 @@ formatInstruction OTDR                    = zeroOperands "OTDR"
 -- formatInstruction _ = zeroOperands "--!!"
 
 -- | Disassembly output with an instruction having no operands
-zeroOperands :: T.Text 
+zeroOperands :: T.Text
              -> (T.Text, T.Text)
 zeroOperands mne = (mne, T.empty)
 
@@ -411,6 +411,10 @@ instance DisOperandFormat Z80reg8 where
                                               , showDisp disp
                                               , ")"
                                               ]
+  formatOperand IXh = "IXh"
+  formatOperand IXl = "IXl"
+  formatOperand IYh = "IYh"
+  formatOperand IYl = "IYl"
 
 instance DisOperandFormat Z80reg16 where
   formatOperand BC = "BC"
@@ -442,7 +446,7 @@ instance DisOperandFormat (SymAbsAddr Z80addr) where
 formatPseudo :: Z80DisasmElt
              -> Seq T.Text
 
-formatPseudo (ByteRange sAddr bytes) = 
+formatPseudo (ByteRange sAddr bytes) =
   let initSlice     = DVU.slice 0 (if DVU.length bytes <= 8; then DVU.length bytes; else 8) bytes
       mkBytes vec   =  T.concat [ padTo lenMnemonic "DB"
                                 , T.intercalate ", " [ oldStyleHex x | x <- DVU.toList vec ]
@@ -450,7 +454,7 @@ formatPseudo (ByteRange sAddr bytes) =
   in  formatLinePrefix initSlice sAddr (mkBytes initSlice)
       >< fmtByteGroup bytes (disEltAddress sAddr + 8) 8 mkBytes
 
-formatPseudo (ExtPseudo (ByteExpression addr expr word)) = 
+formatPseudo (ExtPseudo (ByteExpression addr expr word)) =
   let outF _vec = T.concat [ padTo lenMnemonic "DB"
                               , if (not . T.null) expr then
                                   expr

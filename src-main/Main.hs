@@ -4,7 +4,6 @@ module Main (main) where
 
 import           Control.Lens
 import           Control.Monad
-import           Data.List
 import           System.Console.GetOpt
 import           System.Environment
 import           System.Exit
@@ -35,18 +34,43 @@ main =
                  >> dumpEmulators
       emuName  -> doDispatch emuName others
 
-data AnyEmulator where
-  AnyEmulator :: Machine.EmulatorDriver emu => emu -> AnyEmulator
+class CmdLineDispatch emu where
+  identify :: String
+           -> emu
+           -> Bool
+  formalName :: emu
+             -> String
+  knownAs :: emu
+          -> [String]
+  cmdLineDispatch :: emu
+                  -> [String]
+                  -> IO ()
 
-instance Machine.EmulatorDriver AnyEmulator where
-  formalName (AnyEmulator emu)            = Machine.formalName emu
-  identityNames (AnyEmulator emu)         = Machine.identityNames emu
-  cmdDispatch (AnyEmulator emu) opts      = Machine.cmdDispatch emu opts
+instance CmdLineDispatch AnyEmulator where
+  identify emuName (AnyEmulator emu) = identify emuName emu
+  formalName (AnyEmulator emu) = formalName emu
+  knownAs (AnyEmulator emu) = knownAs emu
+  cmdLineDispatch (AnyEmulator emu) = cmdLineDispatch emu
+
+instance CmdLineDispatch Machine.NullSystem where
+  identify emuName emu = emuName `elem` emu ^. Machine.sysAliases
+  formalName emu       = emu ^. Machine.sysName
+  knownAs emu          = emu ^. Machine.sysAliases
+  cmdLineDispatch      = Machine.nullProcCmdDispatch
+
+instance CmdLineDispatch TRS80.TRS80ModelISystem where
+  identify emuName emu = emuName `elem` (emu ^. Machine.sysAliases)
+  formalName emu       = emu ^. Machine.sysName
+  knownAs emu          = emu ^. Machine.sysAliases
+  cmdLineDispatch      = TRS80.trs80CmdDispatch
+
+data AnyEmulator where
+  AnyEmulator :: CmdLineDispatch emu => emu -> AnyEmulator
 
 knownEmulators :: [ AnyEmulator ]
 knownEmulators = [ AnyEmulator Machine.nullProcessor
-            , AnyEmulator TRS80.trs80generic
-            ]
+                 , AnyEmulator TRS80.trs80generic
+                 ]
 
 -- | Dispatch the command to the appropriate emulator.
 --
@@ -56,20 +80,20 @@ doDispatch :: String                            -- ^ The requested emulator's na
            -> [String]                          -- ^ Command line (emulator-specific)
            -> IO ()
 doDispatch emuName emuOpts =
-  let candEmulators = filter (\emu -> emuName `elem` (Machine.identityNames emu)) knownEmulators
+  let candEmulators = filter (identify emuName) knownEmulators
   in  if length candEmulators == 1
-      then Machine.cmdDispatch (head candEmulators) emuOpts
+      then cmdLineDispatch (head candEmulators) emuOpts
       else hPutStrLn stderr
-                     (if length candEmulators == 0
-                      then ("Unsupported or unknown emulator: '" ++ emuName ++ "'")
-                      else ("Ambiguous emulator: '" ++ emuName ++ "'"))
+                     (if null candEmulators
+                      then "Unsupported or unknown emulator: '" ++ emuName ++ "'"
+                      else "Ambiguous emulator: '" ++ emuName ++ "'")
              >> dumpEmulators
 
 -- | Parse command line flags and options, returning a 'CommonEmulatorOptions' record (options) and
 -- remaining command line parameters wrapped in the IO monad
 parseOptions :: IO (CommonEmulatorOptions, [String])
 parseOptions =
-    let processArgs         = getArgs >>= return . getOpt RequireOrder options
+    let processArgs         = getOpt RequireOrder options <$> getArgs
         -- The key observation here is that within each option in the OptDescr list,
         -- there is a function that sets an individual member of the 'Machine.CommonEmulatorOptions'
         -- record.
@@ -107,7 +131,7 @@ options =
 
     doUsage           _flags    = do
       showUsage
-      exitWith ExitSuccess
+      exitSuccess
 
 -- | Show the help message:
 helpMsg :: String -> String
@@ -116,11 +140,11 @@ helpMsg progname = let header = "Usage: " ++ progname ++ " [OPTIONS]"
 
 -- | Show the usage message
 showUsage :: IO ()
-showUsage = getProgName >>= (\progname -> hPutStr stderr (helpMsg progname))
+showUsage = getProgName >>= hPutStr stderr . helpMsg
 
 -- | Dump the known emulators
 dumpEmulators :: IO ()
-dumpEmulators = do
+dumpEmulators =
     hPutStrLn stderr ""
       >> hPutStrLn stderr "Available emulators are:"
       >> mapM_ prettyEmu knownEmulators
@@ -128,13 +152,13 @@ dumpEmulators = do
     prefix = ".. "
 
     initialString :: AnyEmulator -> String
-    initialString emu = prefix ++ (Machine.formalName emu)
+    initialString emu = prefix ++ formalName emu
 
     prettyEmu :: AnyEmulator -> IO ()
     prettyEmu emu = do
       progName <- getProgName
       hPutStrLn stderr (initialString emu)
-      prettyEmuNames progName (Machine.identityNames emu)
+      prettyEmuNames progName (knownAs emu)
 
     prettyEmuNames _    []             = hPutStrLn stderr ""
     prettyEmuNames prog (eName:eNames) = hPutStrLn stderr ("  " ++ prog ++ " --system=" ++ eName ++ " [options]")

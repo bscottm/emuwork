@@ -25,12 +25,13 @@ library
                         vector,
                         old-locale,
                         comonad,
+                        IntervalMap,
                         lens,
                         transformers,
                         syb,
                         parsec
 
-  ghc-options:          -Wall -O2
+  ghc-options:          -Wall -g
 
   default-extensions:   GADTs,
                         MultiParamTypeClasses,
@@ -43,7 +44,8 @@ library
 
   other-modules:        Machine.DisassemblerTypes,
                         Machine.EmulatedSystem,
-                        Machine.EmulatorDriver,
+                        Machine.MemorySystem,
+                        Machine.ProgramCounter
                         Machine.NullProcessor,
                         Reader.RawFormat,
                         Reader.IntelHex,

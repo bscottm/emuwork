@@ -28,13 +28,15 @@ module Machine.DisassemblerTypes
   , disEltGetLength
   ) where
 
-import Data.Data
-import Data.Word
-import Data.Vector.Unboxed (Vector, Unbox)
-import qualified Data.Vector.Unboxed as DVU
-import qualified Data.Text as T
+import           Data.Data
+import qualified Data.Text              as T
+import           Data.Vector.Unboxed    (Unbox, Vector)
+import qualified Data.Vector.Unboxed    as DVU
+import           Data.Word
 
-import Machine.EmulatedSystem
+import           Machine.MemorySystem
+import           Machine.EmulatedSystem
+import           Machine.ProgramCounter
 
 -- | 'DisasmElement' is a dissassembly element: a disassembled instruction (with corresponding address and instruction
 -- words) or pseudo operation.
@@ -153,7 +155,7 @@ disEltAddress (Labeled addr _label) = addr
 -- | Extract the label from a disassembler element address. Returns empty if a 'Plain' element address
 disEltLabel :: DisEltAddress addrType
             -> T.Text
-disEltLabel (Plain _addr) = T.empty
+disEltLabel (Plain _addr)             = T.empty
 disEltLabel (Labeled _addr addrLabel) = addrLabel
 
 -- | Make a 'Plain' disassembler element address
@@ -228,7 +230,7 @@ disEltGetLength :: ( Unbox wordType ) =>
                 -> Int
 disEltGetLength (DisasmInsn _ bytes _ _) = DVU.length bytes
 disEltGetLength (ByteRange _ bytes)      = DVU.length bytes
-disEltGetLength Addr{}             = 2
+disEltGetLength Addr{}                   = 2
 disEltGetLength (AsciiZ _ bytes)         = DVU.length bytes
 disEltGetLength (Ascii _ bytes)          = DVU.length bytes
 disEltGetLength _                        = 0
