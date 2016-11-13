@@ -40,5 +40,4 @@ z80generic = EmulatedSystem
              , _memory      = initialMemorySystem :: Z80memory
              , _sysName     = "Generic Z80 system"
              , _sysAliases  = ["z80generic", "Z80-generic"]
-             , _cmdDispatch = undefined
              }

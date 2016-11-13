@@ -31,7 +31,7 @@ library
                         syb,
                         parsec
 
-  ghc-options:          -Wall -g
+  ghc-options:          -Wall -O2
 
   default-extensions:   GADTs,
                         MultiParamTypeClasses,

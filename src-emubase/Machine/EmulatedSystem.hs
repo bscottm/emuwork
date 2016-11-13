@@ -53,9 +53,6 @@ data EmulatedSystem procInternals addrType wordType instructionSet where
                   -- ^ The system's name, e.g. "Null/dummy processor"
     , _sysAliases :: [String]
                   -- ^ Names the system is known by.
-    , _cmdDispatch :: EmulatedSystem procInternals addrType wordType instructionSet
-                   -> [String]
-                   -> IO ()
     } -> EmulatedSystem procInternals addrType wordType instructionSet
 
 -- Need to manually generate the lenses due to the constraint on EmulatedSystem
@@ -71,9 +68,6 @@ sysName f sys = (\name -> sys { _sysName = name }) <$> f (_sysName sys)
 
 sysAliases :: Lens' (EmulatedSystem procType addrType wordType insnSet) [String]
 sysAliases f sys = (\aliases -> sys { _sysAliases = aliases }) <$> f (_sysAliases sys)
-
-cmdDispatch :: Lens' (EmulatedSystem procType addrType wordType insnSet) (EmulatedSystem procType addrType wordType insnSet -> [String] -> IO ())
-cmdDispatch f sys = (\cmdFunc -> sys { _cmdDispatch = cmdFunc }) <$> f (_cmdDispatch sys)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 

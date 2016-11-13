@@ -22,7 +22,6 @@ nullProcessor = EmulatedSystem
                 , _memory      = initialMemorySystem
                 , _sysName     = "Null/dummy system"
                 , _sysAliases  = ["null", "dummy"]
-                , _cmdDispatch = nullProcCmdDispatch
                 }
 
 -- | Processor operations

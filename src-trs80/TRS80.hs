@@ -23,13 +23,14 @@ import TRS80.System
 
 import Z80
 
--- | A very basic (and completely unusable) TRS-80 Model I system
+-- | A very basic (and completely unusable) TRS-80 Model I system. This is the system
+-- that is passed through 'trs80CmdDispatch'.
 trs80generic :: TRS80ModelISystem
 trs80generic = z80generic &
                  sysName .~ "TRS-80 Model I" &
-                 sysAliases .~ ["trs80-model-I", "trs80-model-1", "trs80-model-i"] &
-                 cmdDispatch .~ trs80CmdDispatch
+                 sysAliases .~ ["trs80-model-I", "trs80-model-1", "trs80-model-i"]
 
+-- | Command line option collector and dispatcher.
 trs80CmdDispatch :: TRS80ModelISystem
                  -> [String]
                  -> IO ()
