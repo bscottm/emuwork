@@ -110,7 +110,7 @@ mkSection sectName (Y.Array directives) g =
   let dirs   = V.toList $ V.map parseDirective directives
       errs   = lefts dirs
       result = (V.fromList . rights) dirs
-  in  {- | trace ("directives = " ++ (show directives)) -}
+  in  {-  | trace ("directives = " ++ (show directives)) -}
     if null errs
     then Right $ g { sections = H.insert sectName result (sections g) }
     else Left (T.unlines errs)
