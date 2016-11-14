@@ -1,8 +1,10 @@
 {-# LANGUAGE FlexibleInstances, MultiParamTypeClasses #-}
+{-|
+ -}
 
 module Machine.MemorySystem where
 
-import Control.Lens
+import Control.Lens (Lens', (|>), (^.), (%~), (&))
 import Data.Vector.Unboxed (Vector, (!))
 import qualified Data.Vector.Unboxed as DVU
 import qualified Data.IntervalMap.Interval as I
