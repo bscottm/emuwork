@@ -11,6 +11,7 @@ import qualified Data.IntervalMap.Generic.Strict as IM
 -- import Debug.Trace
 
 import Machine.ProgramCounter
+import Machine.Utils
 
 -- | Memory region
 data MemoryRegion addrType wordType where
@@ -45,34 +46,39 @@ data MemorySystem addrType wordType where
 regions :: Lens' (MemorySystem addrType wordType) (MemRegionMap addrType wordType)
 regions f msys = (\regions' -> msys { _regions = regions' }) <$> f (_regions msys)
 
-mkRAMRegion :: (Ord addrType, Num addrType, DVU.Unbox wordType, Num wordType) =>
+mkRAMRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType, Num wordType) =>
                addrType
             -> Int
             -> MemorySystem addrType wordType
             -> MemorySystem addrType wordType
 mkRAMRegion sa len msys =
   let ea = sa + fromIntegral len
-  in  msys & regions %~ IM.insertWith const
-                                     (I.IntervalCO sa ea)
-                                     MR { _readOnly = False
-                                        , _startAddr = sa
-                                        , _endAddr   = ea
-                                        , _contents = DVU.replicate len 0
-                                        }
-mkROMRegion :: (Ord addrType, Num addrType, DVU.Unbox wordType) =>
+  in    if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
+        then msys & regions %~ IM.insertWith const
+                                             (I.IntervalCO sa ea)
+                                             MR { _readOnly = False
+                                                , _startAddr = sa
+                                                , _endAddr   = ea
+                                                , _contents = DVU.replicate len 0
+                                                }
+        else error ("mkRAMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
+
+mkROMRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType) =>
                addrType
             -> Vector wordType
             -> MemorySystem addrType wordType
             -> MemorySystem addrType wordType
 mkROMRegion sa romImg msys =
   let ea = sa + fromIntegral (DVU.length romImg)
-  in  msys & regions %~ IM.insertWith const
-                                     (I.IntervalCO sa ea)
-                                     MR { _readOnly = True
-                                        , _startAddr = sa
-                                        , _endAddr = ea
-                                        , _contents = romImg
-                                        }
+  in  if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
+      then msys & regions %~ IM.insertWith const
+                                           (I.IntervalCO sa ea)
+                                           MR { _readOnly = True
+                                              , _startAddr = sa
+                                              , _endAddr = ea
+                                              , _contents = romImg
+                                              }
+      else error ("mkROMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 mFetch :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
           MemorySystem addrType wordType
@@ -80,11 +86,11 @@ mFetch :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
        -> wordType
 mFetch msys addr =
   let regs = IM.containing (msys ^. regions) addr
-  in  if IM.size regs == 1
-      then let reg = head (IM.elems regs)
-               regSA = reg ^. startAddr
-           in  (reg ^. contents) ! fromIntegral (addr - regSA)
-         -- FIXME: Should something different happen here when data is grabbed from
+      getContent acc iv mr = acc |> ((mr ^. contents) ! fromIntegral (addr - I.lowerBound iv))
+      vals = IM.foldlWithKey getContent [] regs
+  in  if not (null vals)
+      then head vals
+         -- FIXME: Should something different happen here when data is requested from
          -- an unknown/unmapped region?
       else 0
 
@@ -94,7 +100,7 @@ mFetchN :: (Integral addrType, DVU.Unbox wordType) =>
         -> Int
         -> Vector wordType
 mFetchN msys sa nWords =
-  let regs = IM.containing (msys ^. regions) sa
+  let regs = IM.intersecting (msys ^. regions) (I.ClosedInterval sa (sa + fromIntegral nWords))
   in  if IM.size regs == 1
       then let reg = head (IM.elems regs)
                regSA = reg ^. startAddr
