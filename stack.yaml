@@ -27,7 +27,6 @@ packages:
 - '.'
 - src-emubase/
 - src-trs80/
-- src-zilog-emu/
 # - src-edas/
 
 # Dependency packages to be pulled from upstream that are not in the resolver

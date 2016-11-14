@@ -437,7 +437,7 @@ instance DisOperandFormat RegPairAF where
   formatOperand (RPair16' r) = formatOperand r
   formatOperand AF = "AF"
 
-instance DisOperandFormat (SymAbsAddr Z80addr) where
+instance (DisOperandFormat addrType) => DisOperandFormat (SymAbsAddr addrType) where
   formatOperand (AbsAddr addr) = formatOperand addr
   formatOperand (SymAddr label) = label
 

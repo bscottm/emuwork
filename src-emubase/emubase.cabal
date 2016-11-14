@@ -13,40 +13,52 @@ library
   default-language:     Haskell2010
 
   build-depends:
-                        base,
-                        time,
-                        primitive,
-                        filepath,
-                        directory,
-                        deepseq,
-                        containers,
-                        bytestring,
-                        text,
-                        vector,
-                        old-locale,
-                        comonad,
-                        IntervalMap,
-                        lens,
-                        transformers,
-                        syb,
-                        parsec
+    base,
+    time,
+    primitive,
+    filepath,
+    directory,
+    deepseq,
+    containers,
+    unordered-containers,
+    bytestring,
+    text,
+    vector,
+    old-locale,
+    comonad,
+    IntervalMap,
+    lens,
+    transformers,
+    syb,
+    parsec
 
   ghc-options:          -Wall -O2
 
-  default-extensions:   GADTs,
-                        MultiParamTypeClasses,
-                        OverloadedStrings,
-                        TemplateHaskell
+  default-extensions:
+    GADTs,
+    MultiParamTypeClasses,
+    TypeSynonymInstances,
+    OverloadedStrings,
+    TemplateHaskell
 
-  exposed-modules:      Machine,
-                        Machine.Utils,
-                        Reader
+  exposed-modules:
+    Machine,
+    Machine.Utils,
+    Reader,
+    Z80
 
-  other-modules:        Machine.DisassemblerTypes,
-                        Machine.EmulatedSystem,
-                        Machine.MemorySystem,
-                        Machine.ProgramCounter
-                        Machine.NullProcessor,
-                        Reader.RawFormat,
-                        Reader.IntelHex,
-                        Reader.ErrorHandling
+  other-modules:
+    Machine.DisassemblerTypes,
+    Machine.EmulatedSystem,
+    Machine.MemorySystem,
+    Machine.ProgramCounter
+    Machine.NullProcessor,
+    Reader.RawFormat,
+    Reader.IntelHex,
+    Reader.ErrorHandling,
+    Z80.InstructionSet,
+    Z80.InsnDecode,
+    Z80.Processor,
+    Z80.Disassembler,
+    Z80.DisasmOutput,
+    Z80.ParseAnalytic

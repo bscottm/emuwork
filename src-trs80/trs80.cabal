@@ -13,40 +13,39 @@ library
                    Haskell2010
 
   build-depends:
-                aeson,
-                array,
-                base,
-                binary,
-                bytestring,
-                containers,
-                emubase,
-                hashable,
-                lens,
-                pureMD5,
-                scientific,
-                text,
-                unordered-containers,
-                vector,
-                yaml,
-                zilog-emu
+      aeson,
+      array,
+      base,
+      binary,
+      bytestring,
+      containers,
+      emubase,
+      hashable,
+      lens,
+      pureMD5,
+      scientific,
+      text,
+      unordered-containers,
+      vector,
+      yaml
 
   ghc-options:
               -Wall -O2
 
   default-extensions:
-                     GADTs,
-                     MultiParamTypeClasses,
-                     OverloadedStrings,
-                     TemplateHaskell
+      GADTs,
+      MultiParamTypeClasses,
+      OverloadedStrings,
+      TemplateHaskell
 
   exposed-modules:
-        TRS80
+      TRS80
 
   other-modules:
-                TRS80.System
-                TRS80.Disasm
-                TRS80.CommonOptions
-                TRS80.Disasm.Guidance
+      TRS80.System
+      TRS80.Disasm
+      TRS80.CommonOptions
+      TRS80.Disasm.Guidance
 
 test-suite yamltest
     default-language:   Haskell2010
