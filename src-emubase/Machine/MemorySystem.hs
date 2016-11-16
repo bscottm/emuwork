@@ -1,8 +1,37 @@
 {-# LANGUAGE FlexibleInstances, MultiParamTypeClasses #-}
-{-|
+{-| Representation of system memory.
+
+Emulated system memory represents memory as a collection of regions stored in an 'IntervalMap'. The 'IntervalMap' stores the
+start and end addresses for the region; each region stores its contents and a read-only flag. Memory regions __/may not/__
+overlap; they __/must/__ be distinct.
+
+How to use: Add regions to an 'initialMemorySystem' via 'mkRAMRegion' or 'mkROMRegion'. Example snippet from the TRS-80
+code:
+
+> -- | Create the system's RAM
+> installMem :: TRS80ModelISystem
+>            -> Int
+>            -> Vector Z80word
+>            -> TRS80ModelISystem
+> installMem sys memSize newROM =
+>   sys & memory %~ mkROMRegion 0 newROM & memory %~ mkRAMRegion ramStart (memSize * 1024)
+
+TODO: Allow update to a region that turns off the read-only flag (i.e., convert ROM to RAM.)
  -}
 
-module Machine.MemorySystem where
+module Machine.MemorySystem
+  ( MemorySystem(..)
+  , MemoryRegion(..)
+  , readOnly
+  , contents
+  , mkRAMRegion
+  , mkROMRegion
+  , mFetch
+  , mFetchN
+  , mFetchAndIncPC
+  , mIncPCAndFetch
+  , initialMemorySystem
+  ) where
 
 import Control.Lens (Lens', (|>), (^.), (%~), (&))
 import Data.Vector.Unboxed (Vector, (!))
@@ -10,21 +39,23 @@ import qualified Data.Vector.Unboxed as DVU
 import qualified Data.IntervalMap.Interval as I
 import qualified Data.IntervalMap.Generic.Strict as IM
 
--- import Debug.Trace
+import Debug.Trace
 
 import Machine.ProgramCounter
 import Machine.Utils
 
--- | Memory region
+-- | A memory region
 data MemoryRegion addrType wordType where
   MR ::
     { _readOnly    :: Bool
     , _startAddr   :: addrType
     , _endAddr     :: addrType
     , _contents    :: Vector wordType
+    -- ^ Memory region's contents (unboxed vector)
     } -> MemoryRegion addrType wordType
   deriving (Show)
 
+-- | Lens for a memory region's read-only flag.
 readOnly :: Lens' (MemoryRegion addrType wordType) Bool
 readOnly f mregion = (\ro -> mregion { _readOnly = ro }) <$> f (_readOnly mregion)
 
@@ -34,6 +65,7 @@ startAddr f mregion = (\sa -> mregion { _startAddr = sa }) <$> f (_startAddr mre
 endAddr :: Lens' (MemoryRegion addrType wordType) addrType
 endAddr f mregion = (\ea -> mregion { _endAddr = ea }) <$> f (_endAddr mregion)
 
+-- | Lens for a memory region's contents
 contents :: Lens' (MemoryRegion addrType wordType) (Vector wordType)
 contents f mregion = (\content' -> mregion { _contents = content' }) <$> f (_contents mregion)
 
@@ -48,6 +80,8 @@ data MemorySystem addrType wordType where
 regions :: Lens' (MemorySystem addrType wordType) (MemRegionMap addrType wordType)
 regions f msys = (\regions' -> msys { _regions = regions' }) <$> f (_regions msys)
 
+-- | Create a new RAM memory region. __/Note:/__ memory regions may not overlap; 'error' will signal if this
+-- precondition fails.
 mkRAMRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType, Num wordType) =>
                addrType
             -> Int
@@ -65,6 +99,8 @@ mkRAMRegion sa len msys =
                                                 }
         else error ("mkRAMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
+-- | Create a new read-only (ROM) memory region. __/Note:/__ memory regions may not overlap; 'error' will signal if this
+-- precondition fails.
 mkROMRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType) =>
                addrType
             -> Vector wordType
@@ -82,6 +118,8 @@ mkROMRegion sa romImg msys =
                                               }
       else error ("mkROMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
+-- | Fetch a word from a memory address. Note: If the address does not correspond to a region (i.e., the address does not
+-- intersect a region), zero is returned. (FIXME??)
 mFetch :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
           MemorySystem addrType wordType
        -> addrType
@@ -96,19 +134,35 @@ mFetch msys addr =
          -- an unknown/unmapped region?
       else 0
 
-mFetchN :: (Integral addrType, DVU.Unbox wordType) =>
+-- | Fetch a sequence of words from memory. The start and end addresses do not have reside in the same memory region;
+-- gaps between regions will be filled with zeroes.
+mFetchN :: (Integral addrType, Num wordType, Show addrType, DVU.Unbox wordType) =>
            MemorySystem addrType wordType
         -> addrType
         -> Int
         -> Vector wordType
 mFetchN msys sa nWords =
-  let regs = IM.intersecting (msys ^. regions) (I.ClosedInterval sa (sa + fromIntegral nWords))
-  in  if IM.size regs == 1
-      then let reg = head (IM.elems regs)
-               regSA = reg ^. startAddr
-               regEA = reg ^. endAddr
-           in  DVU.slice (fromIntegral (sa - regSA)) (min (fromIntegral (regEA - sa)) nWords) (reg ^. contents)
-      else DVU.empty
+  let regs          = IM.intersecting (msys ^. regions) (I.ClosedInterval sa (sa + fromIntegral nWords))
+      {-go :: (Ord addrType, DVU.Unbox wordType, Num addrType, Num wordType, Integral addrType) => (addrType, Int, [Vector wordType] -> [Vector wordType]) -> I.Interval addrType -> MemoryRegion addrType wordType ->
+            ((addrType, Int, [Vector wordType] -> [Vector wordType]), MemoryRegion addrType wordType)-}
+      go (addr, remaining, vl) ivl reg
+        | addr < lb = let nb     = min ub (lb + (fromIntegral remaining))
+                          vl'    = (((vl [DVU.replicate (fromIntegral (lb - addr)) 0]) ++ [DVU.slice 0 (fromIntegral nb) cts]) ++)
+                          accum' = (ub - nb + 1, remaining - (fromIntegral nb), vl')
+                      in  (accum', reg)
+        | addr > lb = let nb     = min ub (addr + fromIntegral remaining)
+                          vl'    = ((vl [DVU.slice (fromIntegral (addr - lb)) (fromIntegral nb) cts]) ++)
+                          accum' = (ub + 1, remaining - (fromIntegral nb), vl')
+                      in  trace ("addr = " ++ show addr ++ " lb " ++ show lb ++ " rem " ++ show remaining) (accum', reg)
+        | otherwise = let nb = min ub (lb + (fromIntegral remaining))
+                          accum' = (ub - nb + 1, remaining - (fromIntegral nb), ((vl [DVU.slice 0 (fromIntegral nb) cts]) ++))
+                      in  (accum', reg)
+        where
+          lb  = I.lowerBound ivl
+          ub  = I.upperBound ivl
+          cts = reg ^. contents
+      ((_, _, accum), _) = IM.mapAccumWithKey go (sa, nWords, ([] ++)) regs
+  in  trace ("mFetchN: sa = " ++ show sa ++ " nWords " ++ show nWords) (DVU.concat (accum []))
 
 -- | Fetch an entity from memory at the current program counter, return the (incremented pc, contents)
 -- pair.

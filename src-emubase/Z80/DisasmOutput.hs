@@ -8,32 +8,33 @@
 module Z80.DisasmOutput
 ( z80AnalyticDisassembly
 , z80AnalyticDisassemblyOutput
+, formatOperand
 ) where
 
 -- import Debug.Trace
 
-import           Control.Lens hiding ((<|), (|>))
+import           Control.Lens          hiding ((<|), (|>))
 import           Data.Char
-import qualified Data.Foldable as Foldable
+import qualified Data.Foldable         as Foldable
 import           Data.Generics.Aliases
 import           Data.Generics.Schemes
-import           Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as H
-import           Data.List (sortBy)
-import           Data.Maybe (maybe)
-import           Data.Sequence (Seq, (|>), (<|), (><))
-import qualified Data.Sequence as Seq
-import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
-import           Data.Tuple ()
-import           Data.Vector.Unboxed (Vector)
-import qualified Data.Vector.Unboxed as DVU
+import           Data.HashMap.Strict   (HashMap)
+import qualified Data.HashMap.Strict   as H
+import           Data.List             (sortBy)
+import           Data.Maybe            (maybe)
+import           Data.Sequence         (Seq, (<|), (><), (|>))
+import qualified Data.Sequence         as Seq
+import qualified Data.Text             as T
+import qualified Data.Text.IO          as TIO
+import           Data.Tuple            ()
+import           Data.Vector.Unboxed   (Vector)
+import qualified Data.Vector.Unboxed   as DVU
 import           System.IO
 
 import           Machine
+import           Z80.Disassembler
 import           Z80.InstructionSet
 import           Z80.Processor
-import           Z80.Disassembler
 
 -- | Format the "analytic" version of the disassembled Z80 sequence as a 'Text'
 -- sequence. This outputs the address, opcode bytes, the opcodes as ASCII,
@@ -189,7 +190,7 @@ lenAsChars :: Int
 lenAsChars = 8
 -- | Length of the label colum: 8 characters plus ": "
 lenSymLabel :: Int
-lenSymLabel = T.length "XXXXXXXXXXXX" + 2
+lenSymLabel = T.length "XXXXXXXXXXXX: "
 -- | Total length of the instruction+operands output
 lenInstruction :: Int
 lenInstruction = 24
@@ -198,7 +199,7 @@ lenMnemonic :: Int
 lenMnemonic = 6
 -- | Length of the output address
 lenAddress :: Int
-lenAddress = 4 + 2                              -- "XXXX" ++ ": "
+lenAddress = T.length "AAAA: "
 -- | Length of the line's prefix
 lenOutputPrefix :: Int
 lenOutputPrefix = lenAddress + lenInsBytes + lenAsChars + 3
@@ -210,86 +211,97 @@ lenOutputLine = lenOutputPrefix + lenSymLabel + lenInstruction
 formatInstruction :: Z80instruction             -- ^ Instruction to format
                   -> (T.Text, T.Text)           -- ^ '(mnemonic, operands)' result tuple
 
-formatInstruction (Z80undef _)            = zeroOperands "???"
-formatInstruction (LD x)                  = oneOperand "LD" x
-formatInstruction (INC r)                 = oneOperand "INC" r
-formatInstruction (DEC r)                 = oneOperand "DEC" r
-formatInstruction (INC16 r)               = oneOperand "INC" r
-formatInstruction (DEC16 r)               = oneOperand "DEC" r
-formatInstruction (ADD r)                 = oneOperand "ADD" r
-formatInstruction (ADC r)                 = oneOperand "ADC" r
-formatInstruction (SUB r)                 = oneOperand "SUB" r
-formatInstruction (SBC r)                 = oneOperand "SBC" r
-formatInstruction (AND r)                 = oneOperand "AND" r
-formatInstruction (XOR r)                 = oneOperand "XOR" r
-formatInstruction (OR r)                  = oneOperand "OR" r
-formatInstruction (CP r)                  = oneOperand "CP" r
-formatInstruction HALT                    = zeroOperands "HALT"
-formatInstruction NOP                     = zeroOperands "NOP"
-formatInstruction (EXC AFAF')             = ("EX", "AF, AF'")
-formatInstruction (EXC SPHL)              = ("EX", "(SP), HL")
-formatInstruction (EXC DEHL)              = ("EX", "DE, HL")
-formatInstruction DI                      = zeroOperands "DI"
-formatInstruction EI                      = zeroOperands "EI"
-formatInstruction (EXC Primes)            = zeroOperands "EXX"
-formatInstruction JPHL                    = ("JP", "(HL)")
-formatInstruction LDSPHL                  = ("LD", "SP, HL")
-formatInstruction RLCA                    = zeroOperands "RLCA"
-formatInstruction RRCA                    = zeroOperands "RRCA"
-formatInstruction RLA                     = zeroOperands "RLA"
-formatInstruction RRA                     = zeroOperands "RRA"
-formatInstruction DAA                     = zeroOperands "DAA"
-formatInstruction CPL                     = zeroOperands "CPL"
-formatInstruction SCF                     = zeroOperands "SCF"
-formatInstruction CCF                     = zeroOperands "CCF"
-formatInstruction (DJNZ addr)             = oneOperand "DJNZ" addr
-formatInstruction (JR addr)               = oneOperand "JR" addr
-formatInstruction (JRCC cc addr)          = twoOperands "JR" cc addr
-formatInstruction (JP addr)               = oneOperand "JP" addr
-formatInstruction (JPCC cc addr)          = twoOperands "JP" cc addr
-formatInstruction (IN port)               = ("IN", ioPortOperand port True)
-formatInstruction (OUT port)              = ("OUT", ioPortOperand port False)
-formatInstruction (CALL addr)             = oneOperand "CALL" addr
-formatInstruction (CALLCC cc addr)        = twoOperands "CALL" cc addr
-formatInstruction RET                     = zeroOperands "RET"
-formatInstruction (RETCC cc)              = oneOperand "RET" cc
-formatInstruction (PUSH r)                = oneOperand "PUSH" r
-formatInstruction (POP r)                 = oneOperand "POP" r
-formatInstruction (RST rst)               = ("RST", upperHex rst)
-formatInstruction (RLC r)                 = oneOperand "RLC" r
-formatInstruction (RRC r)                 = oneOperand "RRC" r
-formatInstruction (RL r)                  = oneOperand "RL" r
-formatInstruction (RR r)                  = oneOperand "RR" r
-formatInstruction (SLA r)                 = oneOperand "SLA" r
-formatInstruction (SRA r)                 = oneOperand "SRA" r
-formatInstruction (SLL r)                 = oneOperand "SLL" r
-formatInstruction (SRL r)                 = oneOperand "SRL" r
-formatInstruction (BIT bit r)             = twoOperands "BIT" bit r
-formatInstruction (RES bit r)             = twoOperands "RES" bit r
-formatInstruction (SET bit r)             = twoOperands "SET" bit r
-formatInstruction NEG                     = zeroOperands "NEG"
-formatInstruction RETI                    = zeroOperands "RETI"
-formatInstruction RETN                    = zeroOperands "RETN"
-formatInstruction (IM mode)               = oneOperand "IM" mode
-formatInstruction RLD                     = zeroOperands "RLD"
-formatInstruction RRD                     = zeroOperands "RRD"
-formatInstruction LDI                     = zeroOperands "LDI"
-formatInstruction CPI                     = zeroOperands "CPI"
-formatInstruction INI                     = zeroOperands "INI"
-formatInstruction OUTI                    = zeroOperands "OUTI"
-formatInstruction LDD                     = zeroOperands "LDD"
-formatInstruction CPD                     = zeroOperands "CPD"
-formatInstruction IND                     = zeroOperands "IND"
-formatInstruction OUTD                    = zeroOperands "OUTD"
-formatInstruction LDIR                    = zeroOperands "LDIR"
-formatInstruction CPIR                    = zeroOperands "CPIR"
-formatInstruction INIR                    = zeroOperands "INIR"
-formatInstruction OTIR                    = zeroOperands "OTIR"
-formatInstruction LDDR                    = zeroOperands "LDDR"
-formatInstruction CPDR                    = zeroOperands "CPDR"
-formatInstruction INDR                    = zeroOperands "INDR"
-formatInstruction OTDR                    = zeroOperands "OTDR"
-
+formatInstruction (Z80undef _)        = zeroOperands "???"
+formatInstruction (LD x)              = oneOperand "LD" x
+formatInstruction (INC r)             = oneOperand "INC" r
+formatInstruction (DEC r)             = oneOperand "DEC" r
+formatInstruction (INC16 r)           = oneOperand "INC" r
+formatInstruction (DEC16 r)           = oneOperand "DEC" r
+formatInstruction (ADD r)             = oneOperand "ADD" r
+formatInstruction (ADC r)             = oneOperand "ADC" r
+formatInstruction (SUB r)             = oneOperand "SUB" r
+formatInstruction (SBC r)             = oneOperand "SBC" r
+formatInstruction (AND r)             = oneOperand "AND" r
+formatInstruction (XOR r)             = oneOperand "XOR" r
+formatInstruction (OR r)              = oneOperand "OR" r
+formatInstruction (CP r)              = oneOperand "CP" r
+formatInstruction HALT                = zeroOperands "HALT"
+formatInstruction NOP                 = zeroOperands "NOP"
+formatInstruction (EXC AFAF')         = ("EX", "AF, AF'")
+formatInstruction (EXC SPHL)          = ("EX", "(SP), HL")
+formatInstruction (EXC DEHL)          = ("EX", "DE, HL")
+formatInstruction DI                  = zeroOperands "DI"
+formatInstruction EI                  = zeroOperands "EI"
+formatInstruction (EXC Primes)        = zeroOperands "EXX"
+formatInstruction JPHL                = ("JP", "(HL)")
+formatInstruction LDSPHL              = ("LD", "SP, HL")
+formatInstruction RLCA                = zeroOperands "RLCA"
+formatInstruction RRCA                = zeroOperands "RRCA"
+formatInstruction RLA                 = zeroOperands "RLA"
+formatInstruction RRA                 = zeroOperands "RRA"
+formatInstruction DAA                 = zeroOperands "DAA"
+formatInstruction CPL                 = zeroOperands "CPL"
+formatInstruction SCF                 = zeroOperands "SCF"
+formatInstruction CCF                 = zeroOperands "CCF"
+formatInstruction (DJNZ addr)         = oneOperand "DJNZ" addr
+formatInstruction (JR addr)           = oneOperand "JR" addr
+formatInstruction (JRCC cc addr)      = twoOperands "JR" cc addr
+formatInstruction (JP addr)           = oneOperand "JP" addr
+formatInstruction (JPCC cc addr)      = twoOperands "JP" cc addr
+formatInstruction (IN port)           = ("IN", ioPortOperand port True)
+formatInstruction (OUT port)          = ("OUT", ioPortOperand port False)
+formatInstruction (CALL addr)         = oneOperand "CALL" addr
+formatInstruction (CALLCC cc addr)    = twoOperands "CALL" cc addr
+formatInstruction RET                 = zeroOperands "RET"
+formatInstruction (RETCC cc)          = oneOperand "RET" cc
+formatInstruction (PUSH r)            = oneOperand "PUSH" r
+formatInstruction (POP r)             = oneOperand "POP" r
+formatInstruction (RST rst)           = ("RST", upperHex rst)
+formatInstruction (RLC r)             = oneOperand "RLC" r
+formatInstruction (RRC r)             = oneOperand "RRC" r
+formatInstruction (RL r)              = oneOperand "RL" r
+formatInstruction (RR r)              = oneOperand "RR" r
+formatInstruction (SLA r)             = oneOperand "SLA" r
+formatInstruction (SRA r)             = oneOperand "SRA" r
+formatInstruction (SLL r)             = oneOperand "SLL" r
+formatInstruction (SRL r)             = oneOperand "SRL" r
+formatInstruction (BIT bit r)         = twoOperands "BIT" bit r
+formatInstruction (RES bit r)         = twoOperands "RES" bit r
+formatInstruction (SET bit r)         = twoOperands "SET" bit r
+formatInstruction NEG                 = zeroOperands "NEG"
+formatInstruction RETI                = zeroOperands "RETI"
+formatInstruction RETN                = zeroOperands "RETN"
+formatInstruction (IM mode)           = oneOperand "IM" mode
+formatInstruction RLD                 = zeroOperands "RLD"
+formatInstruction RRD                 = zeroOperands "RRD"
+formatInstruction LDI                 = zeroOperands "LDI"
+formatInstruction CPI                 = zeroOperands "CPI"
+formatInstruction INI                 = zeroOperands "INI"
+formatInstruction OUTI                = zeroOperands "OUTI"
+formatInstruction LDD                 = zeroOperands "LDD"
+formatInstruction CPD                 = zeroOperands "CPD"
+formatInstruction IND                 = zeroOperands "IND"
+formatInstruction OUTD                = zeroOperands "OUTD"
+formatInstruction LDIR                = zeroOperands "LDIR"
+formatInstruction CPIR                = zeroOperands "CPIR"
+formatInstruction INIR                = zeroOperands "INIR"
+formatInstruction OTIR                = zeroOperands "OTIR"
+formatInstruction LDDR                = zeroOperands "LDDR"
+formatInstruction CPDR                = zeroOperands "CPDR"
+formatInstruction INDR                = zeroOperands "INDR"
+formatInstruction OTDR                = zeroOperands "OTDR"
+-- The undocumented CB prefixed instructions
+formatInstruction (RLCidx idx r)      = twoOperands "RLC" idx r
+formatInstruction (RRCidx idx r)      = twoOperands "RRC" idx r
+formatInstruction (RLidx  idx r)      = twoOperands "RL" idx r
+formatInstruction (RRidx  idx r)      = twoOperands "RR" idx r
+formatInstruction (SLAidx idx r)      = twoOperands "SLA" idx r
+formatInstruction (SRAidx idx r)      = twoOperands "SRA" idx r
+formatInstruction (SLLidx idx r)      = twoOperands "SLL" idx r
+formatInstruction (SRLidx idx r)      = twoOperands "SRL" idx r
+formatInstruction (BITidx bit idx _r) = twoOperands "BIT" bit idx
+formatInstruction (RESidx bit idx r)  = threeOperands "RES" bit idx r
+formatInstruction (SETidx bit idx r)  = threeOperands "SET" bit idx r
 -- formatInstruction _ = zeroOperands "--!!"
 
 -- | Disassembly output with an instruction having no operands
@@ -310,11 +322,24 @@ twoOperands :: (DisOperandFormat operand1, DisOperandFormat operand2) =>
             -> operand1
             -> operand2
             -> (T.Text, T.Text)
-twoOperands mne op1 op2 = (mne, T.concat [ formatOperand op1
-                                          , ", "
-                                          , formatOperand op2
-                                          ]
+twoOperands mne op1 op2 = (mne, T.intercalate ", " [ formatOperand op1
+                                                   , formatOperand op2
+                                                   ]
                           )
+-- | Disassembly output with a three operand instruction
+threeOperands :: (DisOperandFormat operand1, DisOperandFormat operand2, DisOperandFormat operand3) =>
+               T.Text
+            -> operand1
+            -> operand2
+            -> operand3
+            -> (T.Text, T.Text)
+threeOperands mne op1 op2 op3 = (mne, T.concat [ formatOperand op1
+                                               , ", "
+                                               , formatOperand op2
+                                               , ", "
+                                               , formatOperand op3
+                                               ]
+                                )
 
 -- | Output an I/O port operand
 ioPortOperand :: OperIO         -- ^ Operand
@@ -382,9 +407,9 @@ instance DisOperandFormat OperLD where
                                                      ]
 
 instance DisOperandFormat OperALU where
-  formatOperand (ALUimm imm)    = formatOperand imm
-  formatOperand (ALUreg8 r)     = formatOperand r
-  formatOperand ALUHLindirect   = "(HL)"
+  formatOperand (ALUimm imm)  = formatOperand imm
+  formatOperand (ALUreg8 r)   = formatOperand r
+  formatOperand ALUHLindirect = "(HL)"
 
 instance DisOperandFormat OperExtendedALU where
   formatOperand (ALU8 opnd) = formatOperand opnd
@@ -392,7 +417,7 @@ instance DisOperandFormat OperExtendedALU where
 
 instance DisOperandFormat RegPairSP where
   formatOperand (RPair16 r) = formatOperand r
-  formatOperand SP = "SP"
+  formatOperand SP          = "SP"
 
 instance DisOperandFormat Z80reg8 where
   formatOperand A = "A"
@@ -424,21 +449,21 @@ instance DisOperandFormat Z80reg16 where
   formatOperand IY = "IY"
 
 instance DisOperandFormat Z80condC where
-  formatOperand NZ   = "NZ"
-  formatOperand Z    = "Z"
-  formatOperand NC   = "NC"
-  formatOperand CY   = "C"
-  formatOperand PO   = "PO"
-  formatOperand PE   = "PE"
-  formatOperand POS  = "P"
-  formatOperand MI   = "M"
+  formatOperand NZ  = "NZ"
+  formatOperand Z   = "Z"
+  formatOperand NC  = "NC"
+  formatOperand CY  = "C"
+  formatOperand PO  = "PO"
+  formatOperand PE  = "PE"
+  formatOperand POS = "P"
+  formatOperand MI  = "M"
 
 instance DisOperandFormat RegPairAF where
-  formatOperand (RPair16' r) = formatOperand r
-  formatOperand AF = "AF"
+  formatOperand (AFPair16 r) = formatOperand r
+  formatOperand AF           = "AF"
 
 instance (DisOperandFormat addrType) => DisOperandFormat (SymAbsAddr addrType) where
-  formatOperand (AbsAddr addr) = formatOperand addr
+  formatOperand (AbsAddr addr)  = formatOperand addr
   formatOperand (SymAddr label) = label
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=

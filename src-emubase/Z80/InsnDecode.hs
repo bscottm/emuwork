@@ -11,11 +11,11 @@ module Z80.InsnDecode
   , ProcessorOps(..)
   ) where
 
+import qualified Control.Comonad    as Comonad
 import           Control.Lens
 import           Data.Bits
-import           Data.IntMap        (IntMap)
+import           Data.IntMap        (IntMap, (!))
 import qualified Data.IntMap        as IntMap
-import qualified Control.Comonad    as Comonad
 
 -- import Debug.Trace
 
@@ -29,11 +29,11 @@ type Z80decodedInsn = DecodedInsn Z80instruction Z80addr
 instance ProcessorOps Z80instruction Z80addr Z80word where
   idecode pc mem =
     let opc = withPC pc (mFetch mem)
-        indexedPrefix xForms = let (pc', newOpc) = mIncPCAndFetch pc mem
+        indexedPrefix xForm = let (pc', newOpc) = mIncPCAndFetch pc mem
                                in  case newOpc of
-                                     -- Deal with "weird" IX/IY bit operation layout
-                                     0xcb       -> error "Z80 IX/IY bit instructions not decoded yet."
-                                     _otherwise -> decodeF newOpc mem pc' xForms
+                                     -- Deal with weird IX/IY bit operation layout for undocumented bit/rotate/shift ops
+                                     0xcb       -> undocBitOpsDecode opc pc' mem
+                                     _otherwise -> decodeF newOpc mem pc' xForm
         -- N.B. The opcode 'x' is passed through to the decoding function
         decodeF x = case (x `shiftR` 6) .&. 3 of
                       0          -> group0decode x
@@ -85,7 +85,7 @@ group0decode opc mem pc xForm
   | z == 6 = let (newpc, theReg)   = reg8 reg8XFormF mem pc y
                  (newpc', immval)  = mIncPCAndFetch newpc mem
              in  DecodedInsn (newpc' + 1) (LD (Reg8Imm theReg immval))
-  | z == 7 = defResult (accumOps IntMap.! fromIntegral y)
+  | z == 7 = defResult (accumOps ! fromIntegral y)
   | otherwise = defResult (Z80undef [opc])
   where
     z             = opc .&. 7
@@ -96,6 +96,7 @@ group0decode opc mem pc xForm
     reg16XFormF   = reg16XForm xForm
     nextIns       = pc + 1
     defResult     = DecodedInsn nextIns
+
 -- | Accumulator operations map
 accumOps :: IntMap Z80instruction
 accumOps = IntMap.fromList [ (0, RLCA)
@@ -152,12 +153,14 @@ group3decode :: Z80word
              -> Z80decodedInsn                  -- ^ Decoded result
 group3decode opc mem pc xForm
   | z == 0          = defResult (RETCC . condC $ y)
-  | z == 1, q == 0  = defResult ((POP . pairAF reg16XFormF) p)
-  | z == 1, q == 1  = case p of
-                        0          -> defResult RET
-                        1          -> defResult (EXC Primes)
-                        2          -> defResult JPHL
-                        3          -> defResult LDSPHL
+  | z == 1          = case q of
+                        0 -> defResult ((POP . pairAF reg16XFormF) p)
+                        1 -> case p of
+                               0          -> defResult RET
+                               1          -> defResult (EXC Primes)
+                               2          -> defResult JPHL
+                               3          -> defResult LDSPHL
+                               _otherwise -> undefined
                         _otherwise -> undefined
   | z == 2          = mkAbsAddrIns (JPCC (condC y)) mem pc
   | z == 3          = case y of
@@ -175,16 +178,18 @@ group3decode opc mem pc xForm
                         7          -> defResult EI
                         _otherwise -> undefined
   | z == 4           = mkAbsAddrIns (CALLCC (condC y)) mem pc
-  | z == 5, q == 0   = defResult (PUSH $ pairAF reg16XFormF p)
-  | z == 5, q == 1   = case p of
-                         0          -> mkAbsAddrIns CALL mem pc
-                         -- DD instruction prefix (should never reach here.)
-                         1          -> undefined
-                         -- ED instruction prefix
-                         2          -> let (newpc, nextOpc) = mIncPCAndFetch pc mem
-                                       in  edPrefixDecode nextOpc mem newpc
-                         -- FD instruction prefix (should never reach here.)
-                         3          -> undefined
+  | z == 5           = case q of
+                         0 -> defResult (PUSH $ pairAF reg16XFormF p)
+                         1 -> case p of
+                                0          -> mkAbsAddrIns CALL mem pc
+                                -- DD instruction prefix (should never reach here.)
+                                1          -> undefined
+                                -- ED instruction prefix
+                                2          -> let (newpc, nextOpc) = mIncPCAndFetch pc mem
+                                              in  edPrefixDecode nextOpc mem newpc
+                                -- FD instruction prefix (should never reach here.)
+                                3          -> undefined
+                                _otherwise -> undefined
                          _otherwise -> undefined
   | z == 6           = let (newpc, nextOpc) = mIncPCAndFetch pc mem
                            imm     = ALUimm nextOpc
@@ -218,7 +223,7 @@ bitopsDecode :: Z80memory                       -- ^ Z80 memory (required to use
              -> Z80instruction                  -- ^ The result
 bitopsDecode mem pc opc =
   case shiftR opc 6 .&. 3 of
-    0          -> (rotOps IntMap.! fromIntegral y) theReg
+    0          -> (rotOps ! fromIntegral y) theReg
     1          -> BIT y theReg
     2          -> RES y theReg
     3          -> SET y theReg
@@ -239,6 +244,44 @@ rotOps = IntMap.fromList [ (0, RLC)
                          , (6, SLL)
                          , (7, SRL)
                          ]
+
+-- | Undocumented rotate/shift/bit operations using IX and IY
+undocBitOpsDecode :: Z80word
+                  -- ^ Original prefix, 0xdd or 0xfd
+                  -> Z80PC
+                  -- ^ Current program counter
+                  -> Z80memory
+                  -- ^ Source memory system
+                  -> Z80decodedInsn
+undocBitOpsDecode prefixOpc pc mem = let (pcStep1, disp) = mIncPCAndFetch pc mem
+                                         (pcStep2, opc)  = mIncPCAndFetch pcStep1 mem
+                                         idxReg8Ctor     = (case prefixOpc of
+                                                              0xdd       -> IXindirect
+                                                              0xfd       -> IYindirect
+                                                              _otherwise -> undefined) . fromIntegral
+                                         z = opc .&. 7
+                                         y = shiftR opc 3 .&. 7
+                                         -- Ignore any new program counter 'reg8' because we always apply the null transform
+                                         (_, theReg) = reg8 (reg8XForm z80nullTransform) mem pc z
+                                     in  DecodedInsn (pcStep2 + 1)
+                                                     ( case shiftR opc 6 .&. 3 of
+                                                         0          -> (undocRotOps ! fromIntegral y) (idxReg8Ctor disp) theReg
+                                                         1          -> BITidx y (idxReg8Ctor disp) theReg
+                                                         2          -> RESidx y (idxReg8Ctor disp) theReg
+                                                         3          -> SETidx y (idxReg8Ctor disp) theReg
+                                                         _otherwise -> undefined
+                                                     )
+
+undocRotOps :: IntMap (Z80reg8 -> Z80reg8 -> Z80instruction)
+undocRotOps = IntMap.fromList [ (0, RLCidx)
+                              , (1, RRCidx)
+                              , (2, RLidx)
+                              , (3, RRidx)
+                              , (4, SLAidx)
+                              , (5, SRAidx)
+                              , (6, SLLidx)
+                              , (7, SRLidx)
+                              ]
 
 -- | Decode 'ED'-prefixed instructions
 edPrefixDecode :: Z80word
@@ -262,7 +305,7 @@ edPrefixDecode opc mem pc
   | x == 1, z == 4         = defResult NEG
   | x == 1, z == 5, y == 1 = defResult RETI
   | x == 1, z == 5, y /= 1 = defResult RETN
-  | x == 1, z == 6         = defResult (IM (interruptMode IntMap.! fromIntegral y))
+  | x == 1, z == 6         = defResult (IM (interruptMode ! fromIntegral y))
   | x == 1, z == 7         = case y of
                                0          -> defResult (LD IRegAcc)
                                1          -> defResult (LD RRegAcc)
@@ -274,7 +317,7 @@ edPrefixDecode opc mem pc
                                7          -> invalid
                                _otherwise -> error ("edPrefixDecode, x = 1, z = 7: invalid y = " ++ show y)
   | x == 2, z <= 3, y >= 4 = -- Increment, Increment-Repeat instructions
-                             defResult $ (incdecOps IntMap.! fromIntegral y) IntMap.! fromIntegral z
+                             defResult $ (incdecOps ! fromIntegral y) ! fromIntegral z
   | x == 2                 = invalid
   | x == 3                 = invalid
   -- Should never be matched...
@@ -346,9 +389,9 @@ pairSP _      x = error ("pairSP: invalid 16-bit register code " ++ show x)
 pairAF :: (Z80reg16 -> Z80reg16)                -- ^ Transform function, when needed
        -> Z80word                               -- ^ Register pair index
        -> RegPairAF                             -- ^ Resulting register pair
-pairAF _xform 0 = RPair16' BC
-pairAF _xform 1 = RPair16' DE
-pairAF  xform 2 = (RPair16' . xform) HL
+pairAF _xform 0 = AFPair16 BC
+pairAF _xform 1 = AFPair16 DE
+pairAF  xform 2 = (AFPair16 . xform) HL
 pairAF _xform 3 = AF
 pairAF _      x = error ("pairAF: invalid 16-bit register code " ++ show x)
 

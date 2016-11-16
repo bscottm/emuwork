@@ -1,10 +1,11 @@
 module Machine.ProgramCounter where
 
-import Data.Bits
-import Control.Comonad
-import Control.Arrow
+import           Control.Arrow
+import           Control.Comonad
+import           Data.Bits
+import           Data.Word
 
-import Machine.Utils
+import           Machine.Utils
 
 -- | Generic program counter
 data ProgramCounter addrType where
@@ -165,8 +166,7 @@ instance (FiniteBits dispType) => FiniteBits (RelativePC dispType) where
 -- | Basic program counter type class: increment, decrement, and displace
 class (Num pcType, Integral pcType, FiniteBits pcType) => PCOperation pcType where
   -- | Displace the program counter by a displacement amount (positive or negative).
-  pcDisplace :: (Integral dispType, FiniteBits dispType, SignExtend dispType) =>
-                RelativePC dispType
+  pcDisplace :: (SignExtend dispType) => RelativePC dispType
              -> pcType
              -> pcType
   pcDisplace disp pc = fromIntegral pc + fromIntegral disp
@@ -179,3 +179,8 @@ withPC (PC pc) f = f pc
 -- | Instantiate 'PCOperation' operations for 'ProgramCounter'
 instance (Num addrType, Integral addrType, FiniteBits addrType) => PCOperation (ProgramCounter addrType) where
   pcDisplace (RelativePC disp) (PC pc) = PC (pc + signExtend disp)
+
+instance PCOperation Word8
+instance PCOperation Word16
+instance PCOperation Word32
+instance PCOperation Word64

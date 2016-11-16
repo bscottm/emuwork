@@ -107,9 +107,9 @@ textZero = T.singleton '0'
 -- | Sign extension type class: generally useful for conversions to 'Int32' or 'Int' when having to manipulate unsigned
 -- and signed types. GHC makes no formal guarantees on sign extension when using 'fromIntegral'. Minimum implementation
 -- is 'signExtend64', which can be truncated down to 'Int32'.
-class SignExtend wordType where
+class (FiniteBits wordType, Integral wordType) => SignExtend wordType where
   -- | Sign extend arbitrary word type to 'Int32'
-  signExtend   :: (FiniteBits wordType, Integral wordType, Num targetWordType, FiniteBits targetWordType) =>
+  signExtend   :: (Num targetWordType, FiniteBits targetWordType) =>
                   wordType
                -> targetWordType
   signExtend x = (complement zeroBits `shiftL` finiteBitSize x) .|. fromIntegral x

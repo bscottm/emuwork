@@ -1,5 +1,3 @@
-{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
-
 -- | An minimal definition for an emulator, the 'null' processor
 module Machine.NullProcessor where
 

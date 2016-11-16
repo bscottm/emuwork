@@ -1,5 +1,7 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Re-export module for 'Machine'-related code.
-module Machine (module MachineExports) where
+module Machine ( module MachineExports ) where
 
 import           Machine.DisassemblerTypes as MachineExports
 import           Machine.EmulatedSystem    as MachineExports

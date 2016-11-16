@@ -122,8 +122,14 @@ data Z80instruction where
   BIT, RES, SET                            :: Z80word                      -- Bit within byte to set/reset/test
                                            -> Z80reg8
                                            -> Z80instruction
- -- 0xcb prefix, undocumented (IX and IY indexed)
-
+  -- 0xcb prefix, undocumented IX- and IY-indexed, with result copied into an 8-bit register
+  RLCidx, RRCidx, RLidx, RRidx, SLAidx, SRAidx, SLLidx, SRLidx :: Z80reg8
+                                                               -> Z80reg8
+                                                               -> Z80instruction
+  BITidx, RESidx, SETidx                   :: Z80word
+                                           -> Z80reg8
+                                           -> Z80reg8
+                                           -> Z80instruction
   -- 0xed prefix instructions:
   -- Negate accumulator
   NEG                                      :: Z80instruction
@@ -273,7 +279,7 @@ data RegPairSP where
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Register pair that includes AF (instead of SP)
 data RegPairAF where
-  RPair16' :: Z80reg16
+  AFPair16 :: Z80reg16
            -> RegPairAF
   AF       :: RegPairAF
   deriving (Show, Typeable, Data)

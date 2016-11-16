@@ -1,28 +1,26 @@
-{-# LANGUAGE RankNTypes #-}
-
--- | Re-export module for the Zilog Z80 processor.
+{- | Re-export module for the Zilog Z80 processor.
+-}
 module Z80
        ( module Z80exports
        , z80processor
        , z80generic
+       , Z80BaseSystem
        ) where
-
-import           Data.Word
 
 import           Machine
 
-import           Z80.Processor as Z80exports
+import           Z80.DisasmOutput   as Z80exports
+import           Z80.Disassembler   as Z80exports
+import           Z80.InsnDecode     as Z80exports
 import           Z80.InstructionSet as Z80exports
-import           Z80.Disassembler as Z80exports
-import           Z80.DisasmOutput as Z80exports
-import           Z80.InsnDecode as Z80exports
+import           Z80.Processor      as Z80exports
 -- import Z80.ParseAnalytic
 
-import Z80.Processor (Z80state, Z80memory, z80initialState)
-import Z80.InstructionSet (Z80instruction)
+import           Z80.InstructionSet (Z80instruction)
+import           Z80.Processor      (Z80memory, Z80state, z80initialState)
 
--- | Z80 processor.
-z80processor :: EmulatedProcessor Z80state Word16 Z80instruction
+-- | The Z80 processor instantiation.
+z80processor :: EmulatedProcessor Z80state Z80addr Z80instruction
 z80processor = EmulatedProcessor
                { _procPrettyName = "Zilog Z80"
                , _internals      = z80initialState
@@ -32,8 +30,9 @@ z80processor = EmulatedProcessor
 -- should use a different discriminant.
 data Z80BaseSystem
 
--- | Generic Z80 system, used for disassembling ROMs and such. This is not an actual or useful
--- system.
+-- | Generic Z80 system, from which other systems are derived. This is not an actual or useful
+-- system because it has no predefined memory regions. The TRS-80, for example, adds a 12K ROM
+-- region and RAM.
 z80generic :: Z80system Z80BaseSystem
 z80generic = EmulatedSystem
              { _processor   = z80processor

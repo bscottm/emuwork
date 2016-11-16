@@ -46,9 +46,6 @@ type Z80PC            = ProgramCounter Z80addr
 -- | Z80 memory system type
 type Z80memory        = MemorySystem Z80addr Z80word
 
--- Use default implementatiosn for 'Z80addr'
-instance PCOperation Z80addr
-
 -- | The basic Z80 register file. The actual register file has two sides, the regular and prime. The prime
 -- registers are not generally visible except through the EXX instruction that exchanges the two sides.
 data Z80registers = Z80registers {
@@ -64,10 +61,10 @@ data Z80registers = Z80registers {
   }
 
 -- | Default/zeroed register set
-zeroedRegisters :: Z80registers
-zeroedRegisters = Z80registers {
-    _z80accum = 0
-  , _z80flags = 0
+initialRegisters :: Z80registers
+initialRegisters = Z80registers {
+    _z80accum = 0xff
+  , _z80flags = 0xff
   , _z80breg = 0
   , _z80creg = 0
   , _z80dreg = 0
@@ -110,12 +107,12 @@ z80MemSizeIntegral = fromIntegral z80MaxAddr - fromIntegral z80MinAddr + 1
 -- | Initial state for a Z80
 z80initialState :: Z80state
 z80initialState = Z80state
-                  { _regs    = zeroedRegisters
-                  , _primes  = zeroedRegisters
-                  , _z80pc   = PC (0  :: Z80addr)
+                  { _regs    = initialRegisters
+                  , _primes  = initialRegisters
+                  , _z80pc   = 0
                   , _ix      = 0
                   , _iy      = 0
-                  , _sp      = 0
+                  , _sp      = 0xffff
                   , _ipage   = 0
                   , _refresh = 0
                   , _iff1    = False
