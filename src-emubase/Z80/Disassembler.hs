@@ -55,8 +55,8 @@ data Z80PseudoOps where
 -- | Z80 instruction or pseudo operation contains an address?
 isZ80AddrIns :: Z80DisasmElt
              -> Bool
-isZ80AddrIns (ExtPseudo (ByteExpression _ _ _)) = True
-isZ80AddrIns elt                                = disEltHasAddr elt
+isZ80AddrIns (ExtPseudo ByteExpression{}) = True
+isZ80AddrIns elt                            = disEltHasAddr elt
 
 -- | Extract address component from a Z80 disassembler element
 z80InsAddr :: Z80DisasmElt
@@ -67,8 +67,8 @@ z80InsAddr elt                                   = disEltGetAddr elt
 -- | Get the instruction or pseudo operation's length
 z80InsLength :: Z80DisasmElt
              -> Int
-z80InsLength (ExtPseudo (ByteExpression _ _ _)) = 1
-z80InsLength elt                                = disEltGetLength elt
+z80InsLength (ExtPseudo ByteExpression{}) = 1
+z80InsLength elt                            = disEltGetLength elt
 
 -- | Disassembler state, which indexes the 'Disassembly' type family.
 data Z80disassembly =
@@ -93,7 +93,7 @@ makeLenses ''Z80disassembly
 mkInitialDisassembly :: Z80disassembly
 mkInitialDisassembly = Z80disassembly
                        { _labelNum           = 0
-                       , _addrInDisasmRange  = (\_ -> True)
+                       , _addrInDisasmRange  = const True
                        , _symbolTab          = H.empty
                        , _disasmSeq          = Seq.empty
                        }
@@ -156,8 +156,8 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
           addrInRangeF = curDState ^. addrInDisasmRange
           isInSymtab   = destAddr `H.member` symTab
           label        = T.append prefix (curDState ^. labelNum & (T.pack . show))
-      in  if (addrInRangeF destAddr) && not isInSymtab then
-            (symbolTab %~ (H.insert destAddr label)) . (labelNum +~ 1) $ curDState
+      in  if addrInRangeF destAddr && not isInSymtab then
+            (symbolTab %~ H.insert destAddr label) . (labelNum +~ 1) $ curDState
           else
             curDState
 
@@ -168,7 +168,7 @@ z80disbytes :: Z80disassembly                   -- ^ Current disassembly state
             -> Z80disp                          -- ^ Number of bytes to extract
             -> Z80disassembly                   -- ^ Resulting diassembly state
 z80disbytes dstate mem (PC sAddr) nBytes =
-  disasmSeq %~ (|> (mkByteRange sAddr $ mFetchN mem sAddr (fromIntegral nBytes))) $ dstate
+  disasmSeq %~ (|> mkByteRange sAddr (mFetchN mem sAddr (fromIntegral nBytes))) $ dstate
 
 -- | Grab (what is presumably) an ASCII string sequence, terminating at the first 0 encountered. This is somewhat inefficient
 -- because multiple 'Vector' slices get created.

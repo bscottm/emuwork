@@ -39,8 +39,6 @@ import qualified Data.Vector.Unboxed as DVU
 import qualified Data.IntervalMap.Interval as I
 import qualified Data.IntervalMap.Generic.Strict as IM
 
-import Debug.Trace
-
 import Machine.ProgramCounter
 import Machine.Utils
 
@@ -48,8 +46,6 @@ import Machine.Utils
 data MemoryRegion addrType wordType where
   MR ::
     { _readOnly    :: Bool
-    , _startAddr   :: addrType
-    , _endAddr     :: addrType
     , _contents    :: Vector wordType
     -- ^ Memory region's contents (unboxed vector)
     } -> MemoryRegion addrType wordType
@@ -58,12 +54,6 @@ data MemoryRegion addrType wordType where
 -- | Lens for a memory region's read-only flag.
 readOnly :: Lens' (MemoryRegion addrType wordType) Bool
 readOnly f mregion = (\ro -> mregion { _readOnly = ro }) <$> f (_readOnly mregion)
-
-startAddr :: Lens' (MemoryRegion addrType wordType) addrType
-startAddr f mregion = (\sa -> mregion { _startAddr = sa }) <$> f (_startAddr mregion)
-
-endAddr :: Lens' (MemoryRegion addrType wordType) addrType
-endAddr f mregion = (\ea -> mregion { _endAddr = ea }) <$> f (_endAddr mregion)
 
 -- | Lens for a memory region's contents
 contents :: Lens' (MemoryRegion addrType wordType) (Vector wordType)
@@ -93,8 +83,6 @@ mkRAMRegion sa len msys =
         then msys & regions %~ IM.insertWith const
                                              (I.IntervalCO sa ea)
                                              MR { _readOnly = False
-                                                , _startAddr = sa
-                                                , _endAddr   = ea
                                                 , _contents = DVU.replicate len 0
                                                 }
         else error ("mkRAMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
@@ -112,8 +100,6 @@ mkROMRegion sa romImg msys =
       then msys & regions %~ IM.insertWith const
                                            (I.IntervalCO sa ea)
                                            MR { _readOnly = True
-                                              , _startAddr = sa
-                                              , _endAddr = ea
                                               , _contents = romImg
                                               }
       else error ("mkROMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
@@ -136,33 +122,36 @@ mFetch msys addr =
 
 -- | Fetch a sequence of words from memory. The start and end addresses do not have reside in the same memory region;
 -- gaps between regions will be filled with zeroes.
-mFetchN :: (Integral addrType, Num wordType, Show addrType, DVU.Unbox wordType) =>
+mFetchN :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType) =>
            MemorySystem addrType wordType
         -> addrType
         -> Int
         -> Vector wordType
 mFetchN msys sa nWords =
   let regs          = IM.intersecting (msys ^. regions) (I.ClosedInterval sa (sa + fromIntegral nWords))
-      {-go :: (Ord addrType, DVU.Unbox wordType, Num addrType, Num wordType, Integral addrType) => (addrType, Int, [Vector wordType] -> [Vector wordType]) -> I.Interval addrType -> MemoryRegion addrType wordType ->
-            ((addrType, Int, [Vector wordType] -> [Vector wordType]), MemoryRegion addrType wordType)-}
       go (addr, remaining, vl) ivl reg
-        | addr < lb = let nb     = min ub (lb + (fromIntegral remaining))
-                          vl'    = (((vl [DVU.replicate (fromIntegral (lb - addr)) 0]) ++ [DVU.slice 0 (fromIntegral nb) cts]) ++)
-                          accum' = (ub - nb + 1, remaining - (fromIntegral nb), vl')
-                      in  (accum', reg)
-        | addr > lb = let nb     = min ub (addr + fromIntegral remaining)
-                          vl'    = ((vl [DVU.slice (fromIntegral (addr - lb)) (fromIntegral nb) cts]) ++)
-                          accum' = (ub + 1, remaining - (fromIntegral nb), vl')
-                      in  trace ("addr = " ++ show addr ++ " lb " ++ show lb ++ " rem " ++ show remaining) (accum', reg)
-        | otherwise = let nb = min ub (lb + (fromIntegral remaining))
-                          accum' = (ub - nb + 1, remaining - (fromIntegral nb), ((vl [DVU.slice 0 (fromIntegral nb) cts]) ++))
-                      in  (accum', reg)
+        | addr > lb  = let nb     = min (ub - addr) (fromIntegral remaining)
+                           vl'    = ((vl [DVU.slice (fromIntegral (addr - lb)) (fromIntegral nb) cts]) ++)
+                           accum' = (ub + 1, remaining - (fromIntegral nb), vl')
+                       in  (accum', reg)
+        | addr == lb = let nb = min (ub - addr) (fromIntegral remaining)
+                           accum' = (ub - nb + 1, remaining - (fromIntegral nb), ((vl [DVU.slice 0 (fromIntegral nb) cts]) ++))
+                       in  (accum', reg)
+        | addr < lb  = let nb     = min (ub - addr) (fromIntegral remaining)
+                           vl'    = ((vl [DVU.replicate (fromIntegral (lb - addr)) 0, DVU.slice 0 (fromIntegral nb) cts]) ++)
+                           accum' = (ub - nb + 1, remaining - (fromIntegral nb), vl')
+                       in  (accum', reg)
+        -- Squelch GHC pattern warning...
+        | otherwise   = error ("How'd I get here? addr = " ++ as0xHexS addr ++ " remaining " ++ show remaining)
         where
           lb  = I.lowerBound ivl
           ub  = I.upperBound ivl
           cts = reg ^. contents
-      ((_, _, accum), _) = IM.mapAccumWithKey go (sa, nWords, ([] ++)) regs
-  in  trace ("mFetchN: sa = " ++ show sa ++ " nWords " ++ show nWords) (DVU.concat (accum []))
+      ((_, remain', accum), _)   = IM.mapAccumWithKey go (sa, nWords, ([] ++)) regs
+      endfill                    = if remain' == 0
+                                   then []
+                                   else [DVU.replicate remain' 0]
+  in  (DVU.concat (accum endfill))
 
 -- | Fetch an entity from memory at the current program counter, return the (incremented pc, contents)
 -- pair.
