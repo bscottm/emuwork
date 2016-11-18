@@ -63,7 +63,6 @@ test-suite yamltest
                         scientific,
                         yaml,
                         vector,
-                        zilog-emu,
                         emubase
     Main-is:            TRS80/Disasm/YamlTest.hs
     Other-Modules:      TRS80.Disasm.Guidance

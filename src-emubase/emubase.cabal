@@ -3,10 +3,9 @@ name:           emubase
 version:        0.1
 build-type:     Simple
 author:         B. Scott Michel
-synopsis:       A prototype processor emulation framework
+synopsis:       A processor emulation framework
 
-description:    Yet another processor emulation framework for my
-                favorite old processors.
+description:    An processor emulation framework
 license:        GPL-3
 
 library
@@ -14,6 +13,7 @@ library
 
   build-depends:
     base,
+    comonad,
     time,
     primitive,
     filepath,
@@ -32,7 +32,7 @@ library
     syb,
     parsec
 
-  ghc-options:          -Wall -O2
+  ghc-options: -Wall -O2
 
   default-extensions:
     GADTs,
@@ -44,18 +44,20 @@ library
 
   exposed-modules:
     Machine,
-    Machine.Utils,
     Reader,
     Z80,
-    -- other-modules:
+
     Machine.DisassemblerTypes,
     Machine.EmulatedSystem,
     Machine.MemorySystem,
     Machine.ProgramCounter
     Machine.NullProcessor,
+    Machine.Utils,
+
     Reader.RawFormat,
     Reader.IntelHex,
     Reader.ErrorHandling,
+
     Z80.InstructionSet,
     Z80.InsnDecode,
     Z80.Processor,
@@ -63,20 +65,24 @@ library
     Z80.DisasmOutput,
     Z80.ParseAnalytic
 
-test-suite yamltest
+test-suite msystest
     default-language:   Haskell2010
     Type:               exitcode-stdio-1.0
-    Build-Depends:      base,
-                        Cabal,
-                        QuickCheck,
-                        unordered-containers,
-                        bytestring,
-                        text,
-                        vector,
-                        emubase
-    Main-is:            Z80/Tests/UndocInsns.hs
-    Other-Modules:
-    default-extensions: GADTs,
-                        MultiParamTypeClasses,
-                        OverloadedStrings,
-                        TemplateHaskell
+    Main-is:            Machine/Tests/MsysTests.hs
+    Build-Depends:
+      base,
+      Cabal,
+      comonad,
+      HUnit,
+      lens,
+      IntervalMap,
+      unordered-containers,
+      bytestring,
+      text,
+      vector,
+      emubase
+    default-extensions:
+      GADTs,
+      MultiParamTypeClasses,
+      OverloadedStrings,
+      TemplateHaskell

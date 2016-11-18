@@ -44,7 +44,7 @@ class ProcessorOps insnSet addrType wordType where
 
 -- | 'EmulatedSystem' encapsulates the various parts required to emulate a system (processor, memory, ...)
 data EmulatedSystem procInternals addrType wordType instructionSet where
-  EmulatedSystem :: (ProcessorOps instructionSet addrType wordType) =>
+  EmulatedSystem ::
     { _processor  :: EmulatedProcessor procInternals addrType instructionSet
                   -- ^ System processor
     , _memory     :: MemorySystem addrType wordType

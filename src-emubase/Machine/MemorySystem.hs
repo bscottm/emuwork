@@ -148,10 +148,8 @@ mFetchN msys sa nWords =
           ub  = I.upperBound ivl
           cts = reg ^. contents
       ((_, remain', accum), _)   = IM.mapAccumWithKey go (sa, nWords, ([] ++)) regs
-      endfill                    = if remain' == 0
-                                   then []
-                                   else [DVU.replicate remain' 0]
-  in  (DVU.concat (accum endfill))
+      endfill                    = [DVU.replicate remain' 0]
+  in  DVU.concat (accum endfill)
 
 -- | Fetch an entity from memory at the current program counter, return the (incremented pc, contents)
 -- pair.
