@@ -31,9 +31,11 @@ module Machine.MemorySystem
   , mFetchAndIncPC
   , mIncPCAndFetch
   , initialMemorySystem
+  , countRegions
+  , regionList
   ) where
 
-import Control.Lens (Lens', (|>), (^.), (%~), (&))
+import Control.Lens (Lens', (|>), (^.), (%~), (&), (.~))
 import Data.Vector.Unboxed (Vector, (!))
 import qualified Data.Vector.Unboxed as DVU
 import qualified Data.IntervalMap.Interval as I
@@ -132,14 +134,14 @@ mFetchN msys sa nWords =
       go (addr, remaining, vl) ivl reg
         | addr > lb  = let nb     = min (ub - addr) (fromIntegral remaining)
                            vl'    = ((vl [DVU.slice (fromIntegral (addr - lb)) (fromIntegral nb) cts]) ++)
-                           accum' = (ub + 1, remaining - (fromIntegral nb), vl')
+                           accum' = (ub, remaining - (fromIntegral nb), vl')
                        in  (accum', reg)
         | addr == lb = let nb = min (ub - addr) (fromIntegral remaining)
-                           accum' = (ub - nb + 1, remaining - (fromIntegral nb), ((vl [DVU.slice 0 (fromIntegral nb) cts]) ++))
+                           accum' = (ub - nb, remaining - (fromIntegral nb), ((vl [DVU.slice 0 (fromIntegral nb) cts]) ++))
                        in  (accum', reg)
         | addr < lb  = let nb     = min (ub - addr) (fromIntegral remaining)
                            vl'    = ((vl [DVU.replicate (fromIntegral (lb - addr)) 0, DVU.slice 0 (fromIntegral nb) cts]) ++)
-                           accum' = (ub - nb + 1, remaining - (fromIntegral nb), vl')
+                           accum' = (ub - nb, remaining - (fromIntegral nb), vl')
                        in  (accum', reg)
         -- Squelch GHC pattern warning...
         | otherwise   = error ("How'd I get here? addr = " ++ as0xHexS addr ++ " remaining " ++ show remaining)
@@ -169,5 +171,18 @@ mIncPCAndFetch :: (PCOperation addrType, Num wordType, DVU.Unbox wordType) =>
 mIncPCAndFetch pc mem = let pc' = pc + 1
                         in  (pc', withPC pc' (mFetch mem))
 
+-- | Create an empty memory system
 initialMemorySystem :: (Integral addrType, DVU.Unbox wordType) => MemorySystem addrType wordType
 initialMemorySystem = MSys { _regions = IM.empty }
+
+-- | Count the number of regions in the memory system; used primarily for testing and debugging
+countRegions :: MemorySystem addrType wordType
+             -> Int
+countRegions msys = IM.size (msys ^. regions)
+
+-- | Generate a list of the regions, without the contents. (Note: Does not permit changing the region's contents, primarily
+-- intended as a test interface)
+regionList :: (DVU.Unbox wordType) =>
+              MemorySystem addrType wordType
+           -> [(I.Interval addrType, MemoryRegion addrType wordType)]
+regionList msys = [ (i, (r & contents .~ DVU.empty)) | (i, r) <- IM.toList (msys ^. regions)]

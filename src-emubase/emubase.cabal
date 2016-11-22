@@ -86,3 +86,7 @@ test-suite msystest
       MultiParamTypeClasses,
       OverloadedStrings,
       TemplateHaskell
+    other-modules:
+      Machine.MemorySystem,
+      Machine.ProgramCounter,
+      Machine.Utils

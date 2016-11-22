@@ -15,6 +15,7 @@ import           System.Environment
 import           System.Exit
 import           System.IO (stdout, stderr, hPutStrLn)
 import           Test.HUnit
+import qualified Data.IntervalMap.Interval as I
 
 import qualified Machine.MemorySystem as M
 
@@ -114,6 +115,7 @@ predTest @!? msg = assertionPredicate predTest >>= (\b -> when b (assertFailure 
 mkMsysTests :: TestArgs -> IO Test
 mkMsysTests opts =
   return $ test [ "msys"   ~: test [ "mkROMRegion"    ~: test_mkROMRegion opts     @? "mkROMRegion failed."
+                                   , "mkROMRegion2"   ~: test_mkROMRegion2 opts    @? "mkROMReguin2 failed."
                                    ]
                    ]
 
@@ -121,4 +123,12 @@ test_mkROMRegion :: TestArgs -> IO Bool
 test_mkROMRegion _args =
   let img   = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word16
       msys  = M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word16
-  in   return True
+      rlist = map fst (M.regionList msys)
+  in  return (M.countRegions msys == 1 && rlist == [I.IntervalCO 0 4096])
+
+test_mkROMRegion2 :: TestArgs -> IO Bool
+test_mkROMRegion2 _args =
+  let img   = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word16
+      msys  = M.mkROMRegion 4096 img (M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word16)
+      rlist = map fst (M.regionList msys)
+  in  return (M.countRegions msys == 2 && rlist == [I.IntervalCO 0 4096, I.IntervalCO 4096 8192])
