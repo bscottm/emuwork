@@ -77,21 +77,21 @@ formatSymTab :: HashMap Z80addr T.Text
              -> Seq T.Text
              -> Seq T.Text
 formatSymTab symTab outSeq =
-  let maxsym     = H.foldl' (\len str -> max len (T.length str)) 0 symTab
-      totalCols  = fromIntegral(((lenOutputLine - maxsym) `div` (maxsym + extraSymPad)) + 1) :: Int
-      symsAsList = H.toList symTab
-      byNameSyms = sortBy compareByName symsAsList
-      byAddrSyms = sortBy compareByAddr symsAsList
-      byAddrSeq  = T.empty
-                   <| T.empty
-                   <| "Symbol Table (numeric):"
-                   <| T.empty
-                   <| columnar (Foldable.foldl formatSymbol Seq.empty byAddrSyms)
-      byNameSeq = T.empty
-                  <| T.empty
-                  <| "Symbol Table (alpha):"
-                  <| T.empty
-                  <| columnar (Foldable.foldl formatSymbol Seq.empty byNameSyms)
+  let !maxsym     = H.foldl' (\len str -> max len (T.length str)) 0 symTab
+      !totalCols  = fromIntegral(((lenOutputLine - maxsym) `div` (maxsym + extraSymPad)) + 1) :: Int
+      !symsAsList = H.toList symTab
+      byNameSyms  = sortBy compareByName symsAsList
+      byAddrSyms  = sortBy compareByAddr symsAsList
+      byAddrSeq   = T.empty
+                    <| T.empty
+                    <| "Symbol Table (numeric):"
+                    <| T.empty
+                    <| columnar (Foldable.foldl formatSymbol Seq.empty byAddrSyms)
+      byNameSeq   = T.empty
+                    <| T.empty
+                    <| "Symbol Table (alpha):"
+                    <| T.empty
+                    <| columnar (Foldable.foldl formatSymbol Seq.empty byNameSyms)
       -- Consolidate sequence into columnar format
       columnar symSeq = if Seq.length symSeq >= totalCols then
                           let (thisCol, rest) = Seq.splitAt totalCols symSeq

@@ -50,14 +50,14 @@ type Z80memory        = MemorySystem Z80addr Z80word
 -- registers are not generally visible except through the EXX instruction that exchanges the two sides.
 data Z80registers = Z80registers {
   -- The individual registers. The register pairs are treated separately.
-    _z80accum :: Z80word         -- ^ Accumulator
-  , _z80flags :: Z80word         -- ^ Flags
-  , _z80breg :: Z80word          -- ^ B register
-  , _z80creg :: Z80word          -- ^ C register
-  , _z80dreg :: Z80word          -- ^ D register
-  , _z80ereg :: Z80word          -- ^ E register
-  , _z80hreg :: Z80word          -- ^ "High" register
-  , _z80lreg :: Z80word          -- ^ "Low" register
+    _z80accum :: {-# UNPACK #-} !Z80word         -- ^ Accumulator
+  , _z80flags :: {-# UNPACK #-} !Z80word         -- ^ Flags
+  , _z80breg  :: {-# UNPACK #-} !Z80word         -- ^ B register
+  , _z80creg  :: {-# UNPACK #-} !Z80word         -- ^ C register
+  , _z80dreg  :: {-# UNPACK #-} !Z80word         -- ^ D register
+  , _z80ereg  :: {-# UNPACK #-} !Z80word         -- ^ E register
+  , _z80hreg  :: {-# UNPACK #-} !Z80word         -- ^ "High" register
+  , _z80lreg  :: {-# UNPACK #-} !Z80word         -- ^ "Low" register
   }
 
 -- | Default/zeroed register set

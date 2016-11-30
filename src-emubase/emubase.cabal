@@ -24,6 +24,8 @@ library
     bytestring,
     text,
     vector,
+    psqueues,
+    hashable,
     old-locale,
     comonad,
     IntervalMap,
@@ -40,6 +42,7 @@ library
     TypeSynonymInstances,
     RankNTypes,
     OverloadedStrings,
+    BangPatterns,
     TemplateHaskell
 
   exposed-modules:

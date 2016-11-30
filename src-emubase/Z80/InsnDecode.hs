@@ -28,8 +28,8 @@ type Z80decodedInsn = DecodedInsn Z80instruction Z80addr
 
 instance ProcessorOps Z80instruction Z80addr Z80word where
   idecode pc mem =
-    let opc = withPC pc (mFetch mem)
-        indexedPrefix xForm = let (pc', newOpc) = mIncPCAndFetch pc mem
+    let opc = withPC pc (mRead mem)
+        indexedPrefix xForm = let (pc', newOpc) = mIncPCAndRead pc mem
                                in  case newOpc of
                                      -- Deal with weird IX/IY bit operation layout for undocumented bit/rotate/shift ops
                                      0xcb       -> undocBitOpsDecode opc pc' mem
@@ -83,7 +83,7 @@ group0decode opc mem pc xForm
   | z == 5 = let (newpc, theReg) = reg8 reg8XFormF mem pc y
              in  DecodedInsn (newpc + 1) (DEC theReg)
   | z == 6 = let (newpc, theReg)   = reg8 reg8XFormF mem pc y
-                 (newpc', immval)  = mIncPCAndFetch newpc mem
+                 (newpc', immval)  = mIncPCAndRead newpc mem
              in  DecodedInsn (newpc' + 1) (LD (Reg8Imm theReg immval))
   | z == 7 = defResult (accumOps ! fromIntegral y)
   | otherwise = defResult (Z80undef [opc])
@@ -166,11 +166,11 @@ group3decode opc mem pc xForm
   | z == 3          = case y of
                         0          -> mkAbsAddrIns JP mem pc
                         -- CB instruction prefix
-                        1          -> let (newpc, nextOpc) = mIncPCAndFetch pc mem
+                        1          -> let (newpc, nextOpc) = mIncPCAndRead pc mem
                                       in  DecodedInsn (newpc + 1) (bitopsDecode mem newpc nextOpc)
-                        2          -> let (newpc, nextOpc) = mIncPCAndFetch pc mem
+                        2          -> let (newpc, nextOpc) = mIncPCAndRead pc mem
                                       in  DecodedInsn (newpc + 1) ((OUT . PortImm) nextOpc)
-                        3          -> let (newpc, nextOpc) = mIncPCAndFetch pc mem
+                        3          -> let (newpc, nextOpc) = mIncPCAndRead pc mem
                                       in  DecodedInsn (newpc + 1) ((IN . PortImm) nextOpc)
                         4          -> defResult (EXC SPHL)
                         5          -> defResult (EXC DEHL)
@@ -185,13 +185,13 @@ group3decode opc mem pc xForm
                                 -- DD instruction prefix (should never reach here.)
                                 1          -> undefined
                                 -- ED instruction prefix
-                                2          -> let (newpc, nextOpc) = mIncPCAndFetch pc mem
+                                2          -> let (newpc, nextOpc) = mIncPCAndRead pc mem
                                               in  edPrefixDecode nextOpc mem newpc
                                 -- FD instruction prefix (should never reach here.)
                                 3          -> undefined
                                 _otherwise -> undefined
                          _otherwise -> undefined
-  | z == 6           = let (newpc, nextOpc) = mIncPCAndFetch pc mem
+  | z == 6           = let (newpc, nextOpc) = mIncPCAndRead pc mem
                            imm     = ALUimm nextOpc
                            insCTor = case y of
                                        0          -> ADD . ALU8
@@ -253,8 +253,8 @@ undocBitOpsDecode :: Z80word
                   -> Z80memory
                   -- ^ Source memory system
                   -> Z80decodedInsn
-undocBitOpsDecode prefixOpc pc mem = let (pcStep1, disp) = mIncPCAndFetch pc mem
-                                         (pcStep2, opc)  = mIncPCAndFetch pcStep1 mem
+undocBitOpsDecode prefixOpc pc mem = let (pcStep1, disp) = mIncPCAndRead pc mem
+                                         (pcStep2, opc)  = mIncPCAndRead pcStep1 mem
                                          idxReg8Ctor     = (case prefixOpc of
                                                               0xdd       -> IXindirect
                                                               0xfd       -> IYindirect
@@ -444,7 +444,7 @@ displacementInstruction :: Z80memory
                         -> (SymAbsAddr Z80addr -> Z80instruction)
                         -> Z80decodedInsn
 displacementInstruction mem pc ins =
-  let (pc', disp)  = mIncPCAndFetch pc mem
+  let (pc', disp)  = mIncPCAndRead pc mem
       destAddr     = Comonad.extract pc + signExtend disp + 2
       nextIns      = pc' + 1
   in  DecodedInsn nextIns (ins . AbsAddr $ destAddr)
@@ -463,9 +463,9 @@ z80getAddr :: Z80memory                 -- ^ Memory from which address is fetche
            -> Z80PC                     -- ^ The program counter
            -> Z80decodedInsn
 z80getAddr mem pc = let lo, hi     :: Z80word
-                        lo         = withPC pc (mFetch mem)
+                        lo         = withPC pc (mRead mem)
                         pc'        = pc + 1
-                        hi         = withPC pc' (mFetch mem)
+                        hi         = withPC pc' (mRead mem)
                     in DecodedAddr (pc' + 1) (shiftL (fromIntegral hi) 8 .|. fromIntegral lo)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -486,7 +486,7 @@ type Z80reg16XForm = (  Z80reg16                -- Register pair to be transform
 -- if the operand is indirect via HL. Also include the cases where H and L registers
 -- are in the operand (undocumented instructions.)
 ixXFormReg8 :: Z80reg8XForm
-ixXFormReg8 msys pc HLindirect = let (pc', disp) = mIncPCAndFetch pc msys
+ixXFormReg8 msys pc HLindirect = let (pc', disp) = mIncPCAndRead pc msys
                                 in  (pc', IXindirect $ fromIntegral disp)
 ixXFormReg8 _memsys             pc H           = (pc, IXh)
 ixXFormReg8 _memsys             pc L           = (pc, IXl)
@@ -495,7 +495,7 @@ ixXFormReg8 _msys               pc operand     = (pc, operand)
 -- | Transform the 8-bit register operand to the IY register and displacement, only
 -- if the operand is indirect via HL
 iyXFormReg8 :: Z80reg8XForm
-iyXFormReg8 msys pc HLindirect = let (pc', disp) = mFetchAndIncPC pc msys
+iyXFormReg8 msys pc HLindirect = let (pc', disp) = mReadAndIncPC pc msys
                                 in  (pc', IYindirect $ fromIntegral disp)
 iyXFormReg8 _memsys             pc H          = (pc, IYh)
 iyXFormReg8 _memsys             pc L          = (pc, IYl)

@@ -9,7 +9,7 @@ import           Machine.Utils
 
 -- | Generic program counter
 data ProgramCounter addrType where
-  PC :: addrType
+  PC :: !addrType
      -> ProgramCounter addrType
 
 -- | Make 'ProgramCounter' a 'Functor'

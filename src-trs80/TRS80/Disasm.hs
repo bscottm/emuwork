@@ -114,7 +114,7 @@ trs80disassemble :: Z80system z80sys
                  -> IO ()
 trs80disassemble sys imgReader imgName msize guidance =
   trs80System imgName imgReader (fromIntegral msize) sys
-  >>= (\trs80 -> let img  = mFetchN (trs80 ^. memory) theOrigin (fromIntegral (theEndAddr - theOrigin) + 1)
+  >>= (\trs80 -> let img  = mReadN (trs80 ^. memory) theOrigin (fromIntegral (theEndAddr - theOrigin) + 1)
                  in  case G.getMatchingSection guidance (romMD5 img) of
                        Just dirs ->
                          let dis = collectRom trs80 (initialDisassembly img dirs) dirs
@@ -221,7 +221,7 @@ highbitCharTable memSys sAddr nBytes z80dstate =
   let sAddr'   = fromIntegral sAddr
       nBytes'  = fromIntegral nBytes
       -- Fetch the block from memory as a 'Vector'
-      memBlock = mFetchN memSys sAddr nBytes'
+      memBlock = mReadN memSys sAddr nBytes'
       -- Look for the high bit characters within the address range, then convert back to addresses
       byteidxs = DVU.findIndices (>= 0x80) memBlock
       -- Set up a secondary index vector to make a working zipper
@@ -268,7 +268,7 @@ jumpTable mem sAddr nBytes dstate =
         | otherwise           = z80disbytes z80dstate mem (PC addr) (fromIntegral (ea - addr))
         where
           operAddrPseudo theAddr = z80dstate & disasmSeq %~ (|> operAddr theAddr)
-          operAddr       theAddr = mkAddr addr (AbsAddr theAddr) (mFetchN mem addr 2)
+          operAddr       theAddr = mkAddr addr (AbsAddr theAddr) (mReadN mem addr 2)
   in  generateAddr sAddr dstate
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -280,7 +280,7 @@ trs80RomPostProcessor :: Z80DisasmElt
                       -> Z80disassembly
                       -> (Z80PC, Z80disassembly)
 trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) memSys pc dstate =
-  let byte   = withPC pc (mFetch memSys)
+  let byte   = withPC pc (mRead memSys)
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
       pseudo = if byte >= 0x20 && byte <= 0x7f then
                  mkAscii

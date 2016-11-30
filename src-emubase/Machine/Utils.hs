@@ -112,7 +112,11 @@ class (FiniteBits wordType, Integral wordType) => SignExtend wordType where
   signExtend   :: (Num targetWordType, FiniteBits targetWordType) =>
                   wordType
                -> targetWordType
-  signExtend x = (complement zeroBits `shiftL` finiteBitSize x) .|. fromIntegral x
+  signExtend x = let nbits = finiteBitSize x
+                     x'    = fromIntegral x
+                 in  if   not (testBit x (nbits - 1))
+                     then x'
+                     else (complement zeroBits `shiftL` nbits) .|. x'
 
 instance SignExtend Word8
 instance SignExtend Int8
