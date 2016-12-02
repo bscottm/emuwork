@@ -37,6 +37,7 @@ module Machine.MemorySystem
   , mReadAndIncPC
   , mIncPCAndRead
   -- * Write Memory
+  , mWrite
   , mPatch
   -- * Utility functions
   , countRegions
@@ -44,12 +45,12 @@ module Machine.MemorySystem
   ) where
 
 import           Control.Lens                    (Lens', (%~), (&), (.~), (^.),
-                                                  (|>))
-import           Data.Hashable                   (Hashable)
-import qualified Data.HashPSQ                    as HashPSQ
+                                                  (|>), to)
+import qualified Data.Foldable                   as Fold (foldl')
+import qualified Data.OrdPSQ                     as OrdPSQ
 import qualified Data.IntervalMap.Generic.Strict as IM
 import qualified Data.IntervalMap.Interval       as I
-import           Data.Vector.Unboxed             (Vector, (!))
+import           Data.Vector.Unboxed             (Vector, (!), (//))
 import qualified Data.Vector.Unboxed             as DVU
 import           Data.Maybe (fromMaybe)
 import           Prelude hiding (lookup)
@@ -85,6 +86,10 @@ writesPending f mreg = (\wp -> mreg { _writesPending = wp }) <$> f (_writesPendi
 maxPending :: Int
 maxPending = 29
 
+-- | Number of pending writes to flush when 'maxPending' is reached
+maxFlush :: Int
+maxFlush = maxPending `div` 2
+
 -- | Shorthand for the interval map of memory regions
 type MemRegionMap addrType wordType = IM.IntervalMap (I.Interval addrType) (MemoryRegion addrType wordType)
 
@@ -118,7 +123,7 @@ mkRAMRegion sa len msys =
                                              (I.IntervalCO sa ea)
                                              MR { _readWrite = True
                                                 , _contents = DVU.replicate len 0
-                                                , _writesPending = emptyLRU maxPending
+                                                , _writesPending = initialLRU maxPending
                                                 }
         else error ("mkRAMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
@@ -136,17 +141,17 @@ mkROMRegion sa romImg msys =
                                            (I.IntervalCO sa ea)
                                            MR { _readWrite = False
                                               , _contents = romImg
-                                              , _writesPending = emptyLRU maxPending
+                                              , _writesPending = initialLRU maxPending
                                               }
       else error ("mkROMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- | Fetch a word from a memory address. Note: If the address does not correspond to a region (i.e., the address does not
 -- intersect a region), zero is returned. (FIXME??)
-mRead :: (Integral addrType, Hashable addrType, Num wordType, DVU.Unbox wordType) =>
+mRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
           MemorySystem addrType wordType
        -> addrType
        -> wordType
-mRead msys addr =
+mRead !msys !addr =
   let regs = IM.containing (msys ^. regions) addr
       getContent acc iv mr = acc |> fromMaybe ((mr ^. contents) ! fromIntegral (addr - I.lowerBound iv))
                                               (lookupPendingWrite addr (mr ^. writesPending))
@@ -162,7 +167,7 @@ mReadN :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType
         -> addrType
         -> Int
         -> Vector wordType
-mReadN msys sa nWords =
+mReadN !msys !sa !nWords =
   let regs          = IM.intersecting (msys ^. regions) (I.ClosedInterval sa (sa + fromIntegral nWords))
       go (addr, remaining, vl) ivl reg
         | addr > lb  = let nb     = min (ub - addr) (fromIntegral remaining)
@@ -188,7 +193,7 @@ mReadN msys sa nWords =
 
 -- | Fetch an entity from memory at the current program counter, return the (incremented pc, contents)
 -- pair.
-mReadAndIncPC :: (PCOperation addrType, Hashable addrType, Num wordType, DVU.Unbox wordType) =>
+mReadAndIncPC :: (PCOperation addrType, Num wordType, DVU.Unbox wordType) =>
                   ProgramCounter addrType
                -- ^ Current program counter
                -> MemorySystem addrType wordType
@@ -196,29 +201,36 @@ mReadAndIncPC :: (PCOperation addrType, Hashable addrType, Num wordType, DVU.Unb
                -> (ProgramCounter addrType, wordType)
                -- ^ Updated program counter and fetched word
 
-mReadAndIncPC pc mem = (pc + 1, withPC pc (mRead mem))
+mReadAndIncPC !pc !mem = (pc + 1, withPC pc (mRead mem))
 
 -- | Fetch an entity from memory, pre-incrementing the program counter, returning the (incremented pc, contents)
-mIncPCAndRead :: (PCOperation addrType, Hashable addrType, Num wordType, DVU.Unbox wordType) =>
+mIncPCAndRead :: (PCOperation addrType, Num wordType, DVU.Unbox wordType) =>
                   ProgramCounter addrType
               -- ^ Current progracm counter
                -> MemorySystem addrType wordType
                -- ^ Memory system from which word will be fetched
                -> (ProgramCounter addrType, wordType)
                -- ^ Updated program counter and fetched word
-mIncPCAndRead pc mem = let pc' = pc + 1
-                       in  (pc', withPC pc' (mRead mem))
+mIncPCAndRead !pc !mem = let pc' = pc + 1
+                         in  (pc', withPC pc' (mRead mem))
 
 -- | Write a word into the memory system: inserts the word into the pending write LRU cache, flushing the cache to make
--- space if necessary, commiting updates to the underlying region's contents.
-mWrite :: addrType
+-- space if necessary, commiting updates to the underlying region's contents. If the memory region is not 'readWrite',
+-- then nothing happens.
+mWrite :: (Integral addrType, DVU.Unbox wordType) =>
+          addrType
        -> wordType
        -> MemorySystem addrType wordType
        -> MemorySystem addrType wordType
-mWrite addr word msys =
-  let regs          = IM.intersecting (msys ^. regions) (I.ClosedInterval addr addr)
-  in  undefined
-  
+mWrite !addr !word !msys =
+  let regs                 = IM.keys (IM.intersecting (msys ^. regions) (I.ClosedInterval addr addr))
+      writeRegion msys' iv = msys' & regions %~ IM.update (queuePending (I.lowerBound iv)) iv
+      queuePending lb mr   = Just (if mr ^. readWrite
+                                   then let (_oldval, mr') = queueLRU addr word lb mr
+                                        in  mr'
+                                   else mr)
+  in  Fold.foldl' writeRegion msys regs
+
 -- | Patch (forcibly overwrite) memory. This does not obey or check the 'readWrite' flag and will truncate the memory patch
 -- if it extends beyond a region's upper bound.
 mPatch :: (Ord addrType, Num addrType, DVU.Unbox wordType) =>
@@ -257,93 +269,88 @@ type Size = Int
 
 data LRUWriteCache addrType wordType where
   LRUWriteCache ::
-    { lrucNextTick :: {-# UNPACK #-} !Tick
-    , lrucPsq      ::                !(HashPSQ.HashPSQ addrType Tick wordType)
-    , lrucMaxSize  :: {-# UNPACK #-} !Size
+    { _lrucNextTick :: {-# UNPACK #-} !Tick
+    , _lrucPsq      ::                !(OrdPSQ.OrdPSQ addrType Tick wordType)
+    , _lrucMaxSize  :: {-# UNPACK #-} !Size
     } -> LRUWriteCache addrType wordType
     deriving (Show)
+
+lrucPsq :: Lens' (LRUWriteCache addrType wordType) (OrdPSQ.OrdPSQ addrType Tick wordType)
+lrucPsq f psq = (\psq' -> psq { _lrucPsq = psq' }) <$> f (_lrucPsq psq)
+
 -- | Create an empty write cache
-emptyLRU :: Int
+initialLRU :: Int
          -- ^ Maximum size of the pending write cache
          -> LRUWriteCache addrType wordType
          -- ^ The initial write cache
-emptyLRU = LRUWriteCache 0 HashPSQ.empty
-{-# INLINE emptyLRU #-}
+-- eta reduction: implied first argument, maxSize
+initialLRU = LRUWriteCache 0 OrdPSQ.empty
+{-# INLINE initialLRU #-}
 
 -- | Calculate the size of the write cache
 sizeLRU :: LRUWriteCache addrType wordType
         -> Int
-sizeLRU = HashPSQ.size . lrucPsq
+sizeLRU = (^. lrucPsq . to OrdPSQ.size)
 {-# INLINE sizeLRU #-}
 
-{- NOTUSED? don't need to update the LRU tick if just looking up
-lookupLRU :: addrType
-          -> LRUWriteCache addrType wordType
-          -> (Maybe v, LRUWriteCache addrType wordType)
-lookupLRU addr cache@(LRUWriteCache nextTick psq maxSize) =
-    case HashPSQ.alter tickleIfExists addr psq of
-      (Nothing,       _   ) -> (Nothing, cache)
-      (mbV@(Just _),  psq') -> (mbV,     increaseTick nextTick psq' maxSize)
-  where
-    tickleIfExists Nothing       = (Nothing, Nothing)
-    tickleIfExists (Just (_, v)) = (Just v,  Just (nextTick, v))
--}
-
-lookupPendingWrite :: (Ord addrType, Hashable addrType) =>
+lookupPendingWrite :: (Ord addrType) =>
                       addrType
                   -- ^ The address to probe
                   -> LRUWriteCache addrType wordType
                   -- ^ The pending write cache
                   -> Maybe wordType
                   -- ^ The associated word value, if found, or 'Nothing'
-lookupPendingWrite addr = fmap snd . HashPSQ.lookup addr . lrucPsq
+lookupPendingWrite !addr = (^. lrucPsq . to (fmap snd . OrdPSQ.lookup addr))
 {-# INLINE lookupPendingWrite #-}
 
-increaseTick :: (Ord addrType, Hashable addrType) =>
+increaseTick :: (Ord addrType) =>
                 Tick
-             -> HashPSQ.HashPSQ addrType Tick wordType
+             -> OrdPSQ.OrdPSQ addrType Tick wordType
              -> Size
              -> LRUWriteCache addrType wordType
 increaseTick tick psq maxSize
   | tick < maxBound = LRUWriteCache (tick + 1) psq maxSize
-  | otherwise       = retick psq HashPSQ.empty 0
+  | otherwise       = retick psq OrdPSQ.empty 0
   where
     retick !oldPsq !newPsq !newTick =
-      case HashPSQ.minView oldPsq of
+      case OrdPSQ.minView oldPsq of
         Nothing                 -> LRUWriteCache newTick newPsq maxSize
-        Just (k, _, v, oldPsq') -> retick oldPsq' (HashPSQ.insert k newTick v newPsq) (newTick + 1)
+        Just (k, _, v, oldPsq') -> retick oldPsq' (OrdPSQ.insert k newTick v newPsq) (newTick + 1)
 
-insertLRU :: (Ord addrType, Hashable addrType) =>
-             addrType
-          -- ^ The address
-          -> wordType
-          -- ^ The word to write at the address
-          -> LRUWriteCache addrType wordType
-          -- ^ Incoming pending write cache
-          -> (LRUWriteCache addrType wordType, Maybe (addrType, wordType))
-insertLRU addr word (LRUWriteCache nextTick psq maxSize)
-    | HashPSQ.size psq' <= maxSize
-    = (increaseTick nextTick psq' maxSize, Nothing)
-    | otherwise
-    = fromMaybe (emptyLRU maxSize, Nothing) $ do
-        (addr', _, word', psq'') <- HashPSQ.minView psq'
-        return (increaseTick nextTick psq'' maxSize, Just (addr', word'))
-    where
-      psq' = HashPSQ.insert addr nextTick word psq
+-- | Queue a write to 'addr' in the pending write cache, flushing the cache if its size exceeds 'maxPending'.
+queueLRU :: (Integral addrType, DVU.Unbox wordType) =>
+            addrType
+         -- ^ Address being modified
+         -> wordType
+         -- ^ New contents at the modified address
+         -> addrType
+         -- ^ Memory region's starting address
+         -> MemoryRegion addrType wordType
+         -- ^ Memory region to modify (_note_: flushing will modify '_contents')
+         -> (wordType, MemoryRegion addrType wordType)
+         -- ^ Previously written value, if the modified address was in the pending write queue
+queueLRU !addr !word !sa !mr =
+  let LRUWriteCache nextTick psq maxSize = mr ^. writesPending
+      (oldval, psq')                     = OrdPSQ.alter queueAddr addr psq
+      queueAddr Nothing                  = (Nothing, Just (nextTick, word))
+      queueAddr (Just (_, oldword))      = (Just oldword, Just (nextTick, word))
+      mr'                                = mr & writesPending .~ increaseTick (nextTick + 1) psq' maxSize
+      mr''                               = if   mr' ^. writesPending . to sizeLRU >= maxPending
+                                           then flushPending maxFlush mr'
+                                           else mr'
+      contentVal                         = (mr ^. contents) ! fromIntegral (addr - sa)
+  in  (fromMaybe contentVal oldval, mr'')
 
--- | Evict the entry at the given key in the cache.
-delete :: (Ord addrType, Hashable addrType) =>
-           addrType
-        -> LRUWriteCache addrType wordType
-        -> (LRUWriteCache addrType wordType, Maybe wordType)
-delete addr cache = case HashPSQ.deleteView addr (lrucPsq cache) of
-    Nothing               -> (cache,                  Nothing)
-    Just (_t, word, psq') -> (cache {lrucPsq = psq'}, Just word)
-
-{-
-deleteLRU :: LRUWriteCache addrType wordType -> (LRUWriteCache addrType wordType, Maybe (Int, v))
-deleteLRU (LRUWriteCache nextTick psq maxSize) =
-    fromMaybe (emptyLRU maxSize, Nothing) $ do
-        (k, _, v, psq') <- HashPSQ.minView psq
-        return (LRUWriteCache nextTick psq' maxSize, Just (k, v))
--}
+flushPending :: (Integral addrType, DVU.Unbox wordType) =>
+                Int
+             -- ^ Number of pending writes to commit
+             -> MemoryRegion addrType wordType
+             -- ^ Region where writes will be committed
+             -> MemoryRegion addrType wordType
+             -- ^ Updated region
+flushPending nFlush mr =
+  let -- Ascending list: from least recently to most recently used
+      ents       = [(k, v) | (k, _, v) <- take nFlush (mr ^. writesPending . lrucPsq . to OrdPSQ.toAscList)]
+      pruneQ psq = Fold.foldl' (flip OrdPSQ.delete) psq (map fst ents)
+      -- Bulk update the underlying contents, then prune the write queue (the power of Lenses!)
+  in  mr & contents %~ (// [(fromIntegral k, v) | (k, v) <- ents]) & writesPending %~ lrucPsq %~ pruneQ
