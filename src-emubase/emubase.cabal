@@ -83,11 +83,13 @@ test-suite msystest
       bytestring,
       text,
       vector,
+      psqueues,
       emubase
     default-extensions:
       GADTs,
       MultiParamTypeClasses,
       OverloadedStrings,
+      BangPatterns,
       TemplateHaskell
     other-modules:
       Machine.MemorySystem,

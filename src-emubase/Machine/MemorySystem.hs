@@ -106,8 +106,7 @@ regions f msys = (\regions' -> msys { _regions = regions' }) <$> f (_regions msy
 
 -- | Create an empty memory system
 initialMemorySystem :: MemorySystem addrType wordType
-initialMemorySystem = MSys { _regions = IM.empty
-                           }
+initialMemorySystem = MSys { _regions = IM.empty }
 
 -- | Create a new RAM memory region. __/Note:/__ memory regions may not overlap; 'error' will signal if this
 -- precondition fails.
@@ -167,29 +166,37 @@ mReadN :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType
         -> addrType
         -> Int
         -> Vector wordType
-mReadN !msys !sa !nWords =
-  let regs          = IM.intersecting (msys ^. regions) (I.ClosedInterval sa (sa + fromIntegral nWords))
-      go (addr, remaining, vl) ivl reg
-        | addr > lb  = let nb     = min (ub - addr) (fromIntegral remaining)
-                           vl'    = (vl [DVU.slice (fromIntegral (addr - lb)) (fromIntegral nb) cts] ++)
-                           accum' = (ub, remaining - fromIntegral nb, vl')
-                       in  (accum', reg)
-        | addr == lb = let nb = min (ub - addr) (fromIntegral remaining)
-                           accum' = (ub - nb, remaining - fromIntegral nb, (vl [DVU.slice 0 (fromIntegral nb) cts] ++))
-                       in  (accum', reg)
-        | addr < lb  = let nb     = min (ub - addr) (fromIntegral remaining)
-                           vl'    = (vl [DVU.replicate (fromIntegral (lb - addr)) 0, DVU.slice 0 (fromIntegral nb) cts] ++)
-                           accum' = (ub - nb, remaining - fromIntegral nb, vl')
-                       in  (accum', reg)
-        -- Squelch GHC pattern warning...
-        | otherwise   = error ("How'd I get here? addr = " ++ as0xHexS addr ++ " remaining " ++ show remaining)
-        where
-          lb  = I.lowerBound ivl
-          ub  = I.upperBound ivl
-          cts = reg ^. contents
-      ((_, remain', accum), _)   = IM.mapAccumWithKey go (sa, nWords, ([] ++)) regs
-      endfill                    = [DVU.replicate remain' 0]
-  in  DVU.concat (accum endfill)
+mReadN !msys !sa !nWords
+  | nWords == 1
+  = DVU.singleton (mRead msys sa)
+  | otherwise
+  = let regs          = IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea)
+        ea            = sa + fromIntegral (nWords - 1)
+        getContent (addr, remaining, vl) ivl reg
+          | addr > lb  = let vl'    = (vl [DVU.slice (fromIntegral addr - fromIntegral lb) nb rcontent] ++)
+                             accum' = (ub, remaining - nb, vl')
+                         in  (accum', reg)
+          | addr == lb = let accum' = (ub - fromIntegral nb + 1, remaining - nb, (vl [DVU.slice 0 nb rcontent] ++))
+                         in  (accum', reg)
+          | addr < lb  = let vl'    = (vl [DVU.replicate (fromIntegral lb - fromIntegral addr) 0, DVU.slice 0 nb rcontent] ++)
+                             accum' = (ub - fromIntegral nb + 1, remaining - nb, vl')
+                         in  (accum', reg)
+          -- Squelch GHC pattern warning...
+          | otherwise   = error ("How'd I get here? addr = " ++ as0xHexS addr ++ " remaining " ++ show remaining)
+          where
+            lb       = I.lowerBound ivl
+            ub       = I.upperBound ivl
+            nb       = min (fromIntegral ub - fromIntegral addr) remaining
+            rcontent = reg ^. contents
+        ((_, remain', accum), _)   = IM.mapAccumWithKey getContent (sa, nWords, ([] ++)) regs
+        endfill                    = [DVU.replicate remain' 0]
+        -- And ensure that pending writes in the regions are also included. This uses the same pattern that 'showS' uses,
+        -- threading a list function across the regions so that concatenation only happens once and has linear performance.
+        writes                = Fold.foldl' getWrites ([] ++) regs
+        getWrites pend reg    = (pend (reg ^. writesPending . lrucPsq . to filterWrites) ++)
+        addrInRange (addr, _) = addr >= sa && addr <= ea
+        filterWrites lru      = filter addrInRange (map (\(a, _, v) -> (a, v)) (OrdPSQ.toList lru))
+    in  (DVU.concat . accum) endfill // [(fromIntegral a, v) | (a, v) <- writes []]
 
 -- | Fetch an entity from memory at the current program counter, return the (incremented pc, contents)
 -- pair.
@@ -200,7 +207,6 @@ mReadAndIncPC :: (PCOperation addrType, Num wordType, DVU.Unbox wordType) =>
                -- ^ The memory system from which the word will be fetched
                -> (ProgramCounter addrType, wordType)
                -- ^ Updated program counter and fetched word
-
 mReadAndIncPC !pc !mem = (pc + 1, withPC pc (mRead mem))
 
 -- | Fetch an entity from memory, pre-incrementing the program counter, returning the (incremented pc, contents)
@@ -225,15 +231,16 @@ mWrite :: (Integral addrType, DVU.Unbox wordType) =>
 mWrite !addr !word !msys =
   let regs                 = IM.keys (IM.intersecting (msys ^. regions) (I.ClosedInterval addr addr))
       writeRegion msys' iv = msys' & regions %~ IM.update (queuePending (I.lowerBound iv)) iv
-      queuePending lb mr   = Just (if mr ^. readWrite
-                                   then let (_oldval, mr') = queueLRU addr word lb mr
-                                        in  mr'
-                                   else mr)
+      queuePending lb mr
+        | mr ^. readWrite
+        = Just (snd (queueLRU addr word lb mr))       -- Note: currently discarding the old value, (oldval, mr')
+        | otherwise
+        = Just mr
   in  Fold.foldl' writeRegion msys regs
 
 -- | Patch (forcibly overwrite) memory. This does not obey or check the 'readWrite' flag and will truncate the memory patch
 -- if it extends beyond a region's upper bound.
-mPatch :: (Ord addrType, Num addrType, DVU.Unbox wordType) =>
+mPatch :: (Integral addrType, DVU.Unbox wordType) =>
           addrType
           -- ^ Starting address where patch is applied
        -> Vector wordType
@@ -243,14 +250,27 @@ mPatch :: (Ord addrType, Num addrType, DVU.Unbox wordType) =>
        -> MemorySystem addrType wordType
           -- ^ Patched memory system
 mPatch paddr patch msys =
-  let minterval     = I.ClosedInterval paddr (paddr + fromIntegral (DVU.length patch) - 1)
-      mregs         = IM.intersecting (msys ^. regions) minterval
-  in  undefined
+  let minterval                = I.ClosedInterval paddr ea
+      ea                       = paddr + fromIntegral (DVU.length patch - 1)
+      updContent sa iv reg
+        | iv `I.overlaps` minterval
+        = (sa + ub - lb + 1, reg & contents %~ (// pupdate))
+        | otherwise
+        = (sa + ub - lb + 1, reg)
+        where
+          lb = I.lowerBound iv
+          ub = I.upperBound iv
+          sidx = fromIntegral sa - fromIntegral paddr
+          plen = min (DVU.length patch) (fromIntegral ub - fromIntegral sa)
+          pslice = DVU.slice sidx plen patch
+          pupdate = zip (iterate (+ 1) (fromIntegral sa - fromIntegral lb)) (DVU.toList pslice)
+      (_, mregs)               = IM.mapAccumWithKey updContent paddr (msys ^. regions)
+  in  msys & regions .~ mregs
 
 -- | Count the number of regions in the memory system; used primarily for testing and debugging
 countRegions :: MemorySystem addrType wordType
              -> Int
-countRegions msys = IM.size (msys ^. regions)
+countRegions msys = msys ^. regions . to IM.size
 
 -- | Generate a list of the regions, without the contents. (Note: Does not permit changing the region's contents, primarily
 -- intended as a test interface)
@@ -341,6 +361,7 @@ queueLRU !addr !word !sa !mr =
       contentVal                         = (mr ^. contents) ! fromIntegral (addr - sa)
   in  (fromMaybe contentVal oldval, mr'')
 
+-- | Flush some of the pending writes to a memory region's content vector
 flushPending :: (Integral addrType, DVU.Unbox wordType) =>
                 Int
              -- ^ Number of pending writes to commit
@@ -351,6 +372,11 @@ flushPending :: (Integral addrType, DVU.Unbox wordType) =>
 flushPending nFlush mr =
   let -- Ascending list: from least recently to most recently used
       ents       = [(k, v) | (k, _, v) <- take nFlush (mr ^. writesPending . lrucPsq . to OrdPSQ.toAscList)]
-      pruneQ psq = Fold.foldl' (flip OrdPSQ.delete) psq (map fst ents)
       -- Bulk update the underlying contents, then prune the write queue (the power of Lenses!)
-  in  mr & contents %~ (// [(fromIntegral k, v) | (k, v) <- ents]) & writesPending %~ lrucPsq %~ pruneQ
+  in  mr & contents %~ (// [(fromIntegral k, v) | (k, v) <- ents]) & writesPending %~ lrucPsq %~ prunePsq (map fst ents)
+
+prunePsq :: (Ord addrType) =>
+            [addrType]
+         -> OrdPSQ.OrdPSQ addrType Tick wordType
+         -> OrdPSQ.OrdPSQ addrType Tick wordType
+prunePsq addrs psq = Fold.foldl' (flip OrdPSQ.delete) psq addrs
