@@ -4,7 +4,6 @@ module Main (main) where
 
 import           Control.Monad
 import qualified Data.Foldable as Foldable
-import           Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import           Data.Vector.Unboxed (Vector)
@@ -13,9 +12,11 @@ import           Data.Word
 import           System.Console.GetOpt
 import           System.Environment
 import           System.Exit
-import           System.IO (stdout, stderr, hPutStrLn)
+import           System.IO (stderr, hPutStrLn)
 import           Test.HUnit
 import qualified Data.IntervalMap.Interval as I
+
+import Debug.Trace
 
 import qualified Machine.MemorySystem as M
 
@@ -118,8 +119,11 @@ mkMsysTests opts =
                                    , "mkROMRegion2"   ~: test_mkROMRegion2 opts    @? "mkROMRegion2 failed."
                                    , "mkRAMRegion3"   ~: test_mkRAMRegion3 opts    @? "mkRAMRegion3 failed."
                                    ]
+                , "read"   ~: test [ "read1"          ~: test_read1 opts           @? "read1 failed"
+                                   ]
                 , "patch"  ~: test [ "patch01"        ~: test_patch01 opts         @? "patch01 failed."
                                    , "patch02"        ~: test_patch02 opts         @? "patch02 failed."
+                                   , "patch03"        ~: test_patch03 opts         @? "patch03 failed."
                                    ]
                 ]
 
@@ -167,7 +171,19 @@ test_patch02 args =
   let msys   = M.mkRAMRegion 20 4 (M.mkRAMRegion 0 16 M.initialMemorySystem :: M.MemorySystem Word16 Word8)
       pvec   = [ 0x11, 0x22 ] ++ replicate 4 0  ++ [ 0x33, 0x44, 0x55, 0x66 ]
       msys'  = M.mPatch 14 (DVU.fromList pvec) msys
-      cmpvec = [ 0x0c, 0x0d ] ++ pvec ++ [ 0x14, 0x15 ]
+      cmpvec = [ 0x00, 0x00 ] ++ pvec
+      memvec = DVU.toList (M.mReadN msys' 12 (length cmpvec))
+  in  do
+        when (showResult args) (hPutStrLn stderr ("memvec: " ++ show memvec)
+                                >> hPutStrLn stderr ("cmpvec: " ++ show cmpvec))
+        return (memvec == cmpvec)
+
+test_patch03 :: TestArgs -> IO Bool
+test_patch03 args =
+  let msys   = M.mkRAMRegion 20 4 (M.mkRAMRegion 0 16 M.initialMemorySystem :: M.MemorySystem Word16 Word8)
+      pvec   = [ 0x11, 0x22 ] ++ replicate 4 0  ++ [ 0x33, 0x44, 0x55, 0x66 ]
+      msys'  = M.mPatch 14 (DVU.fromList pvec) msys
+      cmpvec = [ 0x00, 0x00 ] ++ pvec ++ [ 0x00, 0x00, 0x00 ]
       memvec = DVU.toList (M.mReadN msys' 12 (length cmpvec))
   in  do
         when (showResult args) (hPutStrLn stderr ("memvec: " ++ show memvec)

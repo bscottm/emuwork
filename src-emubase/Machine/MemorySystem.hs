@@ -54,7 +54,6 @@ import           Data.Vector.Unboxed             (Vector, (!), (//))
 import qualified Data.Vector.Unboxed             as DVU
 import           Data.Maybe (fromMaybe)
 import           Prelude hiding (lookup)
--- import           Debug.Trace
 
 import           Machine.ProgramCounter
 import           Machine.Utils
@@ -171,33 +170,37 @@ mReadN !msys !sa !nWords
   | nWords == 1
   = DVU.singleton (mRead msys sa)
   | otherwise
-  = let regs          = IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea)
-        ea            = sa + fromIntegral (nWords - 1)
+  = let regs                        = IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea)
+        ea                          = sa + fromIntegral (nWords - 1)
+        ((_, remain', accum), _)    = IM.mapAccumWithKey getContent (sa, nWords, ([] ++)) regs
         getContent (addr, remaining, vl) ivl reg
           | addr > lb  = let vl'    = (vl [DVU.slice (fromIntegral addr - fromIntegral lb) nb rcontent] ++)
-                             accum' = (ub, remaining - nb, vl')
+                             accum' = (ub + 1, remaining - nb, vl')
                          in  (accum', reg)
-          | addr == lb = let accum' = (ub - fromIntegral nb + 1, remaining - nb, (vl [DVU.slice 0 nb rcontent] ++))
+          | addr == lb = let accum' = (ub + 1, remaining - nb, (vl [DVU.slice 0 nb rcontent] ++))
                          in  (accum', reg)
-          | addr < lb  = let vl'    = (vl [DVU.replicate (fromIntegral lb - fromIntegral addr) 0, DVU.slice 0 nb rcontent] ++)
-                             accum' = (ub - fromIntegral nb + 1, remaining - nb, vl')
+          | addr < lb  = let flen   = fromIntegral lb - fromIntegral addr + 1
+                             vl'    = (vl [DVU.replicate flen 0, DVU.slice 0 nb rcontent] ++)
+                             accum' = (ub + 1, remaining - nb - flen, vl')
                          in  (accum', reg)
           -- Squelch GHC pattern warning...
           | otherwise   = error ("How'd I get here? addr = " ++ as0xHexS addr ++ " remaining " ++ show remaining)
           where
             lb       = I.lowerBound ivl
             ub       = I.upperBound ivl
-            nb       = min (fromIntegral ub - fromIntegral addr) remaining
+            addr'    = max lb addr
+            nb       = min (fromIntegral ub - fromIntegral addr') remaining
             rcontent = reg ^. contents
-        ((_, remain', accum), _)   = IM.mapAccumWithKey getContent (sa, nWords, ([] ++)) regs
         endfill                    = [DVU.replicate remain' 0]
         -- And ensure that pending writes in the regions are also included. This uses the same pattern that 'showS' uses,
         -- threading a list function across the regions so that concatenation only happens once and has linear performance.
-        writes                = Fold.foldl' getWrites ([] ++) regs
+        writes                = Fold.foldl' getWrites ([] ++) regs []
         getWrites pend reg    = (pend (reg ^. writesPending . lrucPsq . to filterWrites) ++)
         addrInRange (addr, _) = addr >= sa && addr <= ea
         filterWrites lru      = filter addrInRange (map (\(a, _, v) -> (a, v)) (OrdPSQ.toList lru))
-    in  (DVU.concat . accum) endfill // [(fromIntegral a, v) | (a, v) <- writes []]
+        idxvec                = DVU.fromList (map (fromIntegral . fst) writes)
+        valvec                = DVU.fromList (map snd writes)
+    in  DVU.update_ ((DVU.concat . accum) endfill) idxvec valvec
 
 -- | Fetch an entity from memory at the current program counter, return the (incremented pc, contents)
 -- pair.
@@ -251,22 +254,22 @@ mPatch :: (Integral addrType, DVU.Unbox wordType) =>
        -> MemorySystem addrType wordType
           -- ^ Patched memory system
 mPatch paddr patch msys =
-  let minterval                = I.ClosedInterval paddr ea
-      ea                       = paddr + fromIntegral (DVU.length patch - 1)
+  let minterval                = I.ClosedInterval paddr (paddr + fromIntegral (DVU.length patch - 1))
+      (_, mregs)               = IM.mapAccumWithKey updContent paddr (msys ^. regions)
       updContent sa iv reg
         | iv `I.overlaps` minterval
-        = (sa + ub - lb + 1, reg & contents %~ (\vec -> DVU.update_ vec pidxs pslice))
+        = (ub + 1, reg & contents %~ (\vec -> DVU.update_ vec pidxs pslice))
         | otherwise
-        = (sa + ub - lb + 1, reg)
+        = (ub + 1, reg)
         where
           lb      = I.lowerBound iv
           ub      = I.upperBound iv
-          sidx    = fromIntegral sa - fromIntegral paddr
-          plen    = min (DVU.length patch) (fromIntegral ub - fromIntegral sa)
-          idxoffs = fromIntegral sa - fromIntegral lb
+          sa'     = max sa lb
+          sidx    = fromIntegral sa' - fromIntegral paddr
+          plen    = min (DVU.length patch - sidx) (fromIntegral ub - fromIntegral sa')
+          idxoffs = fromIntegral sa' - fromIntegral lb
           pslice  = DVU.slice sidx plen patch
           pidxs   = DVU.generate plen (+ idxoffs)
-      (_, mregs)               = IM.mapAccumWithKey updContent paddr (msys ^. regions)
   in  msys & regions .~ mregs
 
 -- | Count the number of regions in the memory system; used primarily for testing and debugging
