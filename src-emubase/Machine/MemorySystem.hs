@@ -54,6 +54,7 @@ import           Data.Vector.Unboxed             (Vector, (!), (//))
 import qualified Data.Vector.Unboxed             as DVU
 import           Data.Maybe (fromMaybe)
 import           Prelude hiding (lookup)
+-- import           Debug.Trace
 
 import           Machine.ProgramCounter
 import           Machine.Utils
@@ -254,16 +255,17 @@ mPatch paddr patch msys =
       ea                       = paddr + fromIntegral (DVU.length patch - 1)
       updContent sa iv reg
         | iv `I.overlaps` minterval
-        = (sa + ub - lb + 1, reg & contents %~ (// pupdate))
+        = (sa + ub - lb + 1, reg & contents %~ (\vec -> DVU.update_ vec pidxs pslice))
         | otherwise
         = (sa + ub - lb + 1, reg)
         where
-          lb = I.lowerBound iv
-          ub = I.upperBound iv
-          sidx = fromIntegral sa - fromIntegral paddr
-          plen = min (DVU.length patch) (fromIntegral ub - fromIntegral sa)
-          pslice = DVU.slice sidx plen patch
-          pupdate = zip (iterate (+ 1) (fromIntegral sa - fromIntegral lb)) (DVU.toList pslice)
+          lb      = I.lowerBound iv
+          ub      = I.upperBound iv
+          sidx    = fromIntegral sa - fromIntegral paddr
+          plen    = min (DVU.length patch) (fromIntegral ub - fromIntegral sa)
+          idxoffs = fromIntegral sa - fromIntegral lb
+          pslice  = DVU.slice sidx plen patch
+          pidxs   = DVU.generate plen (+ idxoffs)
       (_, mregs)               = IM.mapAccumWithKey updContent paddr (msys ^. regions)
   in  msys & regions .~ mregs
 
@@ -380,3 +382,4 @@ prunePsq :: (Ord addrType) =>
          -> OrdPSQ.OrdPSQ addrType Tick wordType
          -> OrdPSQ.OrdPSQ addrType Tick wordType
 prunePsq addrs psq = Fold.foldl' (flip OrdPSQ.delete) psq addrs
+{-# INLINE prunePsq #-}

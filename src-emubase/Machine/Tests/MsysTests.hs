@@ -115,37 +115,57 @@ predTest @!? msg = assertionPredicate predTest >>= (\b -> when b (assertFailure 
 mkMsysTests :: TestArgs -> IO Test
 mkMsysTests opts =
   return $ test [ "msys"   ~: test [ "mkROMRegion"    ~: test_mkROMRegion opts     @? "mkROMRegion failed."
-                                   , "mkROMRegion2"   ~: test_mkROMRegion2 opts    @? "mkROMReguin2 failed."
+                                   , "mkROMRegion2"   ~: test_mkROMRegion2 opts    @? "mkROMRegion2 failed."
+                                   , "mkRAMRegion3"   ~: test_mkRAMRegion3 opts    @? "mkRAMRegion3 failed."
                                    ]
                 , "patch"  ~: test [ "patch01"        ~: test_patch01 opts         @? "patch01 failed."
+                                   , "patch02"        ~: test_patch02 opts         @? "patch02 failed."
                                    ]
                 ]
 
 test_mkROMRegion :: TestArgs -> IO Bool
 test_mkROMRegion _args =
-  let img   = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word16
-      msys  = M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word16
+  let img   = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
+      msys  = M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word8
       rlist = map fst (M.regionList msys)
   in  return (M.countRegions msys == 1 && rlist == [I.IntervalCO 0 4096])
 
 test_mkROMRegion2 :: TestArgs -> IO Bool
 test_mkROMRegion2 _args =
-  let img   = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word16
-      msys  = M.mkROMRegion 4096 img (M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word16)
+  let img   = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
+      msys  = M.mkROMRegion 4096 img (M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word8)
       rlist = map fst (M.regionList msys)
   in  return (M.countRegions msys == 2 && rlist == [I.IntervalCO 0 4096, I.IntervalCO 4096 8192])
 
+test_mkRAMRegion3 :: TestArgs -> IO Bool
+test_mkRAMRegion3 _args =
+  let msys  = M.mkRAMRegion 0x1400 0x1000 (M.mkRAMRegion 0 0x1000 M.initialMemorySystem :: M.MemorySystem Word16 Word8)
+      rlist = map fst (M.regionList msys)
+  in  return (M.countRegions msys == 2 && rlist == [I.IntervalCO 0 0x1000, I.IntervalCO 0x1400 0x2400])
+
 test_read1 :: TestArgs -> IO Bool
 test_read1 _opts =
-  let img   = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word16
-      msys  = M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word16
+  let img   = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
+      msys  = M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word8
   in  return (M.mRead msys 1 == 1)
 
 test_patch01 :: TestArgs -> IO Bool
 test_patch01 args =
-  let img    = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word16
-      msys   = M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word16
+  let img    = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
+      msys   = M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word8
       pvec   = [ 0x11, 0x22, 0x33, 0x44, 0x55, 0x66]
+      msys'  = M.mPatch 14 (DVU.fromList pvec) msys
+      cmpvec = [ 0x0c, 0x0d ] ++ pvec ++ [ 0x14, 0x15 ]
+      memvec = DVU.toList (M.mReadN msys' 12 (length cmpvec))
+  in  do
+        when (showResult args) (hPutStrLn stderr ("memvec: " ++ show memvec)
+                                >> hPutStrLn stderr ("cmpvec: " ++ show cmpvec))
+        return (memvec == cmpvec)
+
+test_patch02 :: TestArgs -> IO Bool
+test_patch02 args =
+  let msys   = M.mkRAMRegion 20 4 (M.mkRAMRegion 0 16 M.initialMemorySystem :: M.MemorySystem Word16 Word8)
+      pvec   = [ 0x11, 0x22 ] ++ replicate 4 0  ++ [ 0x33, 0x44, 0x55, 0x66 ]
       msys'  = M.mPatch 14 (DVU.fromList pvec) msys
       cmpvec = [ 0x0c, 0x0d ] ++ pvec ++ [ 0x14, 0x15 ]
       memvec = DVU.toList (M.mReadN msys' 12 (length cmpvec))

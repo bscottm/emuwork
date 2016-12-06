@@ -83,8 +83,7 @@ test-suite msystest
       bytestring,
       text,
       vector,
-      psqueues,
-      emubase
+      psqueues
     default-extensions:
       GADTs,
       MultiParamTypeClasses,
