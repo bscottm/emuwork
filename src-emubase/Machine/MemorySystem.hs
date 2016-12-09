@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE BangPatterns #-}
 {- OPTIONS_HADDOCK ignore-exports -}
 {-| Representation of system memory.
 
@@ -60,27 +61,29 @@ import           Machine.Utils
 
 -- | A memory region
 data MemoryRegion addrType wordType where
-  MR ::
-    { _readWrite   :: Bool
-    -- ^ Read/write flag for the reguion: If 'True', region can be written. Otherwise, it's read-only (i.e., ROM)
-    , _contents    :: Vector wordType
+  RAMRegion ::
+    { _contents    :: Vector wordType
     -- ^ Memory region's contents (unboxed vector)
     , _writesPending :: LRUWriteCache addrType wordType
     -- ^ Pending write LRU cache
     } -> MemoryRegion addrType wordType
-  deriving (Show)
 
--- | Lens for a memory region's read-only flag.
-readWrite :: Lens' (MemoryRegion addrType wordType) Bool
-readWrite f mregion = (\ro -> mregion { _readWrite = ro }) <$> f (_readWrite mregion)
+  ROMRegion ::
+    { _contents :: Vector wordType
+    -- ^ Memory region's contents (unboxed vector)
+    } -> MemoryRegion addrType wordType
+  deriving (Show)
 
 -- | Lens for a memory region's contents
 contents :: Lens' (MemoryRegion addrType wordType) (Vector wordType)
-contents f mregion = (\content' -> mregion { _contents = content' }) <$> f (_contents mregion)
+contents f mregion@(RAMRegion _ _) = (\content' -> mregion { _contents = content' }) <$> f (_contents mregion)
+contents f mregion@(ROMRegion _)   = (\content' -> mregion { _contents = content' }) <$> f (_contents mregion)
 
--- | Lens for the pending write LRU queue
+-- | Lens for the pending write LRU queue.
 writesPending :: Lens' (MemoryRegion addrType wordType) (LRUWriteCache addrType wordType)
-writesPending f mreg = (\wp -> mreg { _writesPending = wp }) <$> f (_writesPending mreg)
+writesPending f mregion@(RAMRegion _ _) = (\wp -> mregion { _writesPending = wp }) <$> f (_writesPending mregion)
+-- For types other than 'RAMRegion', just apply the function over 'initialLRU' (empty LRU cache) and discard the result
+writesPending f mregion                 = mregion <$ f (initialLRU 0)
 
 -- | Pending write queue maximum depth
 maxPending :: Int
@@ -120,10 +123,9 @@ mkRAMRegion sa len msys =
   in    if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
         then msys & regions %~ IM.insertWith const
                                              (I.IntervalCO sa ea)
-                                             MR { _readWrite = True
-                                                , _contents = DVU.replicate len 0
-                                                , _writesPending = initialLRU maxPending
-                                                }
+                                             RAMRegion { _contents = DVU.replicate len 0
+                                                       , _writesPending = initialLRU maxPending
+                                                       }
         else error ("mkRAMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- | Create a new read-only (ROM) memory region. __/Note:/__ memory regions may not overlap; 'error' will signal if this
@@ -138,10 +140,8 @@ mkROMRegion sa romImg msys =
   in  if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
       then msys & regions %~ IM.insertWith const
                                            (I.IntervalCO sa ea)
-                                           MR { _readWrite = False
-                                              , _contents = romImg
-                                              , _writesPending = initialLRU maxPending
-                                              }
+                                           ROMRegion { _contents = romImg
+                                                     }
       else error ("mkROMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- | Fetch a word from a memory address. Note: If the address does not correspond to a region (i.e., the address does not
@@ -235,11 +235,10 @@ mWrite :: (Integral addrType, DVU.Unbox wordType) =>
 mWrite !addr !word !msys =
   let regs                 = IM.keys (IM.intersecting (msys ^. regions) (I.ClosedInterval addr addr))
       writeRegion msys' iv = msys' & regions %~ IM.update (queuePending (I.lowerBound iv)) iv
-      queuePending lb mr
-        | mr ^. readWrite
-        = Just (snd (queueLRU addr word lb mr))       -- Note: currently discarding the old value, (oldval, mr')
-        | otherwise
-        = Just mr
+      -- Note: currently discarding the old value, (oldval, mr')
+      queuePending lb mr@(RAMRegion _ _) = Just (snd (queueLRU addr word lb mr))
+      -- Otherwise, don't write anything.
+      queuePending lb mr                 = Just mr
   in  Fold.foldl' writeRegion msys regs
 
 -- | Patch (forcibly overwrite) memory. This does not obey or check the 'readWrite' flag and will truncate the memory patch
@@ -253,12 +252,28 @@ mPatch :: (Integral addrType, DVU.Unbox wordType) =>
           -- ^ Memory system to which patch will be applied
        -> MemorySystem addrType wordType
           -- ^ Patched memory system
-mPatch paddr patch msys =
+mPatch = doWrite True
+
+-- | Write to memory: 'mPatch' and 'mWriteN' share this code.
+-- if it extends beyond a region's upper bound.
+doWrite :: (Integral addrType, DVU.Unbox wordType) =>
+           Bool
+        -- ^ Force write to memory (only really applicable to patching a ROM)
+        -> addrType
+           -- ^ Starting address where patch is applied
+        -> Vector wordType
+           -- ^ The patch
+        -> MemorySystem addrType wordType
+           -- ^ Memory system to which patch will be applied
+        -> MemorySystem addrType wordType
+           -- ^ Patched memory system
+doWrite force !paddr !patch !msys =
   let minterval                = I.ClosedInterval paddr (paddr + fromIntegral (DVU.length patch - 1))
       (_, mregs)               = IM.mapAccumWithKey updContent paddr (msys ^. regions)
       updContent sa iv reg
         | iv `I.overlaps` minterval
-        = (ub + 1, reg & contents %~ (\vec -> DVU.update_ vec pidxs pslice))
+        = (ub + 1, reg & contents %~ (\vec -> DVU.update_ vec pidxs pslice)
+                       & writesPending %~ cullPendingWrites )
         | otherwise
         = (ub + 1, reg)
         where
@@ -270,6 +285,11 @@ mPatch paddr patch msys =
           idxoffs = fromIntegral sa' - fromIntegral lb
           pslice  = DVU.slice sidx plen patch
           pidxs   = DVU.generate plen (+ idxoffs)
+      -- Delete all pending writes in a region
+      cullPendingWrites wp  = wp & Fold.foldl' getWrites ([] ++) (wp ^. lrucPsq) []
+      getWrites pend reg    = (pend (reg ^. writesPending . lrucPsq . to filterWrites) ++)
+      addrInRange (addr, _) = addr >= sa && addr <= ea
+      filterWrites lru      = filter addrInRange (map (\(a, _, v) -> (a, v)) (OrdPSQ.toList lru))
   in  msys & regions .~ mregs
 
 -- | Count the number of regions in the memory system; used primarily for testing and debugging
