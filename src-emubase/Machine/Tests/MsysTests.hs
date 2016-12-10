@@ -130,8 +130,8 @@ mkMsysTests opts =
                                     , "randROMread1"      ~: test_randROMread1 opts      @? "randROMread1 failed."
                                     , "randROMsequential" ~: test_randROMsequential opts @? "randROMsequential failed."
                                     , "randROMrandom"     ~: test_randROMrandom opts     @? "randROMrandom failed."
-                                    , "gapROMTotal"       ~: test_gapROMTotal opts       @? "gapROMTotal failed."
                                     , "gapROMBefore"      ~: test_gapROMBefore opts      @? "gapROMBefore failed."
+                                    , "gapROMTotal"       ~: test_gapROMTotal opts       @? "gapROMTotal failed."
                                     ]
                 , "patch"   ~: test [ "patchROM01"        ~: test_patchROM01 opts        @? "patch01 failed."
                                     , "patchROM02"        ~: test_patchROM02 opts        @? "patch02 failed."
@@ -237,15 +237,22 @@ gapROMMsys :: M.MemorySystem Word16 Word8
 gapROMMsys    = M.mkROMRegion gapROM_addr_2 gapROMImg_2 (M.mkROMRegion gapROM_addr_1 gapROMImg_1 M.initialMemorySystem)
 
 test_gapROMTotal :: TestArgs -> IO Bool
-test_gapROMTotal _opts =
-  return (M.mReadN gapROMMsys gapROM_addr_1 gapROMTotal == DVU.concat [gapROMImg_1, DVU.replicate gapROMGap 0, gapROMImg_2])
+test_gapROMTotal opts =
+  do
+    let memvec = M.mReadN gapROMMsys gapROM_addr_1 gapROMTotal
+        cmpvec = DVU.concat [gapROMImg_1, DVU.replicate gapROMGap 0, gapROMImg_2]
+    when (showResult opts) (hPutStrLn stderr "gapROMTotal:"
+                            >> hPutStrLn stderr ("length memvec: " ++ show (DVU.length memvec))
+                            >> hPutStrLn stderr ("length cmpvec: " ++ show (DVU.length cmpvec)))
+    return (memvec == cmpvec)
 
 test_gapROMBefore :: TestArgs -> IO Bool
 test_gapROMBefore opts =
   do
     let memvec = DVU.toList (M.mReadN gapROMMsys (gapROM_addr_1 - 17) (17 + 19))
     let cmpvec = replicate 17 0 ++ DVU.toList (DVU.slice 0 19 gapROMImg_1)
-    when (showResult opts) (hPutStrLn stderr ("memvec: " ++ as0xHexS memvec)
+    when (showResult opts) (hPutStrLn stderr "gapROMBefore:"
+                            >> hPutStrLn stderr ("memvec: " ++ as0xHexS memvec)
                             >> hPutStrLn stderr ("cmpvec: " ++ as0xHexS cmpvec))
     return (memvec == cmpvec)
 

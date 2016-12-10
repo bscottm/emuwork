@@ -46,8 +46,7 @@ module Machine.MemorySystem
   , regionList
   ) where
 
-import           Control.Lens                    (Lens', (%~), (&), (.~), (^.),
-                                                  (|>), to)
+import           Control.Lens                    (Lens', (%~), (&), (.~), (^.), (|>), to)
 import qualified Data.Foldable                   as Fold (foldl')
 import qualified Data.OrdPSQ                     as OrdPSQ
 import qualified Data.IntervalMap.Generic.Strict as IM
@@ -56,6 +55,8 @@ import           Data.Vector.Unboxed             (Vector, (!), (//))
 import qualified Data.Vector.Unboxed             as DVU
 import           Data.Maybe (fromMaybe)
 import           Prelude hiding (lookup)
+
+-- import           Debug.Trace
 
 import           Machine.ProgramCounter
 import           Machine.Utils
@@ -179,23 +180,25 @@ mReadN !msys !sa !nWords
         ea                          = sa + fromIntegral (nWords - 1)
         ((_, remain', accum), _)    = IM.mapAccumWithKey getContent (sa, nWords, ([] ++)) regs
         getContent (addr, remaining, vl) ivl reg
+          {-  | trace ("addr = " ++ as0xHexS addr ++ " remaining = " ++ show remaining) False = undefined -}
           | addr > lb  = let vl'    = (vl [DVU.slice (fromIntegral addr - fromIntegral lb) nb rcontent] ++)
-                             accum' = (ub + 1, remaining - nb, vl')
+                             nb     = min (fromIntegral ub - fromIntegral addr) remaining
+                             accum' = (addr + fromIntegral nb, remaining - nb, vl')
                          in  (accum', reg)
-          | addr == lb = let accum' = (ub + 1, remaining - nb, (vl [DVU.slice 0 nb rcontent] ++))
+          | addr == lb = let accum' = (addr + fromIntegral nb, remaining - nb, (vl [DVU.slice 0 nb rcontent] ++))
+                             nb     = min (fromIntegral ub - fromIntegral lb) remaining
                          in  (accum', reg)
-          | addr < lb  = let flen   = fromIntegral lb - fromIntegral addr + 1
-                             nb'    = min (fromIntegral ub - fromIntegral lb) (remaining - flen)
+          | addr < lb  = let flen   = fromIntegral (lb - addr)
+                             nb'    = min (fromIntegral (ub - lb)) (remaining - flen)
+                             nread  = nb' + flen
                              vl'    = (vl [DVU.replicate flen 0, DVU.slice 0 nb' rcontent] ++)
-                             accum' = (ub + 1, remaining - nb - flen, vl')
+                             accum' = (addr + fromIntegral nread, remaining - nread, vl')
                          in  (accum', reg)
           -- Squelch GHC pattern warning...
           | otherwise   = error ("How'd I get here? addr = " ++ as0xHexS addr ++ " remaining " ++ show remaining)
           where
             lb       = I.lowerBound ivl
             ub       = I.upperBound ivl
-            addr'    = max lb addr
-            nb       = min (fromIntegral ub - fromIntegral addr') remaining
             rcontent = reg ^. contents
         endfill                    = [DVU.replicate remain' 0]
         -- And ensure that pending writes in the regions are also included. This uses the same pattern that 'showS' uses,
