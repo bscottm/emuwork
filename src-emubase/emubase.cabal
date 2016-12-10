@@ -83,7 +83,8 @@ test-suite msystest
       bytestring,
       text,
       vector,
-      psqueues
+      psqueues,
+      random
     default-extensions:
       GADTs,
       MultiParamTypeClasses,

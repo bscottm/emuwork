@@ -71,7 +71,7 @@ asHexList :: ShowHex x => (x -> T.Text)
           -> T.Text
 asHexList _asHexF [] s = T.append "]" s
 asHexList asHexF  [x] s = T.append (asHexF x) (asHexList asHexF [] s)
-asHexList asHexF  (x:xs) s = T.append (asHexF x) (T.append ", " (asHexList asHexF xs s))
+asHexList asHexF  (x:xs) s = T.append (asHexF x) (T.append "," (asHexList asHexF xs s))
 
 -- | Zero fill the front of a number, up to a given width
 zeroFill :: Int

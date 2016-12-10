@@ -39,6 +39,7 @@ module Machine.MemorySystem
   , mIncPCAndRead
   -- * Write Memory
   , mWrite
+  , mWriteN
   , mPatch
   -- * Utility functions
   , countRegions
@@ -76,8 +77,8 @@ data MemoryRegion addrType wordType where
 
 -- | Lens for a memory region's contents
 contents :: Lens' (MemoryRegion addrType wordType) (Vector wordType)
-contents f mregion@(RAMRegion _ _) = (\content' -> mregion { _contents = content' }) <$> f (_contents mregion)
-contents f mregion@(ROMRegion _)   = (\content' -> mregion { _contents = content' }) <$> f (_contents mregion)
+contents f mregion@(RAMRegion ctnt _) = (\content' -> mregion { _contents = content' }) <$> f ctnt
+contents f mregion@(ROMRegion ctnt)   = (\content' -> mregion { _contents = content' }) <$> f ctnt
 
 -- | Lens for the pending write LRU queue.
 writesPending :: Lens' (MemoryRegion addrType wordType) (LRUWriteCache addrType wordType)
@@ -163,9 +164,13 @@ mRead !msys !addr =
 -- gaps between regions will be filled with zeroes.
 mReadN :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType) =>
            MemorySystem addrType wordType
+        -- ^ The memory system from which to read
         -> addrType
+        -- ^ Starting address
         -> Int
+        -- ^ Number of words to read
         -> Vector wordType
+        -- ^ Contents read from memory
 mReadN !msys !sa !nWords
   | nWords == 1
   = DVU.singleton (mRead msys sa)
@@ -180,7 +185,8 @@ mReadN !msys !sa !nWords
           | addr == lb = let accum' = (ub + 1, remaining - nb, (vl [DVU.slice 0 nb rcontent] ++))
                          in  (accum', reg)
           | addr < lb  = let flen   = fromIntegral lb - fromIntegral addr + 1
-                             vl'    = (vl [DVU.replicate flen 0, DVU.slice 0 nb rcontent] ++)
+                             nb'    = min (fromIntegral ub - fromIntegral lb) (remaining - flen)
+                             vl'    = (vl [DVU.replicate flen 0, DVU.slice 0 nb' rcontent] ++)
                              accum' = (ub + 1, remaining - nb - flen, vl')
                          in  (accum', reg)
           -- Squelch GHC pattern warning...
@@ -196,8 +202,7 @@ mReadN !msys !sa !nWords
         -- threading a list function across the regions so that concatenation only happens once and has linear performance.
         writes                = Fold.foldl' getWrites ([] ++) regs []
         getWrites pend reg    = (pend (reg ^. writesPending . lrucPsq . to filterWrites) ++)
-        addrInRange (addr, _) = addr >= sa && addr <= ea
-        filterWrites lru      = filter addrInRange (map (\(a, _, v) -> (a, v)) (OrdPSQ.toList lru))
+        filterWrites psq      = [(a - sa, v) | (a, _, v) <- OrdPSQ.toList psq, a >= sa && a <= ea ]
         idxvec                = DVU.fromList (map (fromIntegral . fst) writes)
         valvec                = DVU.fromList (map snd writes)
     in  DVU.update_ ((DVU.concat . accum) endfill) idxvec valvec
@@ -238,8 +243,20 @@ mWrite !addr !word !msys =
       -- Note: currently discarding the old value, (oldval, mr')
       queuePending lb mr@(RAMRegion _ _) = Just (snd (queueLRU addr word lb mr))
       -- Otherwise, don't write anything.
-      queuePending lb mr                 = Just mr
+      queuePending _lb mr                = Just mr
   in  Fold.foldl' writeRegion msys regs
+
+-- | Write a block of memory, respecting the memory system's type
+mWriteN :: (Integral addrType, DVU.Unbox wordType) =>
+           addrType
+        -- ^ Starting address
+        -> Vector wordType
+        -- ^ Content to write
+        -> MemorySystem addrType wordType
+        -- ^ The memory system to be written
+        -> MemorySystem addrType wordType
+        -- ^ Updated memory system
+mWriteN = doWrite False
 
 -- | Patch (forcibly overwrite) memory. This does not obey or check the 'readWrite' flag and will truncate the memory patch
 -- if it extends beyond a region's upper bound.
@@ -255,10 +272,9 @@ mPatch :: (Integral addrType, DVU.Unbox wordType) =>
 mPatch = doWrite True
 
 -- | Write to memory: 'mPatch' and 'mWriteN' share this code.
--- if it extends beyond a region's upper bound.
 doWrite :: (Integral addrType, DVU.Unbox wordType) =>
            Bool
-        -- ^ Force write to memory (only really applicable to patching a ROM)
+        -- ^ Force write flag: If True, writes are permitted in 'ROMRegion's
         -> addrType
            -- ^ Starting address where patch is applied
         -> Vector wordType
@@ -267,13 +283,18 @@ doWrite :: (Integral addrType, DVU.Unbox wordType) =>
            -- ^ Memory system to which patch will be applied
         -> MemorySystem addrType wordType
            -- ^ Patched memory system
-doWrite force !paddr !patch !msys =
-  let minterval                = I.ClosedInterval paddr (paddr + fromIntegral (DVU.length patch - 1))
+doWrite !forceWrite !paddr !patch !msys =
+  let minterval                = I.ClosedInterval paddr ea
+      ea                       = paddr + fromIntegral (DVU.length patch - 1)
       (_, mregs)               = IM.mapAccumWithKey updContent paddr (msys ^. regions)
       updContent sa iv reg
+        -- Don't molest ROM regions if forced writes aren't in effect.
+        | (ROMRegion _) <- reg
+        , not forceWrite
+        = (ub + 1, reg)
         | iv `I.overlaps` minterval
-        = (ub + 1, reg & contents %~ (\vec -> DVU.update_ vec pidxs pslice)
-                       & writesPending %~ cullPendingWrites )
+        = (ub + 1, reg & contents      %~ (\vec -> DVU.update_ vec pidxs pslice)
+                       & writesPending %~ cullPendingWrites sa ea)
         | otherwise
         = (ub + 1, reg)
         where
@@ -285,12 +306,18 @@ doWrite force !paddr !patch !msys =
           idxoffs = fromIntegral sa' - fromIntegral lb
           pslice  = DVU.slice sidx plen patch
           pidxs   = DVU.generate plen (+ idxoffs)
-      -- Delete all pending writes in a region
-      cullPendingWrites wp  = wp & Fold.foldl' getWrites ([] ++) (wp ^. lrucPsq) []
-      getWrites pend reg    = (pend (reg ^. writesPending . lrucPsq . to filterWrites) ++)
-      addrInRange (addr, _) = addr >= sa && addr <= ea
-      filterWrites lru      = filter addrInRange (map (\(a, _, v) -> (a, v)) (OrdPSQ.toList lru))
   in  msys & regions .~ mregs
+
+-- Delete all pending writes in a region, but don't commit any values.
+cullPendingWrites :: (Ord addrType) =>
+                     addrType
+                  -> addrType
+                  -> LRUWriteCache addrType wordType
+                  -> LRUWriteCache addrType wordType
+cullPendingWrites sa ea wp  = wp & lrucPsq %~ (\psq -> prunePsq (getAddrs psq) psq)
+  where
+    getAddrs psq           = filter addrInRange [a | (a, _, _) <- OrdPSQ.toList psq]
+    addrInRange addr       = addr >= sa && addr <= ea
 
 -- | Count the number of regions in the memory system; used primarily for testing and debugging
 countRegions :: MemorySystem addrType wordType
