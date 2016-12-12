@@ -181,19 +181,16 @@ mReadN !msys !sa !nWords
         ((_, remain', accum), _)    = IM.mapAccumWithKey getContent (sa, nWords, ([] ++)) regs
         getContent (addr, remaining, vl) ivl reg
           {-  | trace ("addr = " ++ as0xHexS addr ++ " remaining = " ++ show remaining) False = undefined -}
-          | addr > lb  = let vl'    = (vl [DVU.slice (fromIntegral addr - fromIntegral lb) nb rcontent] ++)
-                             nb     = min (fromIntegral ub - fromIntegral addr) remaining
-                             accum' = (addr + fromIntegral nb, remaining - nb, vl')
-                         in  (accum', reg)
-          | addr == lb = let accum' = (addr + fromIntegral nb, remaining - nb, (vl [DVU.slice 0 nb rcontent] ++))
-                             nb     = min (fromIntegral ub - fromIntegral lb) remaining
-                         in  (accum', reg)
-          | addr < lb  = let flen   = fromIntegral (lb - addr)
-                             nb'    = min (fromIntegral (ub - lb)) (remaining - flen)
-                             nread  = nb' + flen
-                             vl'    = (vl [DVU.replicate flen 0, DVU.slice 0 nb' rcontent] ++)
-                             accum' = (addr + fromIntegral nread, remaining - nread, vl')
-                         in  (accum', reg)
+          | addr >= lb  = let vl'    = (vl [DVU.slice (fromIntegral addr - fromIntegral lb) nb rcontent] ++)
+                              nb     = min (fromIntegral ub - fromIntegral addr) remaining
+                              accum' = (addr + fromIntegral nb, remaining - nb, vl')
+                          in  (accum', reg)
+          | addr < lb   = let flen   = fromIntegral (lb - addr)
+                              nb'    = min (fromIntegral (ub - lb)) (remaining - flen)
+                              nread  = nb' + flen
+                              vl'    = (vl [DVU.replicate flen 0, DVU.slice 0 nb' rcontent] ++)
+                              accum' = (addr + fromIntegral nread, remaining - nread, vl')
+                          in  (accum', reg)
           -- Squelch GHC pattern warning...
           | otherwise   = error ("How'd I get here? addr = " ++ as0xHexS addr ++ " remaining " ++ show remaining)
           where
