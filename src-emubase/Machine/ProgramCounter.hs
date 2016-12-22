@@ -1,3 +1,5 @@
+{-# LANGUAGE GADTs #-}
+
 module Machine.ProgramCounter where
 
 import           Control.Arrow

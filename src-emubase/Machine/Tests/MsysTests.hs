@@ -1,3 +1,4 @@
+
 {- | 'MemorySystem' exercise module -}
 
 module Main (main) where
@@ -11,7 +12,7 @@ import           Data.Vector.Unboxed                  (Vector, (!))
 import qualified Data.Vector.Unboxed                  as DVU
 import           Data.Word
 import           System.IO                            (hPutStrLn, stderr)
-import           System.Random                        (getStdGen, randomRs)
+import           System.Random                        (getStdGen, StdGen, Random, randomR)
 import           Test.Framework                       (Test, defaultMain, plusTestOptions, testGroup)
 import           Test.Framework.Options               (TestOptions' (..))
 import           Test.Framework.Providers.HUnit       (testCase)
@@ -29,60 +30,97 @@ import           Machine.Utils                        (as0xHexS)
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 main :: IO ()
-main = do
-  stdGen  <- getStdGen
-  -- Generate the various random vectors we need to test:
-  let options = TestArgs { randROMImg = DVU.fromList (take 4096 (randomRs (0, 0xff) stdGen)) }
-  defaultMain (mkMsysTests options)
+main = 
+  do
+    stdGen  <- getStdGen
+    -- Generate the various random vectors we need to test:
+    let (romImg, stdGen') = generateROMImg stdGen 4096
+        (writePairs, _)   = generateRandWrites stdGen' 32768
+        options           = TestParams { randROMImg = DVU.fromList romImg
+                                       , randWrites = writePairs
+                                       }
+    defaultMain (mkMsysTests options)
+  where
+    generateROMImg gen lim = 
+      let range = (0, 0xff)
+          (v1, gen') = randomR range gen
+          (vs, gen'') = g1 gen' range (lim - 1) ([v1] ++)
+      in  (vs [], gen'')
 
-data TestArgs =
-  TestArgs
+    g1 :: (Random a) => StdGen -> (a, a) -> Int -> ([a] -> [a]) -> ([a] -> [a], StdGen)
+    g1 gen range 1 vs =
+      let (v, gen') = randomR range gen
+      in  ((vs [v] ++), gen')
+    g1 gen range n vs =
+      let (v, gen') = randomR range gen
+      in  g1 gen' range (n - 1) (vs [v] ++)    
+
+    generateRandWrites gen lim =
+      let addrRange     = (0, 0x1000)
+          byteRange     = (0, 0xff)
+          (b1, gen')    = randomR byteRange gen
+          (bs, gen'')   = g1 gen' byteRange (lim - 1) ([b1] ++)
+          (a1, gen''')  = randomR addrRange gen''
+          (as, gen'''') = g1 gen''' addrRange (lim - 1) ([a1] ++)
+          addrs         = as []
+          bytes         = bs []
+      in  (zip addrs bytes, gen'''')
+
+-- Generated data that gets used by various tests...
+data TestParams =
+  TestParams
   { randROMImg  :: Vector Word8
+  , randWrites  :: [(Word16, Word8)]
   }
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- The tests...
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-mkMsysTests :: TestArgs -> [Test]
-mkMsysTests opts =
-  [ testGroup "msys regions"
-    [ testCase "mkROMRegion"       (test_mkROMRegion opts)
-    , testCase "mkROMRegion2"      (test_mkROMRegion2 opts)
-    , testCase "mkRAMRegion3"      (test_mkRAMRegion3 opts)
+mkMsysTests :: TestParams -> [Test]
+mkMsysTests args =
+  [ testGroup "Memory system construction"
+    [ testCase "One ROM region          " (test_mkROMRegion args)
+    , testCase "Two ROM regions         " (test_mkROMRegion2 args)
+    , testCase "Two RAM regions         " (test_mkRAMRegion3 args)
+    , testCase "Monoid 'mempty'         " (test_mkMEmpty args)
+    , testCase "Monoid 'mappend'        " (test_mappend args)
     ]
   , testGroup "readROM"
-    [ testCase "ROMread1"          (test_ROMread1 opts)
-    , testCase "ROMsequential"     (test_ROMsequential opts)
-    , plusTestOptions propROMRandom_opts (testProperty "ROMrandom" prop_ROMrandom)
-    , testCase "randROMread1"      (test_randROMread1 opts)
-    , testCase "randROMsequential" (test_randROMsequential opts)
-    , plusTestOptions propRandROMRandom_opts (testProperty "randROMrandom" (prop_randROMrandom opts))
-    , testCase "gapROMBefore"      (test_gapROMBefore opts)
-    , testCase "gapROMTotal"       (test_gapROMTotal opts)
-    -- , testCase "gapSlidingWindow"  (test_gapWindows opts)
+    [ testCase "Read one byte           " (test_ROMread1 args)
+    , testCase "Read sequential         " (test_ROMsequential args)
+    , plusTestOptions propROMRandom_args (testProperty "Random reads            " prop_ROMrandom)
+    , testCase "Random image, one byte  " (test_randROMread1 args)
+    , testCase "Random image, sequential" (test_randROMsequential args)
+    , plusTestOptions propRandROMRandom_args (testProperty "Random image, random reads" (prop_randROMrandom args))
     ]
-  , testGroup "patch"
-    [ testCase "patchROM01"        (test_patchROM01 opts)
-    , testCase "patchROM02"        (test_patchROM02 opts)
-    , testCase "patchROM03"        (test_patchROM03 opts)
+  , testGroup "Patch/forced writes"
+    [ testCase "patchROM01              " (test_patchROM01 args)
+    , testCase "patchROM02              " (test_patchROM02 args)
+    , testCase "patchROM03              " (test_patchROM03 args)
     ]
-  , testGroup "write"
-    [ testCase "RAMwrite1"         (test_RAMwrite1 opts)
-    , testCase "RAMwrite5"         (test_RAMwrite5 opts)
+  , testGroup "RAM write"
+    [ testCase "Write/read one byte     " (test_RAMwrite1 args)
+    , testCase "Write/read five bytes   " (test_RAMwrite5 args)
+    , testCase "Sequential write        " (test_RAMSequentialWrite args)
+    ]
+  , testGroup "ROM with gap"
+    [ testCase "Read before gap         " (test_gapROMBefore args)
+    , testCase "Read entire ROM         " (test_gapROMTotal args)
+    -- , testCase "Sliding window read     " (test_gapWindows args)
     ]
   ]
   where
     -- 'mempty' is really the TestOptions record instantiated with all of the
     -- members set to Nothing.
-    propROMRandom_opts = mempty { topt_maximum_generated_tests = Just propROMRandom_tests
+    propROMRandom_args = mempty { topt_maximum_generated_tests = Just propROMRandom_tests
                                 , topt_maximum_unsuitable_generated_tests = Just propROMRandom_tests
                                 }
     propROMRandom_tests = DVU.length readROMImg * 4
-    propRandROMRandom_opts = mempty { topt_maximum_generated_tests = Just propRandROMRandom_tests
+    propRandROMRandom_args = mempty { topt_maximum_generated_tests = Just propRandROMRandom_tests
                                     , topt_maximum_unsuitable_generated_tests = Just propRandROMRandom_tests
                                     }
-    propRandROMRandom_tests = DVU.length (randROMImg opts) * 4
+    propRandROMRandom_tests = DVU.length (randROMImg args) * 4
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 -- Compare two vectors
@@ -110,7 +148,7 @@ compareVectors l r lName rName
 -- The tests...
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 
-test_mkROMRegion :: TestArgs -> Assertion
+test_mkROMRegion :: TestParams -> Assertion
 test_mkROMRegion _args =
   let img      = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
       msys     = M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word8
@@ -122,7 +160,7 @@ test_mkROMRegion _args =
                   else "Expected 4096 Word8 region, got " ++ show rlist)
                  (nRegions && mRegions)
 
-test_mkROMRegion2 :: TestArgs -> Assertion
+test_mkROMRegion2 :: TestParams -> Assertion
 test_mkROMRegion2 _args =
   let img   = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
       msys  = M.mkROMRegion 4096 img (M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word8)
@@ -134,12 +172,33 @@ test_mkROMRegion2 _args =
                   else "Expected 2 intervals, got " ++ show rlist)
                  (nRegions && mRegions)
 
-test_mkRAMRegion3 :: TestArgs -> Assertion
+test_mkRAMRegion3 :: TestParams -> Assertion
 test_mkRAMRegion3 _args =
   let msys  = M.mkRAMRegion 0x1400 0x1000 (M.mkRAMRegion 0 0x1000 M.initialMemorySystem :: M.MemorySystem Word16 Word8)
       rlist = map fst (M.regionList msys)
   in  assertBool "Expected 2 RAM regions"
                  (M.countRegions msys == 2 && rlist == [I.IntervalCO 0 0x1000, I.IntervalCO 0x1400 0x2400])
+
+test_mkMEmpty :: TestParams -> Assertion
+test_mkMEmpty _args =
+  let msys = mempty :: M.MemorySystem Word16 Word8
+  in  assertBool "Expecitng an empty MemorySystem"
+                 (M.countRegions msys == 0 && null (M.regionList msys))
+
+test_mappend :: TestParams -> Assertion
+test_mappend _args =
+  let imgA     = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
+      msysA    = M.mkROMRegion 0 imgA M.initialMemorySystem :: M.MemorySystem Word16 Word8
+      msysB    = M.mkRAMRegion 0x2000 0x1000 (M.mkRAMRegion 0x1000 0x1000 M.initialMemorySystem :: M.MemorySystem Word16 Word8)
+      msys     = msysA `mappend` msysB
+      rlist    = map fst (M.regionList msys)
+  in  assertBool (if   M.countRegions msys /= 3
+                  then "Expected 3 regions: " ++ show (M.countRegions msys)
+                  else "Interval list doesn't match: " ++ show rlist)
+                 (M.countRegions msys == 3 && rlist == [ I.IntervalCO 0x0000 0x1000
+                                                       , I.IntervalCO 0x1000 0x2000
+                                                       , I.IntervalCO 0x2000 0x3000
+                                                       ])
 
 -- | Simple ROM
 simpleROMMsys  :: M.MemorySystem Word16 Word8
@@ -152,11 +211,11 @@ readROMImg  = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256))
 randROMMsys :: Vector Word8 -> M.MemorySystem Word16 Word8
 randROMMsys img = M.mkROMRegion 0 img M.initialMemorySystem
 
-test_ROMread1 :: TestArgs -> Assertion
-test_ROMread1 _opts = assertBool "Read byte from ROM, 1 != 1" (M.mRead simpleROMMsys 1 == 1)
+test_ROMread1 :: TestParams -> Assertion
+test_ROMread1 _args = assertBool "Read byte from ROM, 1 != 1" (M.mRead simpleROMMsys 1 == 1)
 
-test_ROMsequential :: TestArgs -> Assertion
-test_ROMsequential _opts =
+test_ROMsequential :: TestParams -> Assertion
+test_ROMsequential _args =
   let mReads = [M.mRead simpleROMMsys (fromIntegral i) == fromIntegral (i `mod` 256) | i <- [0..DVU.length readROMImg - 1]]
       wrong  = elemIndices False mReads
   in  assertBool ("Mismatched reads at indices: " ++ show wrong) (and mReads)
@@ -166,25 +225,25 @@ prop_ROMrandom =
   let readROM idx = M.mRead simpleROMMsys (fromIntegral idx) == fromIntegral (idx  `mod` 256)
   in  forAll (choose (0, DVU.length readROMImg - 1)) readROM
 
-test_randROMread1 :: TestArgs -> Assertion
-test_randROMread1 opts =
-  let img  = randROMImg opts
+test_randROMread1 :: TestParams -> Assertion
+test_randROMread1 args =
+  let img  = randROMImg args
       msys = randROMMsys img
       val  = M.mRead msys 1
   in assertBool ("Read byte 1 from random ROM image: expected 1, got " ++ show val)
                 (val == img ! 1)
 
-test_randROMsequential :: TestArgs -> Assertion
-test_randROMsequential opts =
-  let img    = randROMImg opts
+test_randROMsequential :: TestParams -> Assertion
+test_randROMsequential args =
+  let img    = randROMImg args
       msys   = randROMMsys img
       mReads = [M.mRead msys (fromIntegral i) == img ! i | i <- [0..DVU.length readROMImg - 1]]
       wrong  = elemIndices False mReads
   in  assertBool ("Mismatched reads at indices: " ++ show wrong) (and mReads)
 
-prop_randROMrandom :: TestArgs -> Property
-prop_randROMrandom opts =
-  let img         = randROMImg opts
+prop_randROMrandom :: TestParams -> Property
+prop_randROMrandom args =
+  let img         = randROMImg args
   in  forAll (choose (0, DVU.length img - 1)) (\idx -> M.mRead (randROMMsys img) (fromIntegral idx) == img ! idx)
 
 -- | start address for the gapped ROM region tests. this is a prime number instead of a power-of-2.
@@ -207,24 +266,24 @@ gapROMImg_2   = DVU.generate gapROM_len_2 (\x -> fromIntegral (x `mod` 256))
 gapROMMsys :: M.MemorySystem Word16 Word8
 gapROMMsys    = M.mkROMRegion gapROM_addr_2 gapROMImg_2 (M.mkROMRegion gapROM_addr_1 gapROMImg_1 M.initialMemorySystem)
 
-test_gapROMTotal :: TestArgs -> Assertion
-test_gapROMTotal _opts =
+test_gapROMTotal :: TestParams -> Assertion
+test_gapROMTotal _args =
   do
     let memvec = M.mReadN gapROMMsys gapROM_addr_1 gapROMTotal
         cmpvec = DVU.concat [gapROMImg_1, DVU.replicate gapROMGap 0, gapROMImg_2]
     assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                (memvec == cmpvec)
 
-test_gapROMBefore :: TestArgs -> Assertion
-test_gapROMBefore _opts =
+test_gapROMBefore :: TestParams -> Assertion
+test_gapROMBefore _args =
   do
     let memvec = M.mReadN gapROMMsys (gapROM_addr_1 - 17) (17 + 19)
     let cmpvec = DVU.concat [DVU.replicate 17 0, DVU.slice 0 19 gapROMImg_1]
     assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                (memvec == cmpvec)
 
-test_gapWindows :: TestArgs -> Assertion
-test_gapWindows _opts =
+test_gapWindows :: TestParams -> Assertion
+test_gapWindows _args =
   let totalGapVec = DVU.concat [ gapROMImg_1
                                , DVU.replicate (fromIntegral gapROM_addr_2 - fromIntegral gapROM_addr_1 - gapROM_len_1) 0
                                , gapROMImg_2
@@ -257,7 +316,7 @@ test_gapWindows _opts =
                   >> return False
   in outer 0 (fromIntegral (totalLen - 1))
 
-test_patchROM01 :: TestArgs -> Assertion
+test_patchROM01 :: TestParams -> Assertion
 test_patchROM01 _args =
   let img    = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
       msys   = M.mkROMRegion 0 img M.initialMemorySystem :: M.MemorySystem Word16 Word8
@@ -271,7 +330,7 @@ test_patchROM01 _args =
 patchROMMsys_1 :: M.MemorySystem Word16 Word8
 patchROMMsys_1 = M.mkRAMRegion 20 4 (M.mkRAMRegion 0 16 M.initialMemorySystem)
 
-test_patchROM02 :: TestArgs -> Assertion
+test_patchROM02 :: TestParams -> Assertion
 test_patchROM02 _args =
   let pvec   = DVU.concat [ DVU.fromList [0x11, 0x22 ], DVU.replicate 4 0, DVU.fromList [ 0x33, 0x44, 0x55, 0x66 ]]
       msys'  = M.mPatch 14 pvec patchROMMsys_1
@@ -280,7 +339,7 @@ test_patchROM02 _args =
   in assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                 (memvec == cmpvec)
 
-test_patchROM03 :: TestArgs -> Assertion
+test_patchROM03 :: TestParams -> Assertion
 test_patchROM03 _args =
   let pvec   = DVU.concat [ DVU.fromList [ 0x11, 0x22 ], DVU.replicate 4 0, DVU.fromList [ 0x33, 0x44, 0x55, 0x66 ]]
       msys'  = M.mPatch 14 pvec patchROMMsys_1
@@ -295,16 +354,28 @@ writeRAMPatch_1 = DVU.generate (12 * 1024) (\x -> fromIntegral (x `mod` 256))
 writeRAMMsys :: M.MemorySystem Word16 Word8
 writeRAMMsys    = M.mPatch 0 writeRAMPatch_1 (M.mkRAMRegion 0 (12 * 1024) M.initialMemorySystem)
 
-test_RAMwrite1 :: TestArgs -> Assertion
-test_RAMwrite1 _opts =
+test_RAMwrite1 :: TestParams -> Assertion
+test_RAMwrite1 _args =
   let msys = M.mWrite 0 0xff writeRAMMsys
       mem0 = M.mRead msys 0
   in  assertBool ("Write RAM, expected 0xff, got " ++ as0xHexS mem0)
                  (mem0 == 0xff)
 
-test_RAMwrite5 :: TestArgs -> Assertion
-test_RAMwrite5 _opts =
+test_RAMwrite5 :: TestParams -> Assertion
+test_RAMwrite5 _args =
   let writeRAM m (addr, val) = M.mWrite addr val m
       msys = Fold.foldl writeRAM writeRAMMsys [(0, 0xff), (3, 0xaa), (2, 0xbb), (1, 0xcc), (4, 0x55)]
   in  assertBool "write compare mismatch"
                  (M.mReadN msys 0 7 == DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x05, 0x06])
+
+test_RAMSequentialWrite :: TestParams -> Assertion
+test_RAMSequentialWrite _args =
+  let ramSize = 0x1000
+      ramBase = 0x0100 :: Word16
+      pairs   = [(fromIntegral addr + ramBase, val) | addr <- [0..ramSize - 1], let val = fromIntegral (addr `mod` 256)]
+      writeRAM m (addr, val) = M.mWrite addr val m
+      msys    = Fold.foldl writeRAM (M.mkRAMRegion ramBase ramSize (mempty :: M.MemorySystem Word16 Word8)) pairs
+      memvec  = M.mReadN msys ramBase ramSize
+      cmpvec  = DVU.generate ramSize (\x -> fromIntegral (x `mod` 256))
+  in assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
+                (memvec == cmpvec)

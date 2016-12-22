@@ -1,7 +1,8 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE BangPatterns #-}
-{- OPTIONS_HADDOCK ignore-exports -}
+{-# LANGUAGE GADTs #-}
+
 {-| Representation of system memory.
 
 Emulated system memory is a collection of regions stored in an 'IntervalMap'. The 'IntervalMap' stores the
@@ -46,7 +47,8 @@ module Machine.MemorySystem
   , regionList
   ) where
 
-import           Control.Lens                    (Lens', (%~), (&), (.~), (^.), (|>), to)
+import           Control.Lens                    (Lens', (%~), (&), (.~), (^.), (|>), to, view, over)
+import           Data.Monoid
 import qualified Data.Foldable                   as Fold (foldl')
 import qualified Data.OrdPSQ                     as OrdPSQ
 import qualified Data.IntervalMap.Generic.Strict as IM
@@ -69,7 +71,6 @@ data MemoryRegion addrType wordType where
     , _writesPending :: LRUWriteCache addrType wordType
     -- ^ Pending write LRU cache
     } -> MemoryRegion addrType wordType
-
   ROMRegion ::
     { _contents :: Vector wordType
     -- ^ Memory region's contents (unboxed vector)
@@ -84,12 +85,12 @@ contents f mregion@(ROMRegion ctnt)   = (\content' -> mregion { _contents = cont
 -- | Lens for the pending write LRU queue.
 writesPending :: Lens' (MemoryRegion addrType wordType) (LRUWriteCache addrType wordType)
 writesPending f mregion@(RAMRegion _ _) = (\wp -> mregion { _writesPending = wp }) <$> f (_writesPending mregion)
--- For types other than 'RAMRegion', just apply the function over 'initialLRU' (empty LRU cache) and discard the result
+-- For types other than 'RAMRegion', it's just the original memory region unchanged.
 writesPending f mregion                 = mregion <$ f (initialLRU 0)
 
 -- | Pending write queue maximum depth
 maxPending :: Int
-maxPending = 29
+maxPending = 71
 
 -- | Number of pending writes to flush when 'maxPending' is reached
 maxFlush :: Int
@@ -99,17 +100,31 @@ maxFlush = maxPending `div` 2
 type MemRegionMap addrType wordType = IM.IntervalMap (I.Interval addrType) (MemoryRegion addrType wordType)
 
 -- | A memory system, for a given address type and word type.
+--
+-- NOTE: 'MemorySystem' is part of the 'Monoid' class, which makes it possible to merge memory systems together via 'mappend' or
+-- 'mconcat', so long as the memory systems' regions do not overlap with each other. Regions in the merged memory system are distinct;
+-- they are not coalesced.
 data MemorySystem addrType wordType where
   MSys ::
     { _regions       :: MemRegionMap addrType wordType
     -- ^ Region interval map
     } -> MemorySystem addrType wordType
+  deriving (Show)
+
+-- Admit MemorySystem into the Monoid class
+instance (Ord addrType) => Monoid (MemorySystem addrType wordType) where
+  mempty              = initialMemorySystem
+  msysA `mappend` msysB
+    | IM.null (IM.intersection (msysA ^. regions) (msysB ^. regions))
+    = over regions (mappend (msysB ^. regions )) msysA
+    | otherwise
+    = error "MemorySystem:mappend: Overlapping memory regions between memory systems"
 
 -- | Lens for the memory region map inside a 'MemorySystem'
 regions :: Lens' (MemorySystem addrType wordType) (MemRegionMap addrType wordType)
 regions f msys = (\regions' -> msys { _regions = regions' }) <$> f (_regions msys)
 
--- | Create an empty memory system
+-- | Create an empty memory system (alternately: 'mempty')
 initialMemorySystem :: MemorySystem addrType wordType
 initialMemorySystem = MSys { _regions = IM.empty }
 
@@ -121,13 +136,12 @@ mkRAMRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType
             -> MemorySystem addrType wordType
             -> MemorySystem addrType wordType
 mkRAMRegion sa len msys =
-  let ea = sa + fromIntegral len
+  let ea        = sa + fromIntegral len
+      newRegion = RAMRegion { _contents      = DVU.replicate len 0
+                            , _writesPending = initialLRU maxPending
+                            }
   in    if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
-        then msys & regions %~ IM.insertWith const
-                                             (I.IntervalCO sa ea)
-                                             RAMRegion { _contents = DVU.replicate len 0
-                                                       , _writesPending = initialLRU maxPending
-                                                       }
+        then over regions (IM.insertWith const (I.IntervalCO sa ea) newRegion) msys
         else error ("mkRAMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- | Create a new read-only (ROM) memory region. __/Note:/__ memory regions may not overlap; 'error' will signal if this
@@ -138,12 +152,10 @@ mkROMRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType
             -> MemorySystem addrType wordType
             -> MemorySystem addrType wordType
 mkROMRegion sa romImg msys =
-  let ea = sa + fromIntegral (DVU.length romImg)
+  let ea        = sa + fromIntegral (DVU.length romImg)
+      newRegion = ROMRegion { _contents = romImg }
   in  if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
-      then msys & regions %~ IM.insertWith const
-                                           (I.IntervalCO sa ea)
-                                           ROMRegion { _contents = romImg
-                                                     }
+      then over regions (IM.insertWith const (I.IntervalCO sa ea) newRegion) msys
       else error ("mkROMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- | Fetch a word from a memory address. Note: If the address does not correspond to a region (i.e., the address does not
@@ -154,7 +166,7 @@ mRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
        -> wordType
 mRead !msys !addr =
   let regs = IM.containing (msys ^. regions) addr
-      getContent acc iv mr = acc |> fromMaybe ((mr ^. contents) ! fromIntegral (addr - I.lowerBound iv))
+      getContent acc iv mr = acc |> fromMaybe (view contents mr ! fromIntegral (addr - I.lowerBound iv))
                                               (lookupPendingWrite addr (mr ^. writesPending))
       vals = IM.foldlWithKey getContent [] regs
       -- FIXME: Should something different happen here when data is requested from
@@ -239,7 +251,7 @@ mWrite :: (Integral addrType, DVU.Unbox wordType) =>
        -> MemorySystem addrType wordType
 mWrite !addr !word !msys =
   let regs                 = IM.keys (IM.intersecting (msys ^. regions) (I.ClosedInterval addr addr))
-      writeRegion msys' iv = msys' & regions %~ IM.update (queuePending (I.lowerBound iv)) iv
+      writeRegion msys' iv = over regions (IM.update (queuePending (I.lowerBound iv)) iv) msys'
       -- Note: currently discarding the old value, (oldval, mr')
       queuePending lb mr@(RAMRegion _ _) = Just (snd (queueLRU addr word lb mr))
       -- Otherwise, don't write anything.
@@ -408,7 +420,7 @@ queueLRU !addr !word !sa !mr =
       queueAddr (Just (_, oldword))      = (Just oldword, Just (nextTick, word))
       mr'                                = mr & writesPending .~ increaseTick (nextTick + 1) psq' maxSize
       mr''                               = if   mr' ^. writesPending . to sizeLRU >= maxPending
-                                           then flushPending maxFlush mr'
+                                           then flushPending maxFlush sa mr'
                                            else mr'
       contentVal                         = (mr ^. contents) ! fromIntegral (addr - sa)
   in  (fromMaybe contentVal oldval, mr'')
@@ -417,15 +429,19 @@ queueLRU !addr !word !sa !mr =
 flushPending :: (Integral addrType, DVU.Unbox wordType) =>
                 Int
              -- ^ Number of pending writes to commit
+             -> addrType
+             -- ^ Start address of the region
              -> MemoryRegion addrType wordType
              -- ^ Region where writes will be committed
              -> MemoryRegion addrType wordType
              -- ^ Updated region
-flushPending nFlush mr =
+flushPending nFlush sa mr =
   let -- Ascending list: from least recently to most recently used
       ents       = [(k, v) | (k, _, v) <- take nFlush (mr ^. writesPending . lrucPsq . to OrdPSQ.toAscList)]
+      upds       = [(fromIntegral (addr - sa), v) | (addr, v) <- ents]
+      committed  = over contents (// upds) mr
       -- Bulk update the underlying contents, then prune the write queue (the power of Lenses!)
-  in  mr & contents %~ (// [(fromIntegral k, v) | (k, v) <- ents]) & writesPending %~ lrucPsq %~ prunePsq (map fst ents)
+  in  over (writesPending . lrucPsq) (prunePsq (map fst ents)) committed 
 
 prunePsq :: (Ord addrType) =>
             [addrType]

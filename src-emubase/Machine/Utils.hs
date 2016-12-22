@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- | Various and sundry utility functions
 module Machine.Utils
   ( -- * Types and classes
