@@ -45,9 +45,10 @@ module Machine.MemorySystem
   -- * Utility functions
   , countRegions
   , regionList
+  , sanityCheck
   ) where
 
-import           Control.Lens                    (Lens', (%~), (&), (.~), (^.), (|>), to, view, over)
+import           Control.Lens                    (Lens', (%~), (+~), (-~), (&), (.~), (^.), (|>), to, view, over)
 import           Data.Monoid
 import qualified Data.Foldable                   as Fold (foldl')
 import qualified Data.OrdPSQ                     as OrdPSQ
@@ -66,10 +67,12 @@ import           Machine.Utils
 -- | A memory region
 data MemoryRegion addrType wordType where
   RAMRegion ::
-    { _contents    :: Vector wordType
+    { _contents       :: Vector wordType
     -- ^ Memory region's contents (unboxed vector)
-    , _writesPending :: LRUWriteCache addrType wordType
+    , _writesPending  :: LRUWriteCache addrType wordType
     -- ^ Pending write LRU cache
+    , _nWritesPending :: {-# UNPACK #-} !Int
+    -- ^ Size of the LRU cache (avoids the $O(n)$ penalty for calling 'OrdPSQ.size')
     } -> MemoryRegion addrType wordType
   ROMRegion ::
     { _contents :: Vector wordType
@@ -79,14 +82,19 @@ data MemoryRegion addrType wordType where
 
 -- | Lens for a memory region's contents
 contents :: Lens' (MemoryRegion addrType wordType) (Vector wordType)
-contents f mregion@(RAMRegion ctnt _) = (\content' -> mregion { _contents = content' }) <$> f ctnt
-contents f mregion@(ROMRegion ctnt)   = (\content' -> mregion { _contents = content' }) <$> f ctnt
+contents f mregion@(RAMRegion ctnt _ _) = (\content' -> mregion { _contents = content' }) <$> f ctnt
+contents f mregion@(ROMRegion ctnt)     = (\content' -> mregion { _contents = content' }) <$> f ctnt
 
 -- | Lens for the pending write LRU queue.
 writesPending :: Lens' (MemoryRegion addrType wordType) (LRUWriteCache addrType wordType)
-writesPending f mregion@(RAMRegion _ _) = (\wp -> mregion { _writesPending = wp }) <$> f (_writesPending mregion)
+writesPending f mregion@RAMRegion{} = (\wp -> mregion { _writesPending = wp }) <$> f (_writesPending mregion)
 -- For types other than 'RAMRegion', it's just the original memory region unchanged.
-writesPending f mregion                 = mregion <$ f (initialLRU 0)
+writesPending f mregion             = mregion <$ f (initialLRU 0)
+
+-- | Lens for number of elements in the LRU queue
+nWritesPending :: Lens' (MemoryRegion addrType wordType) Int
+nWritesPending f mregion@RAMRegion{} = (\n -> mregion { _nWritesPending = n }) <$> f (_nWritesPending mregion)
+nWritesPending f mregion             = mregion <$ f 0
 
 -- | Pending write queue maximum depth
 maxPending :: Int
@@ -137,8 +145,9 @@ mkRAMRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType
             -> MemorySystem addrType wordType
 mkRAMRegion sa len msys =
   let ea        = sa + fromIntegral len
-      newRegion = RAMRegion { _contents      = DVU.replicate len 0
-                            , _writesPending = initialLRU maxPending
+      newRegion = RAMRegion { _contents       = DVU.replicate len 0
+                            , _writesPending  = initialLRU maxPending
+                            , _nWritesPending = 0
                             }
   in    if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
         then over regions (IM.insertWith const (I.IntervalCO sa ea) newRegion) msys
@@ -253,9 +262,9 @@ mWrite !addr !word !msys =
   let regs                 = IM.keys (IM.intersecting (msys ^. regions) (I.ClosedInterval addr addr))
       writeRegion msys' iv = over regions (IM.update (queuePending (I.lowerBound iv)) iv) msys'
       -- Note: currently discarding the old value, (oldval, mr')
-      queuePending lb mr@(RAMRegion _ _) = Just (snd (queueLRU addr word lb mr))
+      queuePending lb mr@RAMRegion{} = Just (snd (queueLRU addr word lb mr))
       -- Otherwise, don't write anything.
-      queuePending _lb mr                = Just mr
+      queuePending _lb mr            = Just mr
   in  Fold.foldl' writeRegion msys regs
 
 -- | Write a block of memory, respecting the memory system's type
@@ -305,19 +314,21 @@ doWrite !forceWrite !paddr !patch !msys =
         , not forceWrite
         = (ub + 1, reg)
         | iv `I.overlaps` minterval
-        = (ub + 1, reg & contents      %~ (\vec -> DVU.update_ vec pidxs pslice)
-                       & writesPending %~ cullPendingWrites sa ea)
+        = (ub + 1, reg & contents       %~ (\vec -> DVU.update_ vec pidxs pslice)
+                       & writesPending  .~ culledPending
+                       & nWritesPending -~ nCulled)
         | otherwise
         = (ub + 1, reg)
         where
-          lb      = I.lowerBound iv
-          ub      = I.upperBound iv
-          sa'     = max sa lb
-          sidx    = fromIntegral sa' - fromIntegral paddr
-          plen    = min (DVU.length patch - sidx) (fromIntegral ub - fromIntegral sa')
-          idxoffs = fromIntegral sa' - fromIntegral lb
-          pslice  = DVU.slice sidx plen patch
-          pidxs   = DVU.generate plen (+ idxoffs)
+          lb                       = I.lowerBound iv
+          ub                       = I.upperBound iv
+          sa'                      = max sa lb
+          sidx                     = fromIntegral sa' - fromIntegral paddr
+          plen                     = min (DVU.length patch - sidx) (fromIntegral ub - fromIntegral sa')
+          idxoffs                  = fromIntegral sa' - fromIntegral lb
+          pslice                   = DVU.slice sidx plen patch
+          pidxs                    = DVU.generate plen (+ idxoffs)
+          (nCulled, culledPending) = cullPendingWrites sa ea (reg ^. writesPending)
   in  msys & regions .~ mregs
 
 -- Delete all pending writes in a region, but don't commit any values.
@@ -325,11 +336,11 @@ cullPendingWrites :: (Ord addrType) =>
                      addrType
                   -> addrType
                   -> LRUWriteCache addrType wordType
-                  -> LRUWriteCache addrType wordType
-cullPendingWrites sa ea wp  = wp & lrucPsq %~ (\psq -> prunePsq (getAddrs psq) psq)
+                  -> (Int, LRUWriteCache addrType wordType)
+cullPendingWrites sa ea wp  = (length addrs, over lrucPsq (prunePsq addrs) wp)
   where
-    getAddrs psq           = filter addrInRange [a | (a, _, _) <- OrdPSQ.toList psq]
-    addrInRange addr       = addr >= sa && addr <= ea
+    addrs            = filter addrInRange [a | (a, _, _) <- OrdPSQ.toList (wp ^. lrucPsq)]
+    addrInRange addr = addr >= sa && addr <= ea
 
 -- | Count the number of regions in the memory system; used primarily for testing and debugging
 countRegions :: MemorySystem addrType wordType
@@ -342,6 +353,13 @@ regionList :: (DVU.Unbox wordType) =>
               MemorySystem addrType wordType
            -> [(I.Interval addrType, MemoryRegion addrType wordType)]
 regionList msys = [ (i, r & contents .~ DVU.empty) | (i, r) <- IM.toList (msys ^. regions)]
+
+-- | Sanity check the memory system's 
+sanityCheck :: MemorySystem addrType wordType
+            -> Bool
+sanityCheck msys =
+  let checkRegSize reg = sizeLRU (reg ^. writesPending) == reg ^. nWritesPending
+  in  all checkRegSize (IM.elems (view regions msys))
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 -- LRU pending write cache implementation, adapted from the psqueues example source. The pending write cache will
@@ -418,8 +436,9 @@ queueLRU !addr !word !sa !mr =
       (oldval, psq')                     = OrdPSQ.alter queueAddr addr psq
       queueAddr Nothing                  = (Nothing, Just (nextTick, word))
       queueAddr (Just (_, oldword))      = (Just oldword, Just (nextTick, word))
-      mr'                                = mr & writesPending .~ increaseTick (nextTick + 1) psq' maxSize
-      mr''                               = if   mr' ^. writesPending . to sizeLRU >= maxPending
+      mr'                                = mr & writesPending  .~ increaseTick (nextTick + 1) psq' maxSize
+                                              & nWritesPending +~ 1
+      mr''                               = if   mr' ^. nWritesPending >= maxPending
                                            then flushPending maxFlush sa mr'
                                            else mr'
       contentVal                         = (mr ^. contents) ! fromIntegral (addr - sa)
@@ -439,9 +458,10 @@ flushPending nFlush sa mr =
   let -- Ascending list: from least recently to most recently used
       ents       = [(k, v) | (k, _, v) <- take nFlush (mr ^. writesPending . lrucPsq . to OrdPSQ.toAscList)]
       upds       = [(fromIntegral (addr - sa), v) | (addr, v) <- ents]
-      committed  = over contents (// upds) mr
       -- Bulk update the underlying contents, then prune the write queue (the power of Lenses!)
-  in  over (writesPending . lrucPsq) (prunePsq (map fst ents)) committed 
+  in  mr & contents                %~ (// upds)
+         & writesPending . lrucPsq %~ prunePsq (map fst ents)
+         & nWritesPending          -~ length ents
 
 prunePsq :: (Ord addrType) =>
             [addrType]

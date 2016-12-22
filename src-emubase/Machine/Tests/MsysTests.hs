@@ -359,14 +359,15 @@ test_RAMwrite1 _args =
   let msys = M.mWrite 0 0xff writeRAMMsys
       mem0 = M.mRead msys 0
   in  assertBool ("Write RAM, expected 0xff, got " ++ as0xHexS mem0)
-                 (mem0 == 0xff)
+                 (mem0 == 0xff && M.sanityCheck msys)
 
 test_RAMwrite5 :: TestParams -> Assertion
 test_RAMwrite5 _args =
   let writeRAM m (addr, val) = M.mWrite addr val m
       msys = Fold.foldl writeRAM writeRAMMsys [(0, 0xff), (3, 0xaa), (2, 0xbb), (1, 0xcc), (4, 0x55)]
   in  assertBool "write compare mismatch"
-                 (M.mReadN msys 0 7 == DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x05, 0x06])
+                 (M.mReadN msys 0 7 == DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x05, 0x06]
+                  && M.sanityCheck msys)
 
 test_RAMSequentialWrite :: TestParams -> Assertion
 test_RAMSequentialWrite _args =
@@ -378,4 +379,4 @@ test_RAMSequentialWrite _args =
       memvec  = M.mReadN msys ramBase ramSize
       cmpvec  = DVU.generate ramSize (\x -> fromIntegral (x `mod` 256))
   in assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
-                (memvec == cmpvec)
+                (memvec == cmpvec && M.sanityCheck msys)
