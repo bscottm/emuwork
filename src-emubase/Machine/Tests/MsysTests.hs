@@ -102,6 +102,7 @@ mkMsysTests args =
   , testGroup "RAM write"
     [ testCase "Write/read one byte     " (test_RAMwrite1 args)
     , testCase "Write/read five bytes   " (test_RAMwrite5 args)
+    , testCase "WriteN five bytes       " (test_RAMwrite5n args)
     , testCase "Sequential write        " (test_RAMSequentialWrite args)
     ]
   , testGroup "ROM with gap"
@@ -364,10 +365,23 @@ test_RAMwrite1 _args =
 test_RAMwrite5 :: TestParams -> Assertion
 test_RAMwrite5 _args =
   let writeRAM m (addr, val) = M.mWrite addr val m
-      msys = Fold.foldl writeRAM writeRAMMsys [(0, 0xff), (3, 0xaa), (2, 0xbb), (1, 0xcc), (4, 0x55)]
-  in  assertBool "write compare mismatch"
-                 (M.mReadN msys 0 7 == DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x05, 0x06]
-                  && M.sanityCheck msys)
+      msys                   = Fold.foldl writeRAM writeRAMMsys [(0, 0xff), (3, 0xaa), (2, 0xbb), (1, 0xcc), (4, 0x55)]
+      memvec                 = M.mReadN msys 0 7
+      cmpvec                 = DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x05, 0x06]
+  in  assertBool (if not (M.sanityCheck msys)
+                  then "msys sanity check failed: " ++ show msys
+                  else fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
+                 (memvec == cmpvec && M.sanityCheck msys)
+
+test_RAMwrite5n :: TestParams -> Assertion
+test_RAMwrite5n _args =
+  let msys   = M.mWriteN 0x11 (DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55]) writeRAMMsys
+      memvec = M.mReadN msys 0x11 7
+      cmpvec = DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x016, 0x17]
+  in  assertBool (if not (M.sanityCheck msys)
+                  then "msys sanity check failed: " ++ show msys
+                  else fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
+                 (memvec == cmpvec && M.sanityCheck msys)
 
 test_RAMSequentialWrite :: TestParams -> Assertion
 test_RAMSequentialWrite _args =
