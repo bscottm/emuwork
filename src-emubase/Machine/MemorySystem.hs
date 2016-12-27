@@ -56,7 +56,7 @@ import qualified Data.IntervalMap.Generic.Strict as IM
 import qualified Data.IntervalMap.Interval       as I
 import           Data.Vector.Unboxed             (Vector, (!), (//))
 import qualified Data.Vector.Unboxed             as DVU
-import           Data.Maybe (fromMaybe)
+import           Data.Maybe (fromMaybe, isJust)
 import           Prelude hiding (lookup)
 
 -- import           Debug.Trace
@@ -78,6 +78,18 @@ data MemoryRegion addrType wordType where
     { _contents :: Vector wordType
     -- ^ Memory region's contents (unboxed vector)
     } -> MemoryRegion addrType wordType
+  {-DevMemRegion :: (Monad m) =>
+    { _contents       :: Vector wordType
+    -- ^ Device memory's region's contents (unboxed vector)
+    , _writesPending  :: LRUWriteCache addrType wordType
+    -- ^ Pending write LRU cache
+    , _nWritesPending :: {-# UNPACK #-} !Int
+    -- ^ Size of the LRU cache (avoids the $O(n)$ penalty for calling 'OrdPSQ.size')
+    , _readAction     :: m x
+    -- ^ Monad action invoked before reading data
+    , _writeAction    :: m x
+    -- ^ Monad action invoked before writing data
+    } -> MemoryRegion addrType wordType-}
   deriving (Show)
 
 -- | Lens for a memory region's contents
@@ -358,8 +370,8 @@ regionList msys = [ (i, r & contents .~ DVU.empty) | (i, r) <- IM.toList (msys ^
 sanityCheck :: MemorySystem addrType wordType
             -> Bool
 sanityCheck msys =
-  let checkRegSize reg = sizeLRU (reg ^. writesPending) == reg ^. nWritesPending
-  in  all checkRegSize (IM.elems (view regions msys))
+  let verifyRegionSize reg = reg ^. writesPending . to sizeLRU == reg ^. nWritesPending
+  in  all verifyRegionSize (IM.elems (view regions msys))
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 -- LRU pending write cache implementation, adapted from the psqueues example source. The pending write cache will
@@ -437,7 +449,7 @@ queueLRU !addr !word !sa !mr =
       queueAddr Nothing                  = (Nothing, Just (nextTick, word))
       queueAddr (Just (_, oldword))      = (Just oldword, Just (nextTick, word))
       mr'                                = mr & writesPending  .~ increaseTick (nextTick + 1) psq' maxSize
-                                              & nWritesPending +~ 1
+                                              & nWritesPending +~ (if isJust oldval then 0 else 1)
       mr''                               = if   mr' ^. nWritesPending >= maxPending
                                            then flushPending maxFlush sa mr'
                                            else mr'

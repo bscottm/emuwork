@@ -18,7 +18,7 @@ import           Test.Framework.Options               (TestOptions' (..))
 import           Test.Framework.Providers.HUnit       (testCase)
 import           Test.Framework.Providers.QuickCheck2 (testProperty)
 import           Test.HUnit                           (Assertion, assertBool, assertFailure)
-import           Test.QuickCheck                      (Property, choose, forAll)
+import           Test.QuickCheck                      (Property, choose, forAll, NonNegative, Large, getNonNegative, getLarge)
 
 -- import           Debug.Trace
 
@@ -37,40 +37,31 @@ main =
     let (romImg, stdGen') = generateROMImg stdGen 4096
         (writePairs, _)   = generateRandWrites stdGen' 32768
         options           = TestParams { randROMImg = DVU.fromList romImg
-                                       , randWrites = writePairs
+                                       , randWrites = DVU.fromList writePairs
                                        }
     defaultMain (mkMsysTests options)
   where
-    generateROMImg gen lim = 
-      let range = (0, 0xff)
-          (v1, gen') = randomR range gen
-          (vs, gen'') = g1 gen' range (lim - 1) ([v1] ++)
-      in  (vs [], gen'')
-
-    g1 :: (Random a) => StdGen -> (a, a) -> Int -> ([a] -> [a]) -> ([a] -> [a], StdGen)
-    g1 gen range 1 vs =
-      let (v, gen') = randomR range gen
-      in  ((vs [v] ++), gen')
-    g1 gen range n vs =
-      let (v, gen') = randomR range gen
-      in  g1 gen' range (n - 1) (vs [v] ++)    
+    generateROMImg gen lim = g1 gen (0, 0xff) lim
 
     generateRandWrites gen lim =
-      let addrRange     = (0, 0x1000)
-          byteRange     = (0, 0xff)
-          (b1, gen')    = randomR byteRange gen
-          (bs, gen'')   = g1 gen' byteRange (lim - 1) ([b1] ++)
-          (a1, gen''')  = randomR addrRange gen''
-          (as, gen'''') = g1 gen''' addrRange (lim - 1) ([a1] ++)
-          addrs         = as []
-          bytes         = bs []
-      in  (zip addrs bytes, gen'''')
+      let (bytes, gen')  = g1 gen  (0, 0xff)   lim
+          (addrs, gen'') = g1 gen' (0, 0x0fff) lim
+      in  (zip addrs bytes, gen'')
+
+    g1 :: (Random a) => StdGen -> (a, a) -> Int -> ([a], StdGen)
+    g1 gen range 1 =
+      let (v, gen')   = randomR range gen
+      in  ([v], gen')
+    g1 gen range n =
+      let (v, gen')   = randomR range gen
+          (vs, gen'') = g1 gen' range (n - 1)
+      in  (v:vs, gen'')
 
 -- Generated data that gets used by various tests...
 data TestParams =
   TestParams
   { randROMImg  :: Vector Word8
-  , randWrites  :: [(Word16, Word8)]
+  , randWrites  :: Vector (Word16, Word8)
   }
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -80,48 +71,48 @@ data TestParams =
 mkMsysTests :: TestParams -> [Test]
 mkMsysTests args =
   [ testGroup "Memory system construction"
-    [ testCase "One ROM region          " (test_mkROMRegion args)
-    , testCase "Two ROM regions         " (test_mkROMRegion2 args)
-    , testCase "Two RAM regions         " (test_mkRAMRegion3 args)
-    , testCase "Monoid 'mempty'         " (test_mkMEmpty args)
-    , testCase "Monoid 'mappend'        " (test_mappend args)
+    [ testCase "One ROM region             " (test_mkROMRegion args)
+    , testCase "Two ROM regions            " (test_mkROMRegion2 args)
+    , testCase "Two RAM regions            " (test_mkRAMRegion3 args)
+    , testCase "Monoid 'mempty'            " (test_mkMEmpty args)
+    , testCase "Monoid 'mappend'           " (test_mappend args)
     ]
   , testGroup "readROM"
-    [ testCase "Read one byte           " (test_ROMread1 args)
-    , testCase "Read sequential         " (test_ROMsequential args)
-    , plusTestOptions propROMRandom_args (testProperty "Random reads            " prop_ROMrandom)
-    , testCase "Random image, one byte  " (test_randROMread1 args)
-    , testCase "Random image, sequential" (test_randROMsequential args)
-    , plusTestOptions propRandROMRandom_args (testProperty "Random image, random reads" (prop_randROMrandom args))
+    [ testCase "Read one byte              " (test_ROMread1 args)
+    , testCase "Read sequential            " (test_ROMsequential args)
+    , plusTestOptions (mkLargeTests (DVU.length readROMImg * 4))
+                      (testProperty "Random reads               " prop_ROMrandom)
+    , testCase "Random image, one byte     " (test_randROMread1 args)
+    , testCase "Random image, sequential   " (test_randROMsequential args)
+    , plusTestOptions (mkLargeTests (DVU.length (randROMImg args) * 4))
+                      (testProperty "Random image, random reads " (prop_randROMrandom args))
     ]
   , testGroup "Patch/forced writes"
-    [ testCase "patchROM01              " (test_patchROM01 args)
-    , testCase "patchROM02              " (test_patchROM02 args)
-    , testCase "patchROM03              " (test_patchROM03 args)
+    [ testCase "patchROM01                 " (test_patchROM01 args)
+    , testCase "patchROM02                 " (test_patchROM02 args)
+    , testCase "patchROM03                 " (test_patchROM03 args)
     ]
   , testGroup "RAM write"
-    [ testCase "Write/read one byte     " (test_RAMwrite1 args)
-    , testCase "Write/read five bytes   " (test_RAMwrite5 args)
-    , testCase "WriteN five bytes       " (test_RAMwrite5n args)
-    , testCase "Sequential write        " (test_RAMSequentialWrite args)
+    [ testCase "Write/read one byte        " (test_RAMwrite1 args)
+    , testCase "Write/read five bytes      " (test_RAMwrite5 args)
+    , testCase "WriteN five bytes          " (test_RAMwrite5n args)
+    , testCase "OvewriteN five bytes       " (test_RAMwrite5n2 args)
+    , testCase "Sequential write           " (test_RAMSequentialWrite args)
+    , plusTestOptions (mkLargeTests (DVU.length (randWrites args) `div` 4))
+                      (testProperty "Random write pairs         " (test_RAMRandReads args 0 0x1000))
     ]
   , testGroup "ROM with gap"
-    [ testCase "Read before gap         " (test_gapROMBefore args)
-    , testCase "Read entire ROM         " (test_gapROMTotal args)
+    [ testCase "Read before gap            " (test_gapROMBefore args)
+    , testCase "Read entire ROM            " (test_gapROMTotal args)
     -- , testCase "Sliding window read     " (test_gapWindows args)
     ]
   ]
   where
     -- 'mempty' is really the TestOptions record instantiated with all of the
     -- members set to Nothing.
-    propROMRandom_args = mempty { topt_maximum_generated_tests = Just propROMRandom_tests
-                                , topt_maximum_unsuitable_generated_tests = Just propROMRandom_tests
+    mkLargeTests nTests = mempty { topt_maximum_generated_tests = Just nTests
+                                , topt_maximum_unsuitable_generated_tests = Just (nTests * 5)
                                 }
-    propROMRandom_tests = DVU.length readROMImg * 4
-    propRandROMRandom_args = mempty { topt_maximum_generated_tests = Just propRandROMRandom_tests
-                                    , topt_maximum_unsuitable_generated_tests = Just propRandROMRandom_tests
-                                    }
-    propRandROMRandom_tests = DVU.length (randROMImg args) * 4
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 -- Compare two vectors
@@ -349,25 +340,31 @@ test_patchROM03 _args =
   in assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                 (memvec == cmpvec)
 
-writeRAMPatch_1 :: Vector Word8
-writeRAMPatch_1 = DVU.generate (12 * 1024) (\x -> fromIntegral (x `mod` 256))
+writeRAMInitial :: Int -> Vector Word8
+writeRAMInitial ramSize = DVU.generate ramSize (\x -> fromIntegral (x `mod` 256))
+{-# INLINABLE writeRAMInitial #-}
 
-writeRAMMsys :: M.MemorySystem Word16 Word8
-writeRAMMsys    = M.mPatch 0 writeRAMPatch_1 (M.mkRAMRegion 0 (12 * 1024) M.initialMemorySystem)
+writeRAMMsys :: Word16 -> Int -> M.MemorySystem Word16 Word8
+writeRAMMsys ramBase ramSize = M.mPatch ramBase initial msys 
+  where
+    initial = writeRAMInitial ramSize
+    msys    = M.mkRAMRegion ramBase ramSize M.initialMemorySystem
+{-# INLINABLE writeRAMMsys #-}
 
 test_RAMwrite1 :: TestParams -> Assertion
 test_RAMwrite1 _args =
-  let msys = M.mWrite 0 0xff writeRAMMsys
-      mem0 = M.mRead msys 0
+  let ramSize = 12 * 1024
+      ramBase = 0x0000
+      msys    = M.mWrite 0 0xff (writeRAMMsys ramBase ramSize)
+      mem0    = M.mRead msys 0
   in  assertBool ("Write RAM, expected 0xff, got " ++ as0xHexS mem0)
                  (mem0 == 0xff && M.sanityCheck msys)
 
 test_RAMwrite5 :: TestParams -> Assertion
 test_RAMwrite5 _args =
-  let writeRAM m (addr, val) = M.mWrite addr val m
-      msys                   = Fold.foldl writeRAM writeRAMMsys [(0, 0xff), (3, 0xaa), (2, 0xbb), (1, 0xcc), (4, 0x55)]
-      memvec                 = M.mReadN msys 0 7
-      cmpvec                 = DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x05, 0x06]
+  let msys    = Fold.foldl writeRAM (writeRAMMsys 0 0x00ff) [(0, 0xff), (3, 0xaa), (2, 0xbb), (1, 0xcc), (4, 0x55)]
+      memvec  = M.mReadN msys 0 7
+      cmpvec  = DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x05, 0x06]
   in  assertBool (if not (M.sanityCheck msys)
                   then "msys sanity check failed: " ++ show msys
                   else fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
@@ -375,9 +372,20 @@ test_RAMwrite5 _args =
 
 test_RAMwrite5n :: TestParams -> Assertion
 test_RAMwrite5n _args =
-  let msys   = M.mWriteN 0x11 (DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55]) writeRAMMsys
+  let msys   = M.mWriteN 0x11 (DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55]) (writeRAMMsys 0 0x00ff)
       memvec = M.mReadN msys 0x11 7
       cmpvec = DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x016, 0x17]
+  in  assertBool (if not (M.sanityCheck msys)
+                  then "msys sanity check failed: " ++ show msys
+                  else fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
+                 (memvec == cmpvec && M.sanityCheck msys)
+
+test_RAMwrite5n2 :: TestParams -> Assertion
+test_RAMwrite5n2 _args =
+  let msys   = M.mWriteN 0x11 (DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55]) (writeRAMMsys 0 0x00ff)
+      msys'  = M.mWriteN 0x13 (DVU.fromList [0xbe, 0xee, 0x66]) msys
+      memvec = M.mReadN msys' 0x11 7
+      cmpvec = DVU.fromList [0xff, 0xcc, 0xbe, 0xee, 0x66, 0x016, 0x17]
   in  assertBool (if not (M.sanityCheck msys)
                   then "msys sanity check failed: " ++ show msys
                   else fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
@@ -388,9 +396,30 @@ test_RAMSequentialWrite _args =
   let ramSize = 0x1000
       ramBase = 0x0100 :: Word16
       pairs   = [(fromIntegral addr + ramBase, val) | addr <- [0..ramSize - 1], let val = fromIntegral (addr `mod` 256)]
-      writeRAM m (addr, val) = M.mWrite addr val m
       msys    = Fold.foldl writeRAM (M.mkRAMRegion ramBase ramSize (mempty :: M.MemorySystem Word16 Word8)) pairs
       memvec  = M.mReadN msys ramBase ramSize
       cmpvec  = DVU.generate ramSize (\x -> fromIntegral (x `mod` 256))
   in assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                 (memvec == cmpvec && M.sanityCheck msys)
+
+test_RAMRandReads :: TestParams -> Word16 -> Int -> Property
+test_RAMRandReads args ramBase ramSize = forAll (choose (1, DVU.length addrPairs `div` 2)) testWrites
+  where
+    addrPairs    = randWrites args
+    ramMsys      = writeRAMMsys ramBase ramSize
+    testWrites :: Int -> NonNegative (Large Int) -> Bool
+    testWrites n m =
+      let m'      = getLarge (getNonNegative m)
+          writes  = DVU.slice n (min m' (DVU.length addrPairs - n)) addrPairs
+          msys    = DVU.foldl' writeRAM ramMsys writes
+          memvec  = M.mReadN msys ramBase ramSize
+          cmpvec  = DVU.update (writeRAMInitial ramSize)
+                               (DVU.map (\(addr, val) -> (fromIntegral addr, val)) writes)
+      in  M.sanityCheck msys && memvec == cmpvec
+
+writeRAM :: (Integral addrType, DVU.Unbox wordType) =>
+            M.MemorySystem addrType wordType
+         -> (addrType, wordType)
+         -> M.MemorySystem addrType wordType
+writeRAM msys (addr, val) = M.mWrite addr val msys
+{-# INLINABLE writeRAM #-}
