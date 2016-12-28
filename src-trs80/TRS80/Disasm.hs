@@ -262,10 +262,10 @@ jumpTable mem sAddr nBytes dstate =
   let ea = sAddr + fromIntegral nBytes
       generateAddr addr z80dstate
         | addr < ea - 2  = let DecodedAddr newAddr operand = z80getAddr mem (PC addr)
-                                in  withPC newAddr (\pc -> generateAddr pc (operAddrPseudo operand))
+                           in  generateAddr (unPC newAddr) (operAddrPseudo operand)
         | addr == ea - 2 = let DecodedAddr _newAddr operand = z80getAddr mem (PC addr)
-                                in  operAddrPseudo operand
-        | otherwise           = z80disbytes z80dstate mem (PC addr) (fromIntegral (ea - addr))
+                           in  operAddrPseudo operand
+        | otherwise      = z80disbytes z80dstate mem (PC addr) (fromIntegral (ea - addr))
         where
           operAddrPseudo theAddr = z80dstate & disasmSeq %~ (|> operAddr theAddr)
           operAddr       theAddr = mkAddr addr (AbsAddr theAddr) (mReadN mem addr 2)
@@ -280,13 +280,13 @@ trs80RomPostProcessor :: Z80DisasmElt
                       -> Z80disassembly
                       -> (Z80PC, Z80disassembly)
 trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) memSys pc dstate =
-  let byte   = withPC pc (mRead memSys)
+  let byte   = mRead memSys (unPC pc)
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
       pseudo = if byte >= 0x20 && byte <= 0x7f then
                  mkAscii
                else
                  mkByteRange
-  in  (pc + 1, disasmSeq %~ (\s -> s |> ins |> withPC pc (\pc' -> pseudo pc' (DVU.singleton byte))) $ dstate)
+  in  (pc + 1, disasmSeq %~ (\s -> s |> ins |> pseudo (unPC pc) (DVU.singleton byte)) $ dstate)
 -- Otherwise, just append the instruction onto the disassembly sequence.
 trs80RomPostProcessor elt mem pc dstate = z80DefaultPostProcessor elt mem pc dstate
 

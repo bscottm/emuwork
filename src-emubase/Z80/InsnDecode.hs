@@ -11,7 +11,6 @@ module Z80.InsnDecode
   , ProcessorOps(..)
   ) where
 
-import qualified Control.Comonad    as Comonad
 import           Control.Lens
 import           Data.Bits
 import           Data.IntMap        (IntMap, (!))
@@ -28,7 +27,7 @@ type Z80decodedInsn = DecodedInsn Z80instruction Z80addr
 
 instance ProcessorOps Z80instruction Z80addr Z80word where
   idecode pc mem =
-    let opc = withPC pc (mRead mem)
+    let opc = mRead mem (unPC pc)
         indexedPrefix xForm = let (pc', newOpc) = mIncPCAndRead pc mem
                                in  case newOpc of
                                      -- Deal with weird IX/IY bit operation layout for undocumented bit/rotate/shift ops
@@ -445,7 +444,7 @@ displacementInstruction :: Z80memory
                         -> Z80decodedInsn
 displacementInstruction mem pc ins =
   let (pc', disp)  = mIncPCAndRead pc mem
-      destAddr     = Comonad.extract pc + signExtend disp + 2
+      destAddr     = fromIntegral (pc + signExtend disp + 2)
       nextIns      = pc' + 1
   in  DecodedInsn nextIns (ins . AbsAddr $ destAddr)
 
@@ -463,9 +462,9 @@ z80getAddr :: Z80memory                 -- ^ Memory from which address is fetche
            -> Z80PC                     -- ^ The program counter
            -> Z80decodedInsn
 z80getAddr mem pc = let lo, hi     :: Z80word
-                        lo         = withPC pc (mRead mem)
+                        lo         = mRead mem (unPC pc)
                         pc'        = pc + 1
-                        hi         = withPC pc' (mRead mem)
+                        hi         = mRead mem (unPC pc')
                     in DecodedAddr (pc' + 1) (shiftL (fromIntegral hi) 8 .|. fromIntegral lo)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=

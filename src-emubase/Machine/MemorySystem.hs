@@ -1,7 +1,7 @@
+{-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE GADTs #-}
 
 {-| Representation of system memory.
 
@@ -33,6 +33,7 @@ module Machine.MemorySystem
   -- * Memory Regions
   , mkRAMRegion
   , mkROMRegion
+  , mkDevRegion
   -- * Read Memory
   , mRead
   , mReadN
@@ -48,19 +49,20 @@ module Machine.MemorySystem
   , sanityCheck
   ) where
 
-import           Control.Lens                    (Lens', (%~), (+~), (-~), (&), (.~), (^.), (|>), to, view, over)
-import           Data.Monoid
+import           Control.Lens                    (Lens', over, to, view, (%~), (&), (+~), (-~), (.~), (^.), (|>))
 import qualified Data.Foldable                   as Fold (foldl')
-import qualified Data.OrdPSQ                     as OrdPSQ
 import qualified Data.IntervalMap.Generic.Strict as IM
 import qualified Data.IntervalMap.Interval       as I
+import           Data.Maybe                      (fromMaybe)
+import           Data.Monoid
+import qualified Data.OrdPSQ                     as OrdPSQ
 import           Data.Vector.Unboxed             (Vector, (!), (//))
 import qualified Data.Vector.Unboxed             as DVU
-import           Data.Maybe (fromMaybe, isJust)
-import           Prelude hiding (lookup)
+import           Prelude                         hiding (lookup)
 
 -- import           Debug.Trace
 
+import Machine.Device
 import           Machine.ProgramCounter
 import           Machine.Utils
 
@@ -75,38 +77,47 @@ data MemoryRegion addrType wordType where
     -- ^ Size of the LRU cache (avoids the $O(n)$ penalty for calling 'OrdPSQ.size')
     } -> MemoryRegion addrType wordType
   ROMRegion ::
-    { _contents :: Vector wordType
+    { _contents       :: Vector wordType
     -- ^ Memory region's contents (unboxed vector)
     } -> MemoryRegion addrType wordType
-  {-DevMemRegion :: (Monad m) =>
-    { _contents       :: Vector wordType
-    -- ^ Device memory's region's contents (unboxed vector)
-    , _writesPending  :: LRUWriteCache addrType wordType
-    -- ^ Pending write LRU cache
-    , _nWritesPending :: {-# UNPACK #-} !Int
-    -- ^ Size of the LRU cache (avoids the $O(n)$ penalty for calling 'OrdPSQ.size')
-    , _readAction     :: m x
-    -- ^ Monad action invoked before reading data
-    , _writeAction    :: m x
-    -- ^ Monad action invoked before writing data
-    } -> MemoryRegion addrType wordType-}
-  deriving (Show)
+  DevMemRegion :: (MemMappedDeviceOps devM addrType wordType) =>
+    { _device :: devM x
+    } -> MemoryRegion addrType wordType
 
 -- | Lens for a memory region's contents
-contents :: Lens' (MemoryRegion addrType wordType) (Vector wordType)
+contents :: (DVU.Unbox wordType) =>
+            Lens' (MemoryRegion addrType wordType) (Vector wordType)
 contents f mregion@(RAMRegion ctnt _ _) = (\content' -> mregion { _contents = content' }) <$> f ctnt
 contents f mregion@(ROMRegion ctnt)     = (\content' -> mregion { _contents = content' }) <$> f ctnt
+contents f mregion@DevMemRegion{}       = mregion <$ f DVU.empty
 
 -- | Lens for the pending write LRU queue.
 writesPending :: Lens' (MemoryRegion addrType wordType) (LRUWriteCache addrType wordType)
-writesPending f mregion@RAMRegion{} = (\wp -> mregion { _writesPending = wp }) <$> f (_writesPending mregion)
+writesPending f mregion@RAMRegion{}    = (\wp -> mregion { _writesPending = wp }) <$> f (_writesPending mregion)
 -- For types other than 'RAMRegion', it's just the original memory region unchanged.
-writesPending f mregion             = mregion <$ f (initialLRU 0)
+writesPending f mregion@ROMRegion{}    = mregion <$ f (initialLRU 0)
+writesPending f mregion@DevMemRegion{} = mregion <$ f (initialLRU 0)
 
 -- | Lens for number of elements in the LRU queue
 nWritesPending :: Lens' (MemoryRegion addrType wordType) Int
 nWritesPending f mregion@RAMRegion{} = (\n -> mregion { _nWritesPending = n }) <$> f (_nWritesPending mregion)
 nWritesPending f mregion             = mregion <$ f 0
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- Show instance
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+instance (Show addrType, Show wordType, DVU.Unbox wordType) =>
+         Show (MemoryRegion addrType wordType) where
+  show (RAMRegion cntnt wPend nWPend) =
+    "RAMRegion " ++ show cntnt ++ " " ++ show wPend ++ " " ++ show nWPend
+  show (ROMRegion cntnt) =
+    "ROMRegion " ++ show cntnt
+  show DevMemRegion{} =
+    "DevMemRegion"
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Pending write queue maximum depth
 maxPending :: Int
@@ -152,7 +163,9 @@ initialMemorySystem = MSys { _regions = IM.empty }
 -- precondition fails.
 mkRAMRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType, Num wordType) =>
                addrType
+            -- ^ RAM region start address
             -> Int
+            -- ^ Length of the RAM region
             -> MemorySystem addrType wordType
             -> MemorySystem addrType wordType
 mkRAMRegion sa len msys =
@@ -169,9 +182,13 @@ mkRAMRegion sa len msys =
 -- precondition fails.
 mkROMRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType) =>
                addrType
+            -- ^ Region's start address
             -> Vector wordType
+            -- ^ ROM image to insert as the region's contents
             -> MemorySystem addrType wordType
+            -- ^ Memory system to alter
             -> MemorySystem addrType wordType
+            -- ^ Resulting memory system with the inserted ROM region
 mkROMRegion sa romImg msys =
   let ea        = sa + fromIntegral (DVU.length romImg)
       newRegion = ROMRegion { _contents = romImg }
@@ -179,8 +196,26 @@ mkROMRegion sa romImg msys =
       then over regions (IM.insertWith const (I.IntervalCO sa ea) newRegion) msys
       else error ("mkROMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
+-- | Create a new region for a memory-mapped device.
+mkDevRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType, MemMappedDeviceOps devM addrType wordType) =>
+               addrType
+            -- ^ Start address of the region
+            -> addrType
+            -- ^ End address of the region
+            -> devM a
+            -- ^ The device monad
+            -> MemorySystem addrType wordType
+            -- ^ Memory region to augment
+            -> MemorySystem addrType wordType
+            -- ^ Resulting memory system with the device region inserted
+mkDevRegion sa ea devM msys =
+  let newRegion = DevMemRegion { _device = devM }
+  in  if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
+      then over regions (IM.insertWith const (I.ClosedInterval sa ea) newRegion) msys
+      else error ("mkDevRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
+
 -- | Fetch a word from a memory address. Note: If the address does not correspond to a region (i.e., the address does not
--- intersect a region), zero is returned. (FIXME??)
+-- intersect a region), zero is returned.
 mRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
           MemorySystem addrType wordType
        -> addrType
@@ -190,8 +225,8 @@ mRead !msys !addr =
       getContent acc iv mr = acc |> fromMaybe (view contents mr ! fromIntegral (addr - I.lowerBound iv))
                                               (lookupPendingWrite addr (mr ^. writesPending))
       vals = IM.foldlWithKey getContent [] regs
-      -- FIXME: Should something different happen here when data is requested from
-      -- an unknown/unmapped region? Throw exception?
+      -- FIXME: Need another function that throws an exception (polluting everything with the IO monad) or otherwise signals
+      -- that the read was from unmapped memory.
   in  if not (null vals) then head vals else 0
 
 -- | Fetch a sequence of words from memory. The start and end addresses do not have reside in the same memory region;
@@ -242,17 +277,17 @@ mReadN !msys !sa !nWords
 
 -- | Fetch an entity from memory at the current program counter, return the (incremented pc, contents)
 -- pair.
-mReadAndIncPC :: (PCOperation addrType, Num wordType, DVU.Unbox wordType) =>
+mReadAndIncPC :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
                   ProgramCounter addrType
                -- ^ Current program counter
                -> MemorySystem addrType wordType
                -- ^ The memory system from which the word will be fetched
                -> (ProgramCounter addrType, wordType)
                -- ^ Updated program counter and fetched word
-mReadAndIncPC !pc !mem = (pc + 1, withPC pc (mRead mem))
+mReadAndIncPC !pc !mem = (pc + 1, mRead mem (unPC pc))
 
 -- | Fetch an entity from memory, pre-incrementing the program counter, returning the (incremented pc, contents)
-mIncPCAndRead :: (PCOperation addrType, Num wordType, DVU.Unbox wordType) =>
+mIncPCAndRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
                   ProgramCounter addrType
               -- ^ Current progracm counter
                -> MemorySystem addrType wordType
@@ -260,7 +295,7 @@ mIncPCAndRead :: (PCOperation addrType, Num wordType, DVU.Unbox wordType) =>
                -> (ProgramCounter addrType, wordType)
                -- ^ Updated program counter and fetched word
 mIncPCAndRead !pc !mem = let pc' = pc + 1
-                         in  (pc', withPC pc' (mRead mem))
+                         in  (pc', mRead mem (unPC pc'))
 
 -- | Write a word into the memory system: inserts the word into the pending write LRU cache, flushing the cache to make
 -- space if necessary, commiting updates to the underlying region's contents. If the memory region is not 'readWrite',
@@ -366,7 +401,7 @@ regionList :: (DVU.Unbox wordType) =>
            -> [(I.Interval addrType, MemoryRegion addrType wordType)]
 regionList msys = [ (i, r & contents .~ DVU.empty) | (i, r) <- IM.toList (msys ^. regions)]
 
--- | Sanity check the memory system's 
+-- | Sanity check the memory system's
 sanityCheck :: MemorySystem addrType wordType
             -> Bool
 sanityCheck msys =
@@ -446,15 +481,19 @@ queueLRU :: (Integral addrType, DVU.Unbox wordType) =>
 queueLRU !addr !word !sa !mr =
   let LRUWriteCache nextTick psq maxSize = mr ^. writesPending
       (oldval, psq')                     = OrdPSQ.alter queueAddr addr psq
-      queueAddr Nothing                  = (Nothing, Just (nextTick, word))
-      queueAddr (Just (_, oldword))      = (Just oldword, Just (nextTick, word))
+      queueAddr Nothing             = (Nothing, Just (nextTick, word))
+      queueAddr (Just (_, oldword)) = (Just oldword, Just (nextTick, word))
+      updateNWrites (Just _) = 0
+      updateNWrites Nothing  = 1
+      doFlush mreg
+        | mreg ^. nWritesPending >= maxPending
+        = flushPending maxFlush sa mr'
+        | otherwise
+        = mreg
       mr'                                = mr & writesPending  .~ increaseTick (nextTick + 1) psq' maxSize
-                                              & nWritesPending +~ (if isJust oldval then 0 else 1)
-      mr''                               = if   mr' ^. nWritesPending >= maxPending
-                                           then flushPending maxFlush sa mr'
-                                           else mr'
+                                              & nWritesPending +~ updateNWrites oldval
       contentVal                         = (mr ^. contents) ! fromIntegral (addr - sa)
-  in  (fromMaybe contentVal oldval, mr'')
+  in  (fromMaybe contentVal oldval, doFlush mr')
 
 -- | Flush some of the pending writes to a memory region's content vector
 flushPending :: (Integral addrType, DVU.Unbox wordType) =>

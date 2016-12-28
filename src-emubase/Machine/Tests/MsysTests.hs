@@ -3,6 +3,7 @@
 
 module Main (main) where
 
+import           Control.Arrow                        (first)
 import qualified Data.Foldable                        as Fold (foldl)
 import qualified Data.IntervalMap.Interval            as I
 import           Data.List                            (elemIndices)
@@ -36,16 +37,21 @@ main =
     -- Generate the various random vectors we need to test:
     let (romImg, stdGen') = generateROMImg stdGen 4096
         (writePairs, _)   = generateRandWrites stdGen' 32768
-        options           = TestParams { randROMImg = DVU.fromList romImg
-                                       , randWrites = DVU.fromList writePairs
+        options           = TestParams { randROMImg     = DVU.fromList romImg
+                                       , randWrites     = DVU.fromList writePairs
+                                       , randWritesMVec = writeRAMInitial randWritesSize
+                                       , randWritesMem  = writeRAMMsys randWritesBase randWritesSize
                                        }
     defaultMain (mkMsysTests options)
   where
-    generateROMImg gen lim = g1 gen (0, 0xff) lim
+    generateROMImg gen = g1 gen (0, 0xff)
+
+    randWritesBase = 0x0
+    randWritesSize = 0x1000 :: Int
 
     generateRandWrites gen lim =
-      let (bytes, gen')  = g1 gen  (0, 0xff)   lim
-          (addrs, gen'') = g1 gen' (0, 0x0fff) lim
+      let (bytes, gen')  = g1 gen  (0, 0xff) lim
+          (addrs, gen'') = g1 gen' (0, fromIntegral (randWritesSize - 1)) lim
       in  (zip addrs bytes, gen'')
 
     g1 :: (Random a) => StdGen -> (a, a) -> Int -> ([a], StdGen)
@@ -60,8 +66,10 @@ main =
 -- Generated data that gets used by various tests...
 data TestParams =
   TestParams
-  { randROMImg  :: Vector Word8
-  , randWrites  :: Vector (Word16, Word8)
+  { randROMImg     :: Vector Word8
+  , randWrites     :: Vector (Word16, Word8)
+  , randWritesMVec :: Vector Word8
+  , randWritesMem  :: M.MemorySystem Word16 Word8
   }
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -111,8 +119,8 @@ mkMsysTests args =
     -- 'mempty' is really the TestOptions record instantiated with all of the
     -- members set to Nothing.
     mkLargeTests nTests = mempty { topt_maximum_generated_tests = Just nTests
-                                , topt_maximum_unsuitable_generated_tests = Just (nTests * 5)
-                                }
+                                 , topt_maximum_unsuitable_generated_tests = Just (nTests * 5)
+                                 }
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 -- Compare two vectors
@@ -406,15 +414,15 @@ test_RAMRandReads :: TestParams -> Word16 -> Int -> Property
 test_RAMRandReads args ramBase ramSize = forAll (choose (1, DVU.length addrPairs `div` 2)) testWrites
   where
     addrPairs    = randWrites args
-    ramMsys      = writeRAMMsys ramBase ramSize
+    ramMsys      = randWritesMem args
+    ramMvec      = randWritesMVec args
     testWrites :: Int -> NonNegative (Large Int) -> Bool
     testWrites n m =
       let m'      = getLarge (getNonNegative m)
           writes  = DVU.slice n (min m' (DVU.length addrPairs - n)) addrPairs
           msys    = DVU.foldl' writeRAM ramMsys writes
           memvec  = M.mReadN msys ramBase ramSize
-          cmpvec  = DVU.update (writeRAMInitial ramSize)
-                               (DVU.map (\(addr, val) -> (fromIntegral addr, val)) writes)
+          cmpvec  = DVU.update ramMvec (DVU.map (first fromIntegral) writes)
       in  M.sanityCheck msys && memvec == cmpvec
 
 writeRAM :: (Integral addrType, DVU.Unbox wordType) =>

@@ -50,6 +50,7 @@ library
     Reader,
     Z80,
 
+    Machine.Device,
     Machine.DisassemblerTypes,
     Machine.EmulatedSystem,
     Machine.MemorySystem,
