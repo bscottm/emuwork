@@ -1,13 +1,15 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 -- | The Z80 processor emulation module.
 module Z80.Processor
   ( -- * Types
     Z80word
   , Z80addr
   , Z80disp
+  , Z80ioPort
   , Z80registers(..)
   , Z80state(..)
   , Z80PC
-  , Z80memory
 
     -- * Functions
   , z80MinAddr
@@ -29,11 +31,11 @@ module Z80.Processor
   , intmode
   ) where
 
-import Control.Lens (makeLenses)
-import Data.Int
-import Data.Word
+import           Control.Lens (makeLenses)
+import           Data.Int
+import           Data.Word
 
-import Machine
+import           Machine
 
 -- | Basic word type on a Z80: byte
 type Z80word          = Word8
@@ -43,8 +45,8 @@ type Z80addr          = Word16
 type Z80disp          = Int16
 -- | Z80 program counter
 type Z80PC            = ProgramCounter Z80addr
--- | Z80 memory system type
-type Z80memory        = MemorySystem Z80addr Z80word
+-- | Z80 I/O ports are 8-bit
+type Z80ioPort        = Word8
 
 -- | The basic Z80 register file. The actual register file has two sides, the regular and prime. The prime
 -- registers are not generally visible except through the EXX instruction that exchanges the two sides.
@@ -84,17 +86,17 @@ z80MaxAddr = maxBound
 -- | The Z80's machine state and internals.
 data Z80state =
         Z80state
-        { _regs      :: Z80registers                            -- ^ Current operating register file
-        , _z80pc     :: Z80PC                                   -- ^ Program counter
-        , _primes    :: Z80registers                            -- ^ The "prime" register set
-        , _ix        :: Z80addr                                 -- ^ IX index register
-        , _iy        :: Z80addr                                 -- ^ IY index register
-        , _sp        :: Z80addr                                 -- ^ Stack pointer
-        , _ipage     :: Z80word                                 -- ^ Interrupt page
-        , _refresh   :: Z80word                                 -- ^ (Dynamic memory) Refresh register
-        , _iff1      :: Bool                                    -- ^ Interrupt flip-flop 1
-        , _iff2      :: Bool                                    -- ^ Interrupt flip-flip 2
-        , _intmode   :: Int                                     -- ^ Interrupt mode (IM 0, 1 or 2)
+        { _regs    :: Z80registers                            -- ^ Current operating register file
+        , _z80pc   :: Z80PC                                   -- ^ Program counter
+        , _primes  :: Z80registers                            -- ^ The "prime" register set
+        , _ix      :: Z80addr                                 -- ^ IX index register
+        , _iy      :: Z80addr                                 -- ^ IY index register
+        , _sp      :: Z80addr                                 -- ^ Stack pointer
+        , _ipage   :: Z80word                                 -- ^ Interrupt page
+        , _refresh :: Z80word                                 -- ^ (Dynamic memory) Refresh register
+        , _iff1    :: Bool                                    -- ^ Interrupt flip-flop 1
+        , _iff2    :: Bool                                    -- ^ Interrupt flip-flip 2
+        , _intmode :: Int                                     -- ^ Interrupt mode (IM 0, 1 or 2)
         }
 
 -- Emit Template Haskell hair for lenses

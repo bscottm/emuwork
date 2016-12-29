@@ -1,6 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE DeriveDataTypeable    #-}
 
 -- | Basic types for all machine disassemblers
 module Machine.DisassemblerTypes
@@ -36,8 +34,7 @@ import           Data.Vector.Unboxed    (Unbox, Vector)
 import qualified Data.Vector.Unboxed    as DVU
 import           Data.Word
 
-import           Machine.MemorySystem
-import           Machine.EmulatedSystem
+import           Machine.Types
 import           Machine.ProgramCounter
 
 -- | 'DisasmElement' is a dissassembly element: a disassembled instruction (with corresponding address and instruction
@@ -172,33 +169,41 @@ mkLabeledAddress :: addrType
 mkLabeledAddress = Labeled
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- | 'DisElement' post-processing function synonym (but does this really cut down on typing or
--- just make the Haddock output that more readable?)
-type DisElementPostProc disasmState insnType memSys addrType wordType extPseudoType =
-  ( DisElement insnType addrType wordType extPseudoType -- Decoded instruction or pseudo-operation
-    -> MemorySystem addrType wordType                   -- Memory system
-    -> ProgramCounter addrType                          -- Current program counter
-    -> disasmState                                      -- Incoming disassembly state
-    -> (ProgramCounter addrType, disasmState)           -- Resulting disassembly state
+-- | 'DisElement' post-processing function synonym
+type DisElementPostProc disasmState cpuType insnType addrType wordType extPseudoType =
+  ( DisElement insnType addrType wordType extPseudoType
+    -- Decoded instruction or pseudo-operation
+    -> EmulatedSystem cpuType insnType addrType wordType
+    -- Memory system
+    -> ProgramCounter addrType
+    -- Current program counter
+    -> disasmState
+    -- Incoming disassembly state
+    -> (ProgramCounter addrType, disasmState, EmulatedSystem cpuType insnType addrType wordType)
+    -- Resulting disassembly state
   )
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | The 'Disassembler' type class and generic interface to disassemblers.
-class Disassembler disasmState insnType addrType wordType extPseudoType where
+class Disassembler disasmState cpuType insnType addrType wordType extPseudoType where
   -- | The main disassembler function
-  disassemble :: disasmState                            -- ^ The incoming disassembly state. This data type should collect
-                                                        -- the disassembled instruction, associated pseudo-operations.
-              -> EmulatedSystem procInternals addrType wordType insnType
-                                                        -- ^ Emulated system that contains the memory system and
-                                                        -- instruction decoder
-              -> ProgramCounter addrType                -- ^ Starting address to disassemble
-              -> ProgramCounter addrType                -- ^ Last address to disassemble
-              -> DisElementPostProc disasmState insnType memSys addrType wordType extPseudoType
-                                                        -- ^ Post-processing function that is be applied after disasembling
-                                                        -- an instruction. This is useful for situations such as the TRS-80
-                                                        -- BASIC ROM, where the \'RST 08\' instruction is always followed by
-                                                        -- a byte and two should be emitted together.
-                                                        -- in the actual disassembler.
-              -> disasmState                            -- ^ The resulting disassembly sequence
+  disassemble :: disasmState
+              -- ^ The incoming disassembly state. This data type should collect
+              -- the disassembled instruction, associated pseudo-operations.
+              -> EmulatedSystem cpuType insnType addrType wordType
+              -- ^ Emulated system that contains the memory system and
+              -- instruction decoder
+              -> ProgramCounter addrType
+              -- ^ Starting address to disassemble
+              -> ProgramCounter addrType
+              -- ^ Last address to disassemble
+              -> DisElementPostProc disasmState cpuType insnType addrType wordType extPseudoType
+              -- ^ Post-processing function that is be applied after disasembling
+              -- an instruction. This is useful for situations such as the TRS-80
+              -- BASIC ROM, where the \'RST 08\' instruction is always followed by
+              -- a byte and two should be emitted together.
+              -- in the actual disassembler.
+              -> (disasmState,  EmulatedSystem cpuType insnType addrType wordType)
+              -- ^ The resulting disassembly sequence
 
 -- | The null/empty pseudo operation. This is primarily useful for testing or in cases where the disassembled output is simply
 -- binary.

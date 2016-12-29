@@ -4,6 +4,7 @@ module Main (main) where
 
 import           Control.Lens
 import           Control.Monad
+import           Data.Word
 import           System.Console.GetOpt
 import           System.Environment
 import           System.Exit
@@ -52,7 +53,7 @@ instance CmdLineDispatch AnyEmulator where
   knownAs (AnyEmulator emu) = knownAs emu
   cmdLineDispatch (AnyEmulator emu) = cmdLineDispatch emu
 
-instance CmdLineDispatch Machine.NullSystem where
+instance CmdLineDispatch (Machine.NullSystem Word32 Word32) where
   identify emuName emu = emuName `elem` emu ^. Machine.sysAliases
   formalName emu       = emu ^. Machine.sysName
   knownAs emu          = emu ^. Machine.sysAliases
@@ -68,7 +69,7 @@ data AnyEmulator where
   AnyEmulator :: CmdLineDispatch emu => emu -> AnyEmulator
 
 knownEmulators :: [ AnyEmulator ]
-knownEmulators = [ AnyEmulator Machine.nullProcessor
+knownEmulators = [ AnyEmulator (Machine.nullSystem :: Machine.NullSystem Word32 Word32)
                  , AnyEmulator TRS80.trs80generic
                  ]
 

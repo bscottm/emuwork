@@ -1,12 +1,12 @@
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_HADDOCK ignore-exports #-}
 
 -- | The Haskell representation of the Z80 instruction set
 module Z80.InstructionSet
   ( -- * Types
-    Z80emulation
-  , Z80system
-  , Z80instruction(..)
+    Z80instruction(..)
   , Z80condC(..)
   , Z80reg8(..)
   , Z80reg16(..)
@@ -36,15 +36,6 @@ import qualified Data.Text as T
 
 import           Machine
 import           Z80.Processor
-
--- | Shorthand for the Z80\'s 'EmulatedProcessor' type. This is defined here because 'Z80instruction' is required
--- and would otherwise form a module import cycle.
-type Z80emulation = EmulatedProcessor Z80state Z80addr Z80instruction
-
--- | Shorthand for a Z80 emulated system, with a phantom type. The phantom type
--- acts as a discriminant between different kinds of Z80 systems, e.g., the
--- TRS-80 Model I.
-type Z80system sysType = EmulatedSystem Z80state Z80addr Z80word Z80instruction
 
 -- | The Z80 instruction set
 data Z80instruction where
