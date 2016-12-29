@@ -68,20 +68,20 @@ instance (Bits addrType, FiniteBits addrType) => Bits (ProgramCounter addrType) 
   {-# INLINE bitSize #-}
   {-# INLINE popCount #-}
   {-# INLINE isSigned #-}
-  bit b                         = PC (bit b)
-  testBit (PC a)                = testBit a
-  (PC a) .&.   (PC b)           = PC (a .&. b)
-  (PC a) .|.   (PC b)           = PC (a .|. b)
-  (PC a) `xor` (PC b)           = PC (a `xor` b)
-  complement (PC a)             = PC (complement a)
-  (PC a) `shift` amt            = PC (a `shift` amt)
-  (PC a) `shiftL` amt           = PC (a `shiftL` amt)
-  (PC a) `shiftR` amt           = PC (a `shiftR` amt)
-  (PC a) `rotate` amt           = PC (a `rotate` amt)
-  bitSizeMaybe (PC a)           = bitSizeMaybe a
-  bitSize (PC a)                = finiteBitSize a
-  popCount (PC a)               = popCount a
-  isSigned (PC a)               = isSigned a
+  testBit (PC a)      = testBit a
+  bit b               = PC (bit b)
+  (PC a) .&.   (PC b) = PC (a .&. b)
+  (PC a) .|.   (PC b) = PC (a .|. b)
+  (PC a) `xor` (PC b) = PC (a `xor` b)
+  complement (PC a)   = PC (complement a)
+  (PC a) `shift` amt  = PC (a `shift` amt)
+  (PC a) `shiftL` amt = PC (a `shiftL` amt)
+  (PC a) `shiftR` amt = PC (a `shiftR` amt)
+  (PC a) `rotate` amt = PC (a `rotate` amt)
+  bitSizeMaybe (PC a) = bitSizeMaybe a
+  bitSize (PC a)      = finiteBitSize a
+  popCount (PC a)     = popCount a
+  isSigned (PC a)     = isSigned a
 
 -- | Admit 'ProgramCounter' into the 'FiniteBits' type class
 instance (FiniteBits addrType) => FiniteBits (ProgramCounter addrType) where
@@ -94,3 +94,7 @@ pcDisplace :: (SignExtend dispType, Num addrType, FiniteBits addrType) =>
            -> ProgramCounter addrType
            -> ProgramCounter addrType
 pcDisplace disp (PC pc) = PC (pc + signExtend disp)
+
+instance (ShowHex addrType) => ShowHex (ProgramCounter addrType) where
+  as0xHex pc = as0xHex (unPC pc)
+  asHex pc   = asHex (unPC pc)

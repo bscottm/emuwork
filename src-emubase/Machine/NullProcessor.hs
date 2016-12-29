@@ -26,7 +26,7 @@ nullProcessor = EmulatedSystem
 
 -- | Processor operations
 instance ProcessorOps NullProcState Word32 Word32 where
-  idecode pc _mem = DecodedInsn pc NullProcState
+  idecode pc mem = (DecodedInsn pc NullProcState, mem)
 
 nullProcCmdDispatch :: EmulatedSystem procType addrType wordType insnSet
                     -> [String]

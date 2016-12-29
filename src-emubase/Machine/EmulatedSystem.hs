@@ -42,7 +42,7 @@ class ProcessorOps insnSet addrType wordType where
           -- ^ Current program counter, from where instructions are fetched
           -> MemorySystem addrType wordType
           -- ^ The memory system
-          -> DecodedInsn insnSet addrType
+          -> (DecodedInsn insnSet addrType, MemorySystem addrType wordType)
           -- ^ The decoded instruction
 
 -- | 'EmulatedSystem' encapsulates the various parts required to emulate a system (processor, memory, ...)

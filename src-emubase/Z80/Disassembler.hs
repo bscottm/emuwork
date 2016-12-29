@@ -1,4 +1,9 @@
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -- | The Z80 disassembler module
 module Z80.Disassembler
@@ -55,7 +60,7 @@ data Z80PseudoOps where
 -- | Z80 instruction or pseudo operation contains an address?
 isZ80AddrIns :: Z80DisasmElt
              -> Bool
-isZ80AddrIns (ExtPseudo ByteExpression{}) = True
+isZ80AddrIns (ExtPseudo ByteExpression{})   = True
 isZ80AddrIns elt                            = disEltHasAddr elt
 
 -- | Extract address component from a Z80 disassembler element
@@ -108,47 +113,56 @@ disasm :: Z80disassembly                        -- ^ Incoming disassembly sequen
             -> Z80memory
             -> Z80PC
             -> Z80disassembly
-            -> (Z80PC, Z80disassembly)
+            -> (Z80PC, Z80disassembly, Z80memory)
           )                                     -- ^ Post-processing function
-       -> Z80disassembly                        -- ^ Resulting disassmbly sequence and state
-disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate
+       -> (Z80disassembly, Z80memory)           -- ^ Resulting disassmbly sequence and state
+disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate theMem
   where
     theMem        = theSystem ^. memory
     addrInDisasmF = dstate    ^. addrInDisasmRange
 
-    disasm' pc curDState
+    disasm' pc curDState msys
       --   | trace ("disasm " ++ (show pc)) False = undefined
       | pc <= lastpc =
-        let DecodedInsn newpc insn = idecode pc theMem
+        let (DecodedInsn newpc insn, msys') = idecode pc msys
             -- Identify symbols where absolute addresses are found and build up a symbol table for a later
             -- symbol translation pass:
             curDState'             =
               case insn of
                 -- Somewhat dubious:
-                -- LD (RPair16ImmLoad _rp (AbsAddr addr))  -> collectSymtab curDState addr "M"
-                LD (HLIndirectStore (AbsAddr addr))     -> collectSymtab curDState addr "M"
-                LD (HLIndirectLoad  (AbsAddr addr))     -> collectSymtab curDState addr "M"
-                LD (RPIndirectLoad _rp (AbsAddr addr))  -> collectSymtab curDState addr "M"
-                LD (RPIndirectStore _rp (AbsAddr addr)) -> collectSymtab curDState addr "M"
-                DJNZ (AbsAddr addr)                     -> collectSymtab curDState addr "L"
-                JR (AbsAddr addr)                       -> collectSymtab curDState addr "L"
-                JRCC _cc (AbsAddr addr)                 -> collectSymtab curDState addr "L"
-                JP (AbsAddr addr)                       -> collectSymtab curDState addr "L"
-                JPCC _cc (AbsAddr addr)                 -> collectSymtab curDState addr "L"
-                CALL (AbsAddr addr)                     -> collectSymtab curDState addr "SUB"
-                CALLCC _cc (AbsAddr addr)               -> collectSymtab curDState addr "SUB"
+                -- LD (RPair16ImmLoad _rp (AbsAddr addr))  -> doCollectSymtab "M"
+                LD (HLIndirectStore (AbsAddr addr))     -> doCollectSymtab addr "M"
+                LD (HLIndirectLoad  (AbsAddr addr))     -> doCollectSymtab addr "M"
+                LD (RPIndirectLoad _rp (AbsAddr addr))  -> doCollectSymtab addr "M"
+                LD (RPIndirectStore _rp (AbsAddr addr)) -> doCollectSymtab addr "M"
+                DJNZ (AbsAddr addr)                     -> doCollectSymtab addr "L"
+                JR (AbsAddr addr)                       -> doCollectSymtab addr "L"
+                JRCC _cc (AbsAddr addr)                 -> doCollectSymtab addr "L"
+                JP (AbsAddr addr)                       -> doCollectSymtab addr "L"
+                JPCC _cc (AbsAddr addr)                 -> doCollectSymtab addr "L"
+                CALL (AbsAddr addr)                     -> doCollectSymtab addr "SUB"
+                CALLCC _cc (AbsAddr addr)               -> doCollectSymtab addr "SUB"
                 _otherwise                              -> curDState
-            (newpc', curDState'')  = postProc (mkDisasmInst pc newpc theMem insn) theMem newpc curDState'
-        in  disasm' newpc' curDState''
-      | otherwise = curDState
+            doCollectSymtab                = collectSymtab curDState
+            (disAsmInst, msys'')           = mkZ80DisasmInsn pc newpc msys' insn
+            (newpc', curDState'', msys''') = postProc disAsmInst msys'' newpc curDState'
+        in  disasm' newpc' curDState'' msys'''
+      | otherwise = (curDState, msys)
 
-    mkDisasmInst :: Z80PC -> Z80PC -> Z80memory -> Z80instruction -> Z80DisasmElt
-    mkDisasmInst (PC oldpc) (PC newpc) msys ins =
-      let opcodes = mReadN msys oldpc (fromIntegral (newpc - oldpc))
+    mkZ80DisasmInsn :: Z80PC
+                    -> Z80PC
+                    -> Z80memory 
+                    -> Z80instruction
+                    -> (Z80DisasmElt, Z80memory)
+    mkZ80DisasmInsn oldpc newpc msys ins =
+      let (opcodes, msys') = mReadN msys (unPC oldpc) (fromIntegral (newpc - oldpc))
           cmnt
-            | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- ins, addrInDisasmF addr = "INTREF"
-            | otherwise                                                         = T.empty
-      in  mkDisasmInsn oldpc opcodes ins cmnt
+            | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- ins
+            , addrInDisasmF addr
+            = "INTREF"
+            | otherwise
+            = T.empty
+      in  (mkDisasmInsn (unPC oldpc) opcodes ins cmnt, msys')
     -- Probe the symbol table for 'destAddr', add a new symbol for this address, if in the range of the disassembled
     -- memory
     collectSymtab curDState destAddr prefix =
@@ -166,40 +180,43 @@ z80disbytes :: Z80disassembly                   -- ^ Current disassembly state
             -> Z80memory                        -- ^ Vector of bytes from which to extract some data
             -> Z80PC                            -- ^ Start address from which to grab bytes
             -> Z80disp                          -- ^ Number of bytes to extract
-            -> Z80disassembly                   -- ^ Resulting diassembly state
-z80disbytes dstate mem (PC sAddr) nBytes =
-  disasmSeq %~ (|> mkByteRange sAddr (mReadN mem sAddr (fromIntegral nBytes))) $ dstate
+            -> (Z80disassembly, Z80memory)      -- ^ Resulting diassembly state
+z80disbytes dstate mem sAddr nBytes =
+  let (memvec, mem') = mReadN mem (unPC sAddr) (fromIntegral nBytes)
+  in  (over disasmSeq (|> mkByteRange (unPC sAddr) memvec) dstate, mem')
 
 -- | Grab (what is presumably) an ASCII string sequence, terminating at the first 0 encountered. This is somewhat inefficient
 -- because multiple 'Vector' slices get created.
 z80disasciiz :: Z80disassembly                  -- ^ Current disassembly state
              -> Z80memory                       -- ^ Vector of bytes from which to extract some data
              -> Z80PC                           -- ^ Start address
-             -> Z80disassembly                  -- ^ Resulting diassembly state
+             -> (Z80disassembly, Z80memory)     -- ^ Resulting diassembly state
 z80disasciiz dstate mem (PC sAddr) =
-  let sRange       = maxBound - sAddr
-      toSearch     = mReadN mem sAddr (fromIntegral sRange)
-      foundStr idx = mkAsciiZ sAddr (DVU.slice 0 (idx + 1) toSearch)
+  -- FIXME: Don't search the entire contents of memory...
+  let sRange           = maxBound - sAddr
+      (toSearch, mem') = mReadN mem sAddr (fromIntegral sRange)
+      foundStr idx     = mkAsciiZ sAddr (DVU.slice 0 (idx + 1) toSearch)
   in  case DVU.elemIndex 0 toSearch of
-        Nothing  -> dstate                      -- Not found?
-        Just idx -> disasmSeq %~ (|> foundStr idx) $ dstate
+        Nothing  -> (dstate, mem')              -- Not found?
+        Just idx -> (over disasmSeq (|> foundStr idx) dstate, mem')
 
 -- | Grab a sequence of bytes from the memory image, add to the disassembly sequence as a 'ByteRange' pseudo instruction
 z80disascii :: Z80disassembly                   -- ^ Current disassembly state
             -> Z80memory                        -- ^ Vector of bytes from which to extract some data
             -> Z80PC                            -- ^ Start address from which to start extracting bytes
             -> Z80disp                          -- ^ Number of bytes to extract
-            -> Z80disassembly                   -- ^ Resulting diassembly state
-z80disascii dstate mem (PC sAddr) nBytes =
-  disasmSeq %~ (|> (mkAscii sAddr $ mReadN mem sAddr (fromIntegral nBytes))) $ dstate
+            -> (Z80disassembly, Z80memory)      -- ^ Resulting diassembly state
+z80disascii dstate mem sAddr nBytes =
+  let (memvec, mem') = mReadN mem (unPC sAddr) (fromIntegral nBytes)
+  in  (over disasmSeq (|> mkAscii (unPC sAddr) memvec) dstate, mem')
 
 -- | Z80 default instruction post processor. This merely appends the decoded instruction onto the disassembly sequence.
 z80DefaultPostProcessor :: Z80DisasmElt
                         -> Z80memory
                         -> Z80PC
                         -> Z80disassembly
-                        -> (Z80PC, Z80disassembly)
-z80DefaultPostProcessor elt _mem pc z80dstate = (pc, disasmSeq %~ (|> elt) $ z80dstate)
+                        -> (Z80PC, Z80disassembly, Z80memory)
+z80DefaultPostProcessor elt mem pc z80dstate = (pc, over disasmSeq (|> elt) z80dstate, mem)
 
 -- | 'Disassembler' type family instance for the Z80's disassembler
 instance Disassembler Z80disassembly Z80instruction Z80addr Z80word Z80PseudoOps where

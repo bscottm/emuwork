@@ -49,6 +49,7 @@ module Machine.MemorySystem
   , sanityCheck
   ) where
 
+import           Control.Arrow                   (first)
 import           Control.Lens                    (Lens', over, to, view, (%~), (&), (+~), (-~), (.~), (^.), (|>))
 import qualified Data.Foldable                   as Fold (foldl')
 import qualified Data.IntervalMap.Generic.Strict as IM
@@ -117,6 +118,7 @@ instance (Show addrType, Show wordType, DVU.Unbox wordType) =>
     "DevMemRegion"
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- Internal constants
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Pending write queue maximum depth
@@ -126,6 +128,8 @@ maxPending = 71
 -- | Number of pending writes to flush when 'maxPending' is reached
 maxFlush :: Int
 maxFlush = maxPending `div` 2
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Shorthand for the interval map of memory regions
 type MemRegionMap addrType wordType = IM.IntervalMap (I.Interval addrType) (MemoryRegion addrType wordType)
@@ -158,6 +162,8 @@ regions f msys = (\regions' -> msys { _regions = regions' }) <$> f (_regions msy
 -- | Create an empty memory system (alternately: 'mempty')
 initialMemorySystem :: MemorySystem addrType wordType
 initialMemorySystem = MSys { _regions = IM.empty }
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Create a new RAM memory region. __/Note:/__ memory regions may not overlap; 'error' will signal if this
 -- precondition fails.
@@ -214,20 +220,33 @@ mkDevRegion sa ea devM msys =
       then over regions (IM.insertWith const (I.ClosedInterval sa ea) newRegion) msys
       else error ("mkDevRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- Read/write memory
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+-- | Return type for 'mRead'. It has to be this way because devices __can__ (and usually __do__) change
+-- state when read, producing an altered 'MemorySystem'
+type MemRead addrType wordType = (wordType, MemorySystem addrType wordType)
+-- | Return type for 'mReadN'. Devices __can__ and usually __do__ change state when read, producing an altered
+-- 'MemorySystem'.
+type MemReadN addrType wordType = (Vector wordType, MemorySystem addrType wordType)
+
 -- | Fetch a word from a memory address. Note: If the address does not correspond to a region (i.e., the address does not
 -- intersect a region), zero is returned.
 mRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
           MemorySystem addrType wordType
        -> addrType
-       -> wordType
+       -> MemRead addrType wordType
 mRead !msys !addr =
-  let regs = IM.containing (msys ^. regions) addr
-      getContent acc iv mr = acc |> fromMaybe (view contents mr ! fromIntegral (addr - I.lowerBound iv))
-                                              (lookupPendingWrite addr (mr ^. writesPending))
-      vals = IM.foldlWithKey getContent [] regs
+  let getContent (vals', msys') iv mr@DevMemRegion{} = undefined
+      getContent (vals', msys') iv mr =
+        let memval = fromMaybe (view contents mr ! fromIntegral (addr - I.lowerBound iv))
+                               (lookupPendingWrite addr (mr ^. writesPending))
+            in (vals' |> memval, msys')
+      (vals, msys'') = IM.foldlWithKey getContent ([], msys) (IM.containing (msys ^. regions) addr)
       -- FIXME: Need another function that throws an exception (polluting everything with the IO monad) or otherwise signals
       -- that the read was from unmapped memory.
-  in  if not (null vals) then head vals else 0
+  in  (if not (null vals) then head vals else 0, msys'')
 
 -- | Fetch a sequence of words from memory. The start and end addresses do not have reside in the same memory region;
 -- gaps between regions will be filled with zeroes.
@@ -238,26 +257,30 @@ mReadN :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType
         -- ^ Starting address
         -> Int
         -- ^ Number of words to read
-        -> Vector wordType
+        -> MemReadN addrType wordType
         -- ^ Contents read from memory
 mReadN !msys !sa !nWords
+  {- Trivial optimization: Could also do this for other small numbers, e.g., nWords <= 4 -}
   | nWords == 1
-  = DVU.singleton (mRead msys sa)
+  = first DVU.singleton (mRead msys sa)
   | otherwise
-  = let regs                        = IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea)
-        ea                          = sa + fromIntegral (nWords - 1)
-        ((_, remain', accum), _)    = IM.mapAccumWithKey getContent (sa, nWords, ([] ++)) regs
-        getContent (addr, remaining, vl) ivl reg
+  = let memRegions                           = IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea)
+        ea                                   = sa + fromIntegral (nWords - 1)
+        ((_, remain', accum, resultMsys), _) = IM.mapAccumWithKey getContent (sa, nWords, ([] ++), msys) memRegions
+        getContent (addr, remaining, vl, msys') ivl reg
           {-  | trace ("addr = " ++ as0xHexS addr ++ " remaining = " ++ show remaining) False = undefined -}
+          | DevMemRegion devM <- reg
+          = undefined
+          {- Other regions must have actual content -}
           | addr >= lb  = let vl'    = (vl [DVU.slice (fromIntegral addr - fromIntegral lb) nb rcontent] ++)
                               nb     = min (fromIntegral ub - fromIntegral addr) remaining
-                              accum' = (addr + fromIntegral nb, remaining - nb, vl')
+                              accum' = (addr + fromIntegral nb, remaining - nb, vl', msys')
                           in  (accum', reg)
           | addr < lb   = let flen   = fromIntegral (lb - addr)
                               nb'    = min (fromIntegral (ub - lb)) (remaining - flen)
                               nread  = nb' + flen
                               vl'    = (vl [DVU.replicate flen 0, DVU.slice 0 nb' rcontent] ++)
-                              accum' = (addr + fromIntegral nread, remaining - nread, vl')
+                              accum' = (addr + fromIntegral nread, remaining - nread, vl', msys')
                           in  (accum', reg)
           -- Squelch GHC pattern warning...
           | otherwise   = error ("How'd I get here? addr = " ++ as0xHexS addr ++ " remaining " ++ show remaining)
@@ -268,12 +291,12 @@ mReadN !msys !sa !nWords
         endfill                    = [DVU.replicate remain' 0]
         -- And ensure that pending writes in the regions are also included. This uses the same pattern that 'showS' uses,
         -- threading a list function across the regions so that concatenation only happens once and has linear performance.
-        writes                = Fold.foldl' getWrites ([] ++) regs []
+        writes                = Fold.foldl' getWrites ([] ++) memRegions []
         getWrites pend reg    = (pend (reg ^. writesPending . lrucPsq . to filterWrites) ++)
         filterWrites psq      = [(a - sa, v) | (a, _, v) <- OrdPSQ.toList psq, a >= sa && a <= ea ]
         idxvec                = DVU.fromList (map (fromIntegral . fst) writes)
         valvec                = DVU.fromList (map snd writes)
-    in  DVU.update_ ((DVU.concat . accum) endfill) idxvec valvec
+    in  (DVU.update_ ((DVU.concat . accum) endfill) idxvec valvec, resultMsys)
 
 -- | Fetch an entity from memory at the current program counter, return the (incremented pc, contents)
 -- pair.
@@ -282,7 +305,7 @@ mReadAndIncPC :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
                -- ^ Current program counter
                -> MemorySystem addrType wordType
                -- ^ The memory system from which the word will be fetched
-               -> (ProgramCounter addrType, wordType)
+               -> (ProgramCounter addrType, MemRead addrType wordType)
                -- ^ Updated program counter and fetched word
 mReadAndIncPC !pc !mem = (pc + 1, mRead mem (unPC pc))
 
@@ -292,7 +315,7 @@ mIncPCAndRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
               -- ^ Current progracm counter
                -> MemorySystem addrType wordType
                -- ^ Memory system from which word will be fetched
-               -> (ProgramCounter addrType, wordType)
+               -> (ProgramCounter addrType, MemRead addrType wordType)
                -- ^ Updated program counter and fetched word
 mIncPCAndRead !pc !mem = let pc' = pc + 1
                          in  (pc', mRead mem (unPC pc'))

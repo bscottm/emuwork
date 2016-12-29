@@ -1,3 +1,5 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 -- | The Z80 processor emulation module.
 module Z80.Processor
   ( -- * Types

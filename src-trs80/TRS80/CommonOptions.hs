@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 {-# OPTIONS_HADDOCK ignore-exports #-}
 
 {- | TRS-80 common option processing.
@@ -29,7 +30,7 @@ data CommonOptions where
   -- | Collected options to configure a TRS-80 Model I system. This is normally what gets
   -- returned.
   CommonOptions ::
-    { imageReader :: (FilePath -> IO (Vector Word8))
+    { imageReader :: FilePath -> IO (Vector Word8)
     , romPath     :: FilePath
     , memSize     :: Int
     } -> CommonOptions
@@ -87,31 +88,30 @@ commonOptions =
 validateOptions :: CommonOptions
                 -> IO CommonOptions
 validateOptions (InvalidReader rdr) =
-  (hPutStr stderr $ unlines [ ("Invalid ROM reader format: " ++ rdr)
-                            , "Valid formats are 'ihex', 'intelhex' or 'raw'"
-                            , ""
-                            ])
+  hPutStr stderr (unlines [ "Invalid ROM reader format: " ++ rdr
+                          , "Valid formats are 'ihex', 'intelhex' or 'raw'"
+                          , ""
+                          ])
   >> commonOptionUsage
   >> return InvalidOptions
 validateOptions InvalidOptions =
   hPutStrLn stderr "InvalidOptions while validating options?"
   >> return InvalidOptions
 validateOptions (InvalidMemSize msize) =
-  (hPutStr stderr $ unlines [ "Invalid memory size (" ++ msize ++ "), expected 16, 32 or 48"
-                            , ""
-                            ])
+  hPutStr stderr (unlines [ "Invalid memory size (" ++ msize ++ "), expected 16, 32 or 48"
+                          , ""
+                          ])
   >> commonOptionUsage
   >> return InvalidOptions
 validateOptions opts
   | null (romPath opts)
-  = (hPutStr stderr $ unlines [ "TRS-80 ROM file name missing."
-                              , ""
-                              ])
+  = hPutStr stderr (unlines [ "TRS-80 ROM file name missing."
+                            , ""
+                            ])
     >> commonOptionUsage
     >> return InvalidOptions
   | otherwise
   = return opts
 
 commonOptionUsage :: IO ()
-commonOptionUsage = do
-  hPutStrLn stderr (usageInfo "Common options:" commonOptions)
+commonOptionUsage = hPutStrLn stderr (usageInfo "Common options:" commonOptions)
