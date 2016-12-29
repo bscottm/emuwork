@@ -4,16 +4,16 @@ module Reader.RawFormat
     readRawWord8Vector
   ) where
 
-import System.IO
-import Control.Exception
-import qualified Data.ByteString.Lazy as BL
-import Control.Monad (zipWithM_)
+import           Control.Exception
+import           Control.Monad               (zipWithM_)
+import qualified Data.ByteString.Lazy        as BL
+import           System.IO
 
-import Data.Word
-import qualified Data.Vector.Unboxed as DVU
+import qualified Data.Vector.Unboxed         as DVU
 import qualified Data.Vector.Unboxed.Mutable as M
+import           Data.Word
 
-import Reader.ErrorHandling
+import           Reader.ErrorHandling
 
 -- | Read a raw 'Word8' vector from a file.
 --

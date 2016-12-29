@@ -1,34 +1,34 @@
 {-# OPTIONS_HADDOCK ignore-exports #-}
 
 -- | Intel Hex format parser/reader
-module Reader.IntelHex 
+module Reader.IntelHex
   ( readIntelHexVector
   ) where
 
 -- import Debug.Trace
 
-import Numeric
-import System.IO
-import Data.Word
-import Data.Char (digitToInt)
-import Data.Bits (xor, shiftR, (.&.))
-import Control.Exception hiding (try)
-import Control.Applicative ((*>))
-import Control.Monad (liftM, zipWithM_)
-import Control.Monad.Primitive (PrimMonad(..))
-import Control.Monad.ST
-import qualified Data.Foldable as Foldable
-import Text.Parsec
-import Text.Parsec.Text
-import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
-import Data.Vector.Unboxed (Vector)
-import Data.Sequence (Seq)
-import qualified Data.Sequence as Seq
-import qualified Data.Vector.Unboxed as DVU
+import           Control.Applicative         ((*>))
+import           Control.Exception           hiding (try)
+import           Control.Monad               (liftM, zipWithM_)
+import           Control.Monad.Primitive     (PrimMonad (..))
+import           Control.Monad.ST
+import           Data.Bits                   (shiftR, xor, (.&.))
+import           Data.Char                   (digitToInt)
+import qualified Data.Foldable               as Foldable
+import           Data.Sequence               (Seq)
+import qualified Data.Sequence               as Seq
+import qualified Data.Text                   as T
+import qualified Data.Text.IO                as TIO
+import           Data.Vector.Unboxed         (Vector)
+import qualified Data.Vector.Unboxed         as DVU
 import qualified Data.Vector.Unboxed.Mutable as M
+import           Data.Word
+import           Numeric
+import           System.IO
+import           Text.Parsec
+import           Text.Parsec.Text
 
-import Reader.ErrorHandling
+import           Reader.ErrorHandling
 
 readIntelHexVector :: FilePath
                    -> IO (Vector Word8)
@@ -67,7 +67,7 @@ fillVector ihexSeq mvec = Foldable.mapM_ (processLine mvec) ihexSeq
                           >> return mvec
   where
     -- Create a list of indices that are zipped with the actual byte data, and write them into the mutable vector.
-    processLine vec line = 
+    processLine vec line =
      let sAddr = (fromIntegral . addr) line
          eAddr = sAddr + (length . bytes) line
      in  zipWithM_ (M.write vec) [sAddr..eAddr] (bytes line)
@@ -172,7 +172,7 @@ trimEOF ihex =
       else
         ihex
 
--- | Get address + length of the last data record as the maximum address of the 
+-- | Get address + length of the last data record as the maximum address of the
 getLastAddr :: Seq IHexLine
             -> Word16
 getLastAddr ihex = let lastRec = ihex `Seq.index` (Seq.length ihex - 1)

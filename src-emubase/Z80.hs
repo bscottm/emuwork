@@ -14,16 +14,18 @@ import           Z80.Disassembler   as Z80exports
 import           Z80.InsnDecode     as Z80exports
 import           Z80.InstructionSet as Z80exports
 import           Z80.Processor      as Z80exports
+import           Z80.System         as Z80exports
 -- import Z80.ParseAnalytic
 
 import           Z80.InstructionSet (Z80instruction)
-import           Z80.Processor      (Z80memory, Z80state, z80initialState)
+import           Z80.Processor      (Z80state, z80initialState)
+import           Z80.System         (Z80memory)
 
 -- | The Z80 processor instantiation.
-z80processor :: EmulatedProcessor Z80state Z80addr Z80instruction
+z80processor :: Z80emulation
 z80processor = EmulatedProcessor
                { _procPrettyName = "Zilog Z80"
-               , _internals      = z80initialState
+               , _cpu            = z80initialState
                }
 
 -- | Type discriminant for the *z80generic* system. Other Z80-based systems
@@ -34,9 +36,7 @@ data Z80BaseSystem
 -- system because it has no predefined memory regions. The TRS-80, for example, adds a 12K ROM
 -- region and RAM.
 z80generic :: Z80system Z80BaseSystem
-z80generic = EmulatedSystem
-             { _processor   = z80processor
-             , _memory      = initialMemorySystem :: Z80memory
-             , _sysName     = "Generic Z80 system"
-             , _sysAliases  = ["z80generic", "Z80-generic"]
-             }
+z80generic = mkEmulatedSystem z80processor name aliases
+  where
+    name    = "Generic Z80 system"
+    aliases = ["z80generic", "Z80-generic"]
