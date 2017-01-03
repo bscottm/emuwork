@@ -24,13 +24,13 @@ library
     bytestring,
     text,
     vector,
+    mtl >= 2,
     psqueues,
     hashable,
     old-locale,
     comonad,
     IntervalMap,
     lens,
-    transformers,
     syb,
     parsec
 
@@ -88,6 +88,7 @@ test-suite msystest
       unordered-containers,
       bytestring,
       text,
+      mtl >= 2,
       vector,
       psqueues,
       random
@@ -98,6 +99,7 @@ test-suite msystest
       BangPatterns,
       TemplateHaskell
     other-modules:
+      Machine.Device,
       Machine.MemorySystem,
       Machine.ProgramCounter,
       Machine.Utils

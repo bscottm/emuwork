@@ -49,6 +49,7 @@ module Machine.MemorySystem
   , sanityCheck
   ) where
 
+import           Control.Arrow                   ((***))
 import           Control.Lens                    (Lens', over, to, view, (%~), (&), (+~), (-~), (.~), (^.), (|>))
 import qualified Data.Foldable                   as Fold (foldl')
 import qualified Data.IntervalMap.Generic.Strict as IM
@@ -386,8 +387,7 @@ cullPendingWrites :: (Ord addrType) =>
                   -> (Int, LRUWriteCache addrType wordType)
 cullPendingWrites sa ea wp  = (length addrs, over lrucPsq (prunePsq addrs) wp)
   where
-    addrs            = filter addrInRange [a | (a, _, _) <- OrdPSQ.toList (wp ^. lrucPsq)]
-    addrInRange addr = addr >= sa && addr <= ea
+    addrs            = [a | (a, _, _) <- wp ^. lrucPsq . to OrdPSQ.toList, a >= sa && a <= ea]
 
 -- | Count the number of regions in the memory system; used primarily for testing and debugging
 countRegions :: MemorySystem addrType wordType
@@ -406,7 +406,7 @@ sanityCheck :: MemorySystem addrType wordType
             -> Bool
 sanityCheck msys =
   let verifyRegionSize reg = reg ^. writesPending . to sizeLRU == reg ^. nWritesPending
-  in  all verifyRegionSize (IM.elems (view regions msys))
+  in  all verifyRegionSize (msys ^. regions . to IM.elems)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 -- LRU pending write cache implementation, adapted from the psqueues example source. The pending write cache will
@@ -480,19 +480,19 @@ queueLRU :: (Integral addrType, DVU.Unbox wordType) =>
          -- ^ Previously written value, if the modified address was in the pending write queue
 queueLRU !addr !word !sa !mr =
   let LRUWriteCache nextTick psq maxSize = mr ^. writesPending
-      (oldval, psq')                     = OrdPSQ.alter queueAddr addr psq
+      (oldval, psq')                = OrdPSQ.alter queueAddr addr psq
       queueAddr Nothing             = (Nothing, Just (nextTick, word))
       queueAddr (Just (_, oldword)) = (Just oldword, Just (nextTick, word))
-      updateNWrites (Just _) = 0
-      updateNWrites Nothing  = 1
+      updateNWrites (Just _)        = 0
+      updateNWrites Nothing         = 1
       doFlush mreg
         | mreg ^. nWritesPending >= maxPending
         = flushPending maxFlush sa mr'
         | otherwise
         = mreg
-      mr'                                = mr & writesPending  .~ increaseTick (nextTick + 1) psq' maxSize
-                                              & nWritesPending +~ updateNWrites oldval
-      contentVal                         = (mr ^. contents) ! fromIntegral (addr - sa)
+      mr'                            = mr & writesPending  .~ increaseTick (nextTick + 1) psq' maxSize
+                                          & nWritesPending +~ updateNWrites oldval
+      contentVal                     = (mr ^. contents) ! fromIntegral (addr - sa)
   in  (fromMaybe contentVal oldval, doFlush mr')
 
 -- | Flush some of the pending writes to a memory region's content vector
