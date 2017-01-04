@@ -7,7 +7,7 @@ module Machine.Device
     , MemMappedDeviceOps(..)
     ) where
 
-newtype DeviceState dev = DeviceState dev
+newtype DeviceState dev = DeviceState { unDev :: dev }
 
 -- | Type class for basic operations operations on emulated devices.
 class DeviceOps dev where

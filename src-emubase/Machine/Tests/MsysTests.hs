@@ -3,8 +3,9 @@
 
 module Main where
 
+import           Control.Monad (replicateM, unless)
+import           Control.Monad.State.Strict           (runState, get, put)
 import           Control.Arrow                        (first)
-import           Control.Monad.State.Strict           (runState, state)
 import qualified Data.Foldable                        as Fold (foldl)
 import qualified Data.IntervalMap.Interval            as I
 import           Data.List                            (elemIndices)
@@ -14,7 +15,7 @@ import           Data.Vector.Unboxed                  (Vector, (!))
 import qualified Data.Vector.Unboxed                  as DVU
 import           Data.Word
 import           System.IO                            (hPutStrLn, stderr)
-import           System.Random                        (getStdGen, StdGen, Random, RandomGen, randomR)
+import           System.Random                        (getStdGen, setStdGen, randomR, Random, StdGen)
 import           Test.Framework                       (Test, defaultMain, plusTestOptions, testGroup)
 import           Test.Framework.Options               (TestOptions' (..))
 import           Test.Framework.Providers.HUnit       (testCase)
@@ -32,37 +33,39 @@ import           Machine.Utils                        (as0xHexS)
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 main :: IO ()
-main = 
+main =
   do
     stdGen  <- getStdGen
     -- Generate the various random vectors we need to test:
-    let (romImg, stdGen') = generateROMImg stdGen 4096
-        (writePairs, _)   = generateRandWrites stdGen' 32768
-        options           = TestParams { randROMImg     = DVU.fromList romImg
-                                       , randWrites     = DVU.fromList writePairs
-                                       , randWritesMVec = writeRAMInitial randWritesSize
-                                       , randWritesMem  = writeRAMMsys randWritesBase randWritesSize
-                                       }
+    let (romImg, stdGen')        = generateROMImg stdGen 4096
+        (writePairs, stdGen'')   = generateRandWrites stdGen' 32768
+        options                  = TestParams { randROMImg     = DVU.fromList romImg
+                                              , randWrites     = DVU.fromList writePairs
+                                              , randWritesMVec = writeRAMInitial randWritesSize
+                                              , randWritesMem  = writeRAMMsys randWritesBase randWritesSize
+                                              }
+    setStdGen stdGen''
     defaultMain (mkMsysTests options)
   where
-    generateROMImg gen = g1 gen (0, 0xff)
+    generateROMImg gen = finiteRandList gen (0, 0xff)
 
     randWritesBase = 0x0
     randWritesSize = 0x1000 :: Int
 
     generateRandWrites gen lim =
-      let (bytes, gen')  = g1 gen  (0, 0xff) lim
-          (addrs, gen'') = g1 gen' (0, fromIntegral (randWritesSize - 1)) lim
+      let (bytes, gen')  = finiteRandList gen  (0, 0xff) lim
+          (addrs, gen'') = finiteRandList gen' (0, fromIntegral (randWritesSize - 1)) lim
       in  (zip addrs bytes, gen'')
 
-    g1 :: (Random a) => StdGen -> (a, a) -> Int -> ([a], StdGen)
-    g1 gen range 1 =
-      let (v, gen')   = randomR range gen
-      in  ([v], gen')
-    g1 gen range n =
-      let (v, gen')   = randomR range gen
-          (vs, gen'') = g1 gen' range (n - 1)
-      in  (v:vs, gen'')
+finiteRandList :: (Random a) => StdGen -> (a, a) -> Int -> ([a], StdGen)
+finiteRandList gen range lim =
+  let -- There is eta reduction here: the State 's' is an implied extra argument to this function. Note that 'return x'
+      -- is really '(return x) s'
+      -- genRandom :: StateT StdGen Identity a
+      genRandom =
+        get >>= (\gen' -> let (x, gen'') = randomR range gen'
+                          in  put gen'' >> return x)
+  in  runState (replicateM lim genRandom) gen
 
 -- Generated data that gets used by various tests...
 data TestParams =
@@ -79,7 +82,11 @@ data TestParams =
 
 mkMsysTests :: TestParams -> [Test]
 mkMsysTests args =
-  [ testGroup "Memory system construction"
+  [ testGroup "Random lists"
+    [ testCase "Two random lists, l1 /= l2 " test_randLists
+
+    ]
+  , testGroup "Memory system construction"
     [ testCase "One ROM region             " (test_mkROMRegion args)
     , testCase "Two ROM regions            " (test_mkROMRegion2 args)
     , testCase "Two RAM regions            " (test_mkRAMRegion3 args)
@@ -104,7 +111,7 @@ mkMsysTests args =
   , testGroup "RAM write"
     [ testCase "Write/read one byte        " (test_RAMwrite1 args)
     , testCase "Write/read five bytes      " (test_RAMwrite5 args)
-    , testCase "WriteN five bytes          " (test_RAMwrite5n args)
+    , testCase "WriteN/read five bytes     " (test_RAMwrite5n args)
     , testCase "OvewriteN five bytes       " (test_RAMwrite5n2 args)
     , testCase "Sequential write           " (test_RAMSequentialWrite args)
     , plusTestOptions (mkLargeTests (DVU.length (randWrites args) `div` 4))
@@ -113,7 +120,7 @@ mkMsysTests args =
   , testGroup "ROM with gap"
     [ testCase "Read before gap            " (test_gapROMBefore args)
     , testCase "Read entire ROM            " (test_gapROMTotal args)
-    -- , testCase "Sliding window read     " (test_gapWindows args)
+    , testCase "Sliding window read     " (test_gapWindows args)
     ]
   ]
   where
@@ -148,6 +155,12 @@ compareVectors l r lName rName
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 -- The tests...
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
+
+test_randLists :: Assertion
+test_randLists =
+  getStdGen >>= (\stdGen -> let (l1, gen1) = finiteRandList stdGen (0, 0x1000) 10240 :: ([Int], StdGen)
+                                (l2, gen2) = finiteRandList gen1   (0, 0x1000) 10240 :: ([Int], StdGen)
+                            in  setStdGen gen2 >> assertBool "l1 == l2" (l1 /= l2))
 
 test_mkROMRegion :: TestParams -> Assertion
 test_mkROMRegion _args =
@@ -295,27 +308,27 @@ test_gapWindows _args =
         = return ()
         | otherwise
         = let toRead = (totalLen - fromIntegral i)
-          in  inner toRead 0 i
+          in  inner toRead
               >>= (\b -> if b
                          then outer (i + 1) lim
                          else assertFailure ("gapWindows failed at read length " ++ show toRead))
-      inner toRead offs lim
-        {-  | trace ("inner " ++ as0xHexS offs ++ " toRead " ++ show toRead) False = undefined -}
-        | offs == lim
-        = return True
-        | otherwise
-        = let memvec = fst (M.mReadN gapROMMsys (gapROM_addr_1 + offs) toRead)
-              cmpvec = DVU.slice (fromIntegral offs) toRead totalGapVec
-          in if memvec == cmpvec
-             then inner toRead (offs + 1) lim
-             else hPutStrLn stderr ("gapWindows/inner@" ++ as0xHexS offs ++
-                                    ", toRead = " ++ show toRead ++
-                                    " cmpvec " ++ show (DVU.length cmpvec) ++
-                                    " memvec " ++ show (DVU.length memvec))
-                  >> hPutStrLn stderr (as0xHexS (DVU.toList memvec))
-                  >> hPutStrLn stderr (as0xHexS (DVU.toList cmpvec))
-                  >> return False
-  in outer 0 (fromIntegral (totalLen - 1))
+
+      inner toRead = and <$> sequence [gapReadOverWindow toRead (fromIntegral i) | i <- [0..(totalLen - toRead)]]
+      gapReadOverWindow toRead offs =
+        let memvec = fst (M.mReadN gapROMMsys (gapROM_addr_1 + offs) toRead)
+            cmpvec = DVU.slice (fromIntegral offs) toRead totalGapVec
+            passed = memvec == cmpvec
+        in  unless passed
+              ( hPutStrLn stderr ("gapWindows/inner@" ++ as0xHexS offs ++
+                                  ", toRead = " ++ show toRead ++
+                                  " cmpvec " ++ show (DVU.length cmpvec) ++
+                                  " memvec " ++ show (DVU.length memvec))
+                >> hPutStrLn stderr (as0xHexS (DVU.toList memvec))
+                >> hPutStrLn stderr (as0xHexS (DVU.toList cmpvec))
+              )
+            >> return passed
+
+  in sequence [inner w | w <- [0..fromIntegral(totalLen - 1)]] -- outer (0 :: Int) (fromIntegral (totalLen - 1))
 
 test_patchROM01 :: TestParams -> Assertion
 test_patchROM01 _args =
@@ -354,7 +367,7 @@ writeRAMInitial ramSize = DVU.generate ramSize (\x -> fromIntegral (x `mod` 256)
 {-# INLINABLE writeRAMInitial #-}
 
 writeRAMMsys :: Word16 -> Int -> M.MemorySystem Word16 Word8
-writeRAMMsys ramBase ramSize = M.mPatch ramBase initial msys 
+writeRAMMsys ramBase ramSize = M.mPatch ramBase initial msys
   where
     initial = writeRAMInitial ramSize
     msys    = M.mkRAMRegion ramBase ramSize M.initialMemorySystem
