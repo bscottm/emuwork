@@ -2,6 +2,7 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ExistentialQuantification #-}
 
 {-| Representation of system memory.
 
@@ -49,7 +50,7 @@ module Machine.MemorySystem
   , sanityCheck
   ) where
 
-import           Control.Arrow                   (first)
+import           Control.Arrow                   ((***), first)
 import           Control.Lens                    (Lens', over, to, view, (%~), (&), (+~), (-~), (.~), (^.), (|>))
 import qualified Data.Foldable                   as Fold (foldl')
 import qualified Data.IntervalMap.Generic.Strict as IM
@@ -81,9 +82,9 @@ data MemoryRegion addrType wordType where
     { _contents       :: Vector wordType
     -- ^ Memory region's contents (unboxed vector)
     } -> MemoryRegion addrType wordType
-  DevMemRegion :: (MemMappedDeviceOps devM addrType wordType) =>
-    { _device :: devM x
-    } -> MemoryRegion addrType wordType
+  DevMemRegion :: (MemMappedDeviceOps dev addrType wordType) =>
+                  DeviceState dev
+               -> MemoryRegion addrType wordType
 
 -- | Lens for a memory region's contents
 contents :: (DVU.Unbox wordType) =>
@@ -203,19 +204,20 @@ mkROMRegion sa romImg msys =
       else error ("mkROMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- | Create a new region for a memory-mapped device.
-mkDevRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType, MemMappedDeviceOps devM addrType wordType) =>
+mkDevRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType,
+                MemMappedDeviceOps dev addrType wordType) =>
                addrType
             -- ^ Start address of the region
             -> addrType
             -- ^ End address of the region
-            -> devM a
-            -- ^ The device monad
+            -> DeviceState dev
+            -- ^ The device type
             -> MemorySystem addrType wordType
             -- ^ Memory region to augment
             -> MemorySystem addrType wordType
             -- ^ Resulting memory system with the device region inserted
-mkDevRegion sa ea devM msys =
-  let newRegion = DevMemRegion { _device = devM }
+mkDevRegion sa ea dev msys =
+  let newRegion = DevMemRegion dev
   in  if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
       then over regions (IM.insertWith const (I.ClosedInterval sa ea) newRegion) msys
       else error ("mkDevRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
@@ -238,15 +240,17 @@ mRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
        -> addrType
        -> MemRead addrType wordType
 mRead !msys !addr =
-  let getContent (vals', msys') iv mr@DevMemRegion{} = undefined
-      getContent (vals', msys') iv mr =
+  let -- Cute use of arrows to operate on the pair returned by 'devRead':
+      getContent vals' iv (DevMemRegion dev) = (vals' |>) *** DevMemRegion $ devRead addr dev
+      getContent vals' iv mr =
         let memval = fromMaybe (view contents mr ! fromIntegral (addr - I.lowerBound iv))
                                (lookupPendingWrite addr (mr ^. writesPending))
-            in (vals' |> memval, msys')
-      (vals, msys'') = IM.foldlWithKey getContent ([], msys) (IM.containing (msys ^. regions) addr)
+            in (vals' |> memval, mr)
+      -- Devices change a region's internal content; 'updMRs' are the updated memory regions.
+      (vals, updMRs) = IM.mapAccumWithKey getContent [] (IM.containing (msys ^. regions) addr)
       -- FIXME: Need another function that throws an exception (polluting everything with the IO monad) or otherwise signals
       -- that the read was from unmapped memory.
-  in  (if not (null vals) then head vals else 0, msys'')
+  in  (if not (null vals) then head vals else 0, over regions (IM.union updMRs) msys)
 
 -- | Fetch a sequence of words from memory. The start and end addresses do not have reside in the same memory region;
 -- gaps between regions will be filled with zeroes.

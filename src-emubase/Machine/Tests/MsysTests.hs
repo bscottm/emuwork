@@ -1,9 +1,10 @@
 
 {- | 'MemorySystem' exercise module -}
 
-module Main (main) where
+module Main where
 
 import           Control.Arrow                        (first)
+import           Control.Monad.State.Strict           (runState, state)
 import qualified Data.Foldable                        as Fold (foldl)
 import qualified Data.IntervalMap.Interval            as I
 import           Data.List                            (elemIndices)
@@ -13,7 +14,7 @@ import           Data.Vector.Unboxed                  (Vector, (!))
 import qualified Data.Vector.Unboxed                  as DVU
 import           Data.Word
 import           System.IO                            (hPutStrLn, stderr)
-import           System.Random                        (getStdGen, StdGen, Random, randomR)
+import           System.Random                        (getStdGen, StdGen, Random, RandomGen, randomR)
 import           Test.Framework                       (Test, defaultMain, plusTestOptions, testGroup)
 import           Test.Framework.Options               (TestOptions' (..))
 import           Test.Framework.Providers.HUnit       (testCase)

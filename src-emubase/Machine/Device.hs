@@ -1,32 +1,34 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ExistentialQuantification #-}
 
 module Machine.Device
-    ( DeviceOps(..)
+    ( DeviceState(..)
+    , DeviceOps(..)
     , MemMappedDeviceOps(..)
     ) where
 
-import Control.Monad.IO.Class
+newtype DeviceState dev = DeviceState dev
 
--- | Type class for operations on emulated devices, i.e., operations that change the device's internal state
-class (MonadIO devM) => DeviceOps devM where
+-- | Type class for basic operations operations on emulated devices.
+class DeviceOps dev where
   -- | Reset the device to its power-on state
-  reset :: devM x -> devM x
+  reset :: DeviceState dev -> DeviceState dev
 
 -- | Type class for operations on memory-mapped devices
-class (DeviceOps devM) => MemMappedDeviceOps devM addrType wordType where
+class (DeviceOps dev) => MemMappedDeviceOps dev addrType wordType where
   -- | Read a word from the device
   devRead  :: addrType
            -- ^ Address being read
-           -> devM a
+           -> DeviceState dev
            -- ^ The current device state
-           -> (wordType, devM b)
+           -> (wordType, DeviceState dev)
            -- ^ Read word, new device state
   -- | Write a word to a device
   devWrite :: addrType
            -- ^ Device's memory address being written to
            -> wordType
            -- ^ Value to write
-           -> devM a
+           -> DeviceState dev
            -- ^ Current device state
-           -> devM b
+           -> DeviceState dev
            -- ^ Resulting device state
