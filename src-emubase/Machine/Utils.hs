@@ -14,11 +14,11 @@ module Machine.Utils
   , textZero
   ) where
 
-import Data.Int
-import Data.Bits
+import           Data.Bits
+import           Data.Char
+import           Data.Int
 import qualified Data.Text as T
-import Data.Char
-import Data.Word
+import           Data.Word
 
 -- | Type class that converts its output as leading zero, hexadecimal strings. This is fairly well
 -- specialized to particular numeric types

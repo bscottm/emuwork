@@ -3,6 +3,7 @@
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 {-| Representation of system memory.
 
@@ -82,7 +83,7 @@ data MemoryRegion addrType wordType where
     { _contents       :: Vector wordType
     -- ^ Memory region's contents (unboxed vector)
     } -> MemoryRegion addrType wordType
-  DevMemRegion :: (MemMappedDeviceOps dev addrType wordType) =>
+  DevMemRegion :: (MemMappedDevice dev addrType wordType, Show dev) =>
                   DeviceState dev
                -> MemoryRegion addrType wordType
 
@@ -115,8 +116,8 @@ instance (Show addrType, Show wordType, DVU.Unbox wordType) =>
     "RAMRegion " ++ show cntnt ++ " " ++ show wPend ++ " " ++ show nWPend
   show (ROMRegion cntnt) =
     "ROMRegion " ++ show cntnt
-  show DevMemRegion{} =
-    "DevMemRegion"
+  show (DevMemRegion (DeviceState dev)) =
+    "DevMemRegion" ++ show dev
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Internal constants
@@ -205,7 +206,7 @@ mkROMRegion sa romImg msys =
 
 -- | Create a new region for a memory-mapped device.
 mkDevRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType,
-                MemMappedDeviceOps dev addrType wordType) =>
+                MemMappedDevice dev addrType wordType, Show dev) =>
                addrType
             -- ^ Start address of the region
             -> addrType

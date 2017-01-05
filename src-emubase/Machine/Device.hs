@@ -1,13 +1,33 @@
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE ExistentialQuantification #-}
 
 module Machine.Device
-    ( DeviceState(..)
+    ( DeviceManager(..)
+    , DeviceState(..)
     , DeviceOps(..)
-    , MemMappedDeviceOps(..)
+    , MemMappedDevice(..)
     ) where
 
+import Data.HashMap.Strict (HashMap)
+
+data DeviceManager addrType portType where
+  DeviceManager ::
+    { _memDevices :: HashMap addrType (DeviceState dev)
+    , _ioDevices  :: HashMap portType (DeviceState dev)
+    } -> DeviceManager addrType portType
+
 newtype DeviceState dev = DeviceState { unDev :: dev }
+  deriving (Show)
+
+instance Functor DeviceState where
+  fmap f (DeviceState d) = DeviceState (f d)
+
+instance Applicative DeviceState where
+  pure = DeviceState
+  DeviceState f <*> DeviceState d = DeviceState (f d)
+
+instance Monad DeviceState where
+  dev >>= k = k (unDev dev)
 
 -- | Type class for basic operations operations on emulated devices.
 class DeviceOps dev where
@@ -15,7 +35,7 @@ class DeviceOps dev where
   reset :: DeviceState dev -> DeviceState dev
 
 -- | Type class for operations on memory-mapped devices
-class (DeviceOps dev) => MemMappedDeviceOps dev addrType wordType where
+class (DeviceOps dev) => MemMappedDevice dev addrType wordType where
   -- | Read a word from the device
   devRead  :: addrType
            -- ^ Address being read

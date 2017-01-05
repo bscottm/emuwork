@@ -3,9 +3,9 @@
 
 module Main where
 
-import           Control.Monad (replicateM, unless)
-import           Control.Monad.State.Strict           (runState, get, put)
 import           Control.Arrow                        (first)
+import           Control.Monad                        (replicateM, unless)
+import           Control.Monad.State.Strict           (get, put, runState)
 import qualified Data.Foldable                        as Fold (foldl)
 import qualified Data.IntervalMap.Interval            as I
 import           Data.List                            (elemIndices)
@@ -15,13 +15,13 @@ import           Data.Vector.Unboxed                  (Vector, (!))
 import qualified Data.Vector.Unboxed                  as DVU
 import           Data.Word
 import           System.IO                            (hPutStrLn, stderr)
-import           System.Random                        (getStdGen, setStdGen, randomR, Random, StdGen)
+import           System.Random                        (Random, StdGen, getStdGen, randomR, setStdGen)
 import           Test.Framework                       (Test, defaultMain, plusTestOptions, testGroup)
 import           Test.Framework.Options               (TestOptions' (..))
 import           Test.Framework.Providers.HUnit       (testCase)
 import           Test.Framework.Providers.QuickCheck2 (testProperty)
-import           Test.HUnit                           (Assertion, assertBool, assertFailure)
-import           Test.QuickCheck                      (Property, choose, forAll, NonNegative, Large, getNonNegative, getLarge)
+import           Test.HUnit                           (Assertion, assertBool)
+import           Test.QuickCheck                      (Large, NonNegative, Property, choose, forAll, getLarge, getNonNegative)
 
 -- import           Debug.Trace
 
@@ -114,13 +114,13 @@ mkMsysTests args =
     , testCase "WriteN/read five bytes     " (test_RAMwrite5n args)
     , testCase "OvewriteN five bytes       " (test_RAMwrite5n2 args)
     , testCase "Sequential write           " (test_RAMSequentialWrite args)
-    , plusTestOptions (mkLargeTests (DVU.length (randWrites args) `div` 4))
+    , plusTestOptions (mkLargeTests (DVU.length (randWrites args) `div` 8))
                       (testProperty "Random write pairs         " (test_RAMRandReads args 0 0x1000))
     ]
   , testGroup "ROM with gap"
     [ testCase "Read before gap            " (test_gapROMBefore args)
     , testCase "Read entire ROM            " (test_gapROMTotal args)
-    , testCase "Sliding window read     " (test_gapWindows args)
+    , testCase "Sliding window read        " (test_gapWindows args)
     ]
   ]
   where
@@ -299,21 +299,13 @@ test_gapROMBefore _args =
 test_gapWindows :: TestParams -> Assertion
 test_gapWindows _args =
   let totalGapVec = DVU.concat [ gapROMImg_1
-                               , DVU.replicate (fromIntegral gapROM_addr_2 - fromIntegral gapROM_addr_1 - gapROM_len_1) 0
+                               , DVU.replicate (fromIntegral (gapROM_addr_2 - gapROM_addr_1) - gapROM_len_1) 0
                                , gapROMImg_2
                                ]
       totalLen    = DVU.length totalGapVec
-      outer i lim
-        | i == lim
-        = return ()
-        | otherwise
-        = let toRead = (totalLen - fromIntegral i)
-          in  inner toRead
-              >>= (\b -> if b
-                         then outer (i + 1) lim
-                         else assertFailure ("gapWindows failed at read length " ++ show toRead))
 
       inner toRead = and <$> sequence [gapReadOverWindow toRead (fromIntegral i) | i <- [0..(totalLen - toRead)]]
+
       gapReadOverWindow toRead offs =
         let memvec = fst (M.mReadN gapROMMsys (gapROM_addr_1 + offs) toRead)
             cmpvec = DVU.slice (fromIntegral offs) toRead totalGapVec
@@ -328,7 +320,8 @@ test_gapWindows _args =
               )
             >> return passed
 
-  in sequence [inner w | w <- [0..fromIntegral(totalLen - 1)]] -- outer (0 :: Int) (fromIntegral (totalLen - 1))
+  in  and <$> sequence [inner (totalLen - w) | w <- [0..fromIntegral(totalLen - 1)]]
+      >>= assertBool "read gapped window failed"
 
 test_patchROM01 :: TestParams -> Assertion
 test_patchROM01 _args =
