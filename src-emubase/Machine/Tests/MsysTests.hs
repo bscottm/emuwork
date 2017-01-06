@@ -103,6 +103,11 @@ mkMsysTests args =
     , plusTestOptions (mkLargeTests (DVU.length (randROMImg args) * 4))
                       (testProperty "Random image, random reads " (prop_randROMrandom args))
     ]
+  , testGroup "ROM with gap"
+    [ testCase "Read before gap            " (test_gapROMBefore args)
+    , testCase "Read entire ROM            " (test_gapROMTotal args)
+    , testCase "Sliding window read        " (test_gapWindows args)
+    ]
   , testGroup "Patch/forced writes"
     [ testCase "patchROM01                 " (test_patchROM01 args)
     , testCase "patchROM02                 " (test_patchROM02 args)
@@ -116,11 +121,6 @@ mkMsysTests args =
     , testCase "Sequential write           " (test_RAMSequentialWrite args)
     , plusTestOptions (mkLargeTests (DVU.length (randWrites args) `div` 8))
                       (testProperty "Random write pairs         " (test_RAMRandReads args 0 0x1000))
-    ]
-  , testGroup "ROM with gap"
-    [ testCase "Read before gap            " (test_gapROMBefore args)
-    , testCase "Read entire ROM            " (test_gapROMTotal args)
-    , testCase "Sliding window read        " (test_gapWindows args)
     ]
   ]
   where

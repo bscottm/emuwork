@@ -1,54 +1,70 @@
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
+{- | Emulated devices.
+
+
+-}
 module Machine.Device
-    ( DeviceManager(..)
-    , DeviceState(..)
-    , DeviceOps(..)
+    ( -- * Fundamental device types
+      Device(..)
     , MemMappedDevice(..)
+    -- * Device functions
+    , DeviceOps(..)
+    , memDevRead
     ) where
 
-import Data.HashMap.Strict (HashMap)
+import           Control.Arrow              (second)
+import           Control.Monad.State.Strict (State, runState)
 
-data DeviceManager addrType portType where
-  DeviceManager ::
-    { _memDevices :: HashMap addrType (DeviceState dev)
-    , _ioDevices  :: HashMap portType (DeviceState dev)
-    } -> DeviceManager addrType portType
+-- | Boxed device type to cope with the existential 'dev' type.
+data Device where
+  Device :: (DeviceOps dev) =>
+            dev
+         -> Device
 
-newtype DeviceState dev = DeviceState { unDev :: dev }
-  deriving (Show)
+-- | Type class required to operate on boxed devices
+class (Monoid dev) => DeviceOps dev where
+  -- | Device reset. The default assumes the device type is a 'Monoid', ignoring the argument and returning 'mempty'.
+  deviceReset :: dev
+              -- ^ Original device state
+              -> dev
+              -- ^ Reset device state
+  deviceReset _dev = mempty
 
-instance Functor DeviceState where
-  fmap f (DeviceState d) = DeviceState (f d)
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- Memory-mapped devices:
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-instance Applicative DeviceState where
-  pure = DeviceState
-  DeviceState f <*> DeviceState d = DeviceState (f d)
+-- | Type signature for reading a memory-mapped device
+type MemDevReader addrType wordType = addrType -> State Device wordType
 
-instance Monad DeviceState where
-  dev >>= k = k (unDev dev)
+-- | Memory mapped device's internal state. This is a container for the reader function ('MemDevReader'), the writer
+-- function and the actual underlying device itself. It is also a place where the underlying device's state ('_device')
+-- can be updated when reading or writing to the device.
+data MemMappedDevice addrType wordType where
+  -- | A memory-mapped device
+  MemMappedDevice ::
+    { _reader :: MemDevReader addrType wordType
+    -- ^ The reader embedded state transform function
+    , _device :: Device
+    -- ^ The underlying device
+    } -> MemMappedDevice addrType wordType
 
--- | Type class for basic operations operations on emulated devices.
-class DeviceOps dev where
-  -- | Reset the device to its power-on state
-  reset :: DeviceState dev -> DeviceState dev
+instance Show (MemMappedDevice addrType wordType) where
+  show dev = "MemMappedDevice " ++ show dev
 
--- | Type class for operations on memory-mapped devices
-class (DeviceOps dev) => MemMappedDevice dev addrType wordType where
-  -- | Read a word from the device
-  devRead  :: addrType
-           -- ^ Address being read
-           -> DeviceState dev
-           -- ^ The current device state
-           -> (wordType, DeviceState dev)
-           -- ^ Read word, new device state
-  -- | Write a word to a device
-  devWrite :: addrType
-           -- ^ Device's memory address being written to
-           -> wordType
-           -- ^ Value to write
-           -> DeviceState dev
-           -- ^ Current device state
-           -> DeviceState dev
-           -- ^ Resulting device state
+-- | Read a word from a memory-mapped device
+memDevRead :: addrType
+           -- ^ Address to read from
+           -> MemMappedDevice addrType wordType
+           -- ^ The memory-mapped device
+           -> (wordType, MemMappedDevice addrType wordType)
+           -- ^ Value/word read and updated device state pair
+memDevRead addr dev = let updateDev dev' = dev { _device = dev' }
+                      in  second updateDev (runState (_reader dev addr) (_device dev))
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- I/O port devices: These are distinct from memory-mapped because they live in an entirely different
+-- "memory" address space (e.g., Zilog and Intel port I/O)
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=

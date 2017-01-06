@@ -4,7 +4,7 @@
 # http://docs.haskellstack.org/en/stable/yaml_configuration/
 
 # resolver: lts-7.12
-resolver: nightly-2016-12-22
+resolver: nightly-2016-12-31
 
 # User packages to be built.
 # Various formats can be used as shown in the example below.

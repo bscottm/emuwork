@@ -175,15 +175,15 @@ mkLabeledAddress = Labeled
 -- | 'DisElement' post-processing function synonym
 type DisElementPostProc disasmState insnType memSys addrType wordType extPseudoType =
   ( DisElement insnType addrType wordType extPseudoType
-    -- ^ Decoded instruction or pseudo-operation
+    -- Decoded instruction or pseudo-operation
     -> MemorySystem addrType wordType
-    -- ^ Memory system
+    -- Memory system
     -> ProgramCounter addrType
-    -- ^ Current program counter
+    -- Current program counter
     -> disasmState
-    -- ^ Incoming disassembly state
+    -- Incoming disassembly state
     -> (ProgramCounter addrType, disasmState, MemorySystem addrType wordType)
-    -- ^ Resulting disassembly state
+    -- Resulting disassembly state
   )
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | The 'Disassembler' type class and generic interface to disassemblers.

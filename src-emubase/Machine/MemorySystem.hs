@@ -1,9 +1,8 @@
-{-# LANGUAGE BangPatterns          #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE GADTs                 #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE BangPatterns              #-}
 {-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleInstances         #-}
+{-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE MultiParamTypeClasses     #-}
 
 {-| Representation of system memory.
 
@@ -32,6 +31,10 @@ module Machine.MemorySystem
     MemorySystem(..)
   -- * Initialization
   , initialMemorySystem
+  -- * Memory-mapped devices
+  , memDevices
+  , nMemDevices
+  , getMemMappedDev
   -- * Memory Regions
   , mkRAMRegion
   , mkROMRegion
@@ -51,9 +54,11 @@ module Machine.MemorySystem
   , sanityCheck
   ) where
 
-import           Control.Arrow                   ((***), first)
+import           Control.Arrow                   (first, (***))
 import           Control.Lens                    (Lens', over, to, view, (%~), (&), (+~), (-~), (.~), (^.), (|>))
 import qualified Data.Foldable                   as Fold (foldl')
+import           Data.HashMap.Strict             (HashMap)
+import qualified Data.HashMap.Strict             as H
 import qualified Data.IntervalMap.Generic.Strict as IM
 import qualified Data.IntervalMap.Interval       as I
 import           Data.Maybe                      (fromMaybe)
@@ -65,7 +70,7 @@ import           Prelude                         hiding (lookup)
 
 -- import           Debug.Trace
 
-import Machine.Device
+import           Machine.Device
 import           Machine.ProgramCounter
 import           Machine.Utils
 
@@ -83,9 +88,10 @@ data MemoryRegion addrType wordType where
     { _contents       :: Vector wordType
     -- ^ Memory region's contents (unboxed vector)
     } -> MemoryRegion addrType wordType
-  DevMemRegion :: (MemMappedDevice dev addrType wordType, Show dev) =>
-                  DeviceState dev
+  DevMemRegion :: Int
+               -- Index into the memory system's '_memDevices' memory-mapped device container
                -> MemoryRegion addrType wordType
+  deriving (Show)
 
 -- | Lens for a memory region's contents
 contents :: (DVU.Unbox wordType) =>
@@ -105,19 +111,6 @@ writesPending f mregion@DevMemRegion{} = mregion <$ f (initialLRU 0)
 nWritesPending :: Lens' (MemoryRegion addrType wordType) Int
 nWritesPending f mregion@RAMRegion{} = (\n -> mregion { _nWritesPending = n }) <$> f (_nWritesPending mregion)
 nWritesPending f mregion             = mregion <$ f 0
-
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- Show instance
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
-instance (Show addrType, Show wordType, DVU.Unbox wordType) =>
-         Show (MemoryRegion addrType wordType) where
-  show (RAMRegion cntnt wPend nWPend) =
-    "RAMRegion " ++ show cntnt ++ " " ++ show wPend ++ " " ++ show nWPend
-  show (ROMRegion cntnt) =
-    "ROMRegion " ++ show cntnt
-  show (DevMemRegion (DeviceState dev)) =
-    "DevMemRegion" ++ show dev
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Internal constants
@@ -145,6 +138,10 @@ data MemorySystem addrType wordType where
   MSys ::
     { _regions       :: MemRegionMap addrType wordType
     -- ^ Region interval map
+    , _memDevices    :: HashMap Int (MemMappedDevice addrType wordType)
+    -- ^ Container for memory-mapped devices, indexed by an integer identifier
+    , _nMemDevices   :: Int
+    -- ^ Number of devices (and device identifier generator)
     } -> MemorySystem addrType wordType
   deriving (Show)
 
@@ -161,9 +158,26 @@ instance (Ord addrType) => Monoid (MemorySystem addrType wordType) where
 regions :: Lens' (MemorySystem addrType wordType) (MemRegionMap addrType wordType)
 regions f msys = (\regions' -> msys { _regions = regions' }) <$> f (_regions msys)
 
+-- | Lens for the memory-mapped device container
+memDevices :: Lens' (MemorySystem addrType wordType) (HashMap Int (MemMappedDevice addrType wordType))
+memDevices f msys = (\memD -> msys { _memDevices = memD }) <$> f (_memDevices msys)
+
+-- | Lens for the memory-mapped device container
+nMemDevices :: Lens' (MemorySystem addrType wordType) Int
+nMemDevices f msys = (\n -> msys { _nMemDevices = n }) <$> f (_nMemDevices msys)
+
 -- | Create an empty memory system (alternately: 'mempty')
 initialMemorySystem :: MemorySystem addrType wordType
-initialMemorySystem = MSys { _regions = IM.empty }
+initialMemorySystem = MSys { _regions = IM.empty
+                           , _memDevices = H.empty
+                           , _nMemDevices = 0
+                           }
+
+-- | Lookup a memory-mapped device in the `MemorySystem` using its `Int` key.
+getMemMappedDev :: Int
+                -> MemorySystem addrType wordType
+                -> Maybe (MemMappedDevice addrType wordType)
+getMemMappedDev didx = H.lookup didx . view memDevices
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -205,22 +219,23 @@ mkROMRegion sa romImg msys =
       else error ("mkROMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- | Create a new region for a memory-mapped device.
-mkDevRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType,
-                MemMappedDevice dev addrType wordType, Show dev) =>
+mkDevRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType) =>
                addrType
             -- ^ Start address of the region
             -> addrType
             -- ^ End address of the region
-            -> DeviceState dev
+            -> MemMappedDevice addrType wordType
             -- ^ The device type
             -> MemorySystem addrType wordType
             -- ^ Memory region to augment
-            -> MemorySystem addrType wordType
+            -> (Int, MemorySystem addrType wordType)
             -- ^ Resulting memory system with the device region inserted
 mkDevRegion sa ea dev msys =
-  let newRegion = DevMemRegion dev
+  let nextDevIdx = msys ^. nMemDevices + 1
   in  if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
-      then over regions (IM.insertWith const (I.ClosedInterval sa ea) newRegion) msys
+      then (nextDevIdx, msys & nMemDevices .~ nextDevIdx
+                             & regions     %~ IM.insertWith const (I.ClosedInterval sa ea) (DevMemRegion nextDevIdx)
+                             & memDevices  %~ H.insert nextDevIdx dev)
       else error ("mkDevRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -242,16 +257,24 @@ mRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
        -> MemRead addrType wordType
 mRead !msys !addr =
   let -- Cute use of arrows to operate on the pair returned by 'devRead':
-      getContent vals' iv (DevMemRegion dev) = (vals' |>) *** DevMemRegion $ devRead addr dev
-      getContent vals' iv mr =
+      getContent (vals', msys') _iv (DevMemRegion devIdx) =
+        let doMemRead dev' = (vals' |>) *** doDevUpd $ memDevRead addr dev'
+            doDevUpd  dev' = msys' & memDevices %~ H.update (\_ -> Just dev') devIdx
+            defaultVal     = (vals' |> 0, msys')
+        in  maybe defaultVal doMemRead (H.lookup devIdx (msys' ^. memDevices))
+      getContent (vals', msys') iv mr =
         let memval = fromMaybe (view contents mr ! fromIntegral (addr - I.lowerBound iv))
                                (lookupPendingWrite addr (mr ^. writesPending))
-            in (vals' |> memval, mr)
-      -- Devices change a region's internal content; 'updMRs' are the updated memory regions.
-      (vals, updMRs) = IM.mapAccumWithKey getContent [] (IM.containing (msys ^. regions) addr)
+        in (vals' |> memval, msys')
       -- FIXME: Need another function that throws an exception (polluting everything with the IO monad) or otherwise signals
-      -- that the read was from unmapped memory.
-  in  (if not (null vals) then head vals else 0, over regions (IM.union updMRs) msys)
+      -- that the read was from unmapped memory. Or: Provide a function that checks the address is mapped, let that throw
+      -- an exception, otherwise return the value.
+      --
+      -- Here, just return 0 if no value could be read from the memory regions.
+      ensureValue []       = 0
+      ensureValue vals     = head vals
+      -- And another use of an arrow on a pair.
+  in  first ensureValue (IM.foldlWithKey getContent ([], msys) (IM.containing (msys ^. regions) addr))
 
 -- | Fetch a sequence of words from memory. The start and end addresses do not have reside in the same memory region;
 -- gaps between regions will be filled with zeroes.
@@ -274,7 +297,7 @@ mReadN !msys !sa !nWords
         ((_, remain', accum, resultMsys), _) = IM.mapAccumWithKey getContent (sa, nWords, ([] ++), msys) memRegions
         getContent (addr, remaining, vl, msys') ivl reg
           {-  | trace ("addr = " ++ as0xHexS addr ++ " remaining = " ++ show remaining) False = undefined -}
-          | DevMemRegion devM <- reg
+          | DevMemRegion _devIdx <- reg
           = undefined
           {- Other regions must have actual content -}
           | addr >= lb  = let vl'    = (vl [DVU.slice (fromIntegral addr - fromIntegral lb) nb rcontent] ++)
@@ -510,8 +533,8 @@ queueLRU !addr !word !sa !mr =
       (oldval, psq')                = OrdPSQ.alter queueAddr addr psq
       queueAddr Nothing             = (Nothing, Just (nextTick, word))
       queueAddr (Just (_, oldword)) = (Just oldword, Just (nextTick, word))
-      updateNWrites (Just _)        = 0
-      updateNWrites Nothing         = 1
+      updateNWrites (Just _) = 0
+      updateNWrites Nothing  = 1
       doFlush mreg
         | mreg ^. nWritesPending >= maxPending
         = flushPending maxFlush sa mr'

@@ -3,6 +3,7 @@
 -- | Re-export module for 'Machine'-related code.
 module Machine ( module MachineExports ) where
 
+import           Machine.Device            as MachineExports
 import           Machine.DisassemblerTypes as MachineExports
 import           Machine.EmulatedSystem    as MachineExports
 import           Machine.MemorySystem      as MachineExports
