@@ -32,7 +32,7 @@ module Machine.MemorySystem
   -- * Initialization
   , initialMemorySystem
   -- * Memory-mapped devices
-  , deviceMgr
+  , memDevices
   , nDevices
   , getMemMappedDev
   -- * Memory Regions
@@ -130,6 +130,8 @@ maxFlush = maxPending `div` 2
 
 -- | Shorthand for the interval map of memory regions
 type MemRegionMap addrType wordType = IM.IntervalMap (I.Interval addrType) (MemoryRegion addrType wordType)
+-- | Shorthand for the device manager
+type MemMappedDevices addrType wordType = HashMap Int (MemMappedDevice addrType wordType)
 
 -- | A memory system, for a given address type and word type.
 --
@@ -138,14 +140,16 @@ type MemRegionMap addrType wordType = IM.IntervalMap (I.Interval addrType) (Memo
 -- they are not coalesced.
 data MemorySystem addrType wordType where
   MSys ::
-    { _regions   :: MemRegionMap addrType wordType
+    { _regions    :: MemRegionMap addrType wordType
     -- ^ Region interval map
-    , _deviceMgr :: HashMap Int (Device addrType wordType)
+    , _memDevices :: MemMappedDevices addrType wordType
     -- ^ Container for memory-mapped devices, indexed by an integer identifier
-    , _nDevices  :: Int
+    , _nDevices   :: Int
     -- ^ Number of devices (and device identifier generator)
     } -> MemorySystem addrType wordType
-  deriving (Show)
+
+instance (Show addrType, Show wordType, DVU.Unbox wordType) => Show (MemorySystem addrType wordType) where
+  show msys = "MemorySystem " ++ show (msys ^. regions) ++ " " ++ show (msys ^. nDevices)
 
 -- Admit MemorySystem into the Monoid class
 instance (Ord addrType) => Monoid (MemorySystem addrType wordType) where
@@ -161,8 +165,8 @@ regions :: Lens' (MemorySystem addrType wordType) (MemRegionMap addrType wordTyp
 regions f msys = (\regions' -> msys { _regions = regions' }) <$> f (_regions msys)
 
 -- | Lens for the memory-mapped device container
-deviceMgr :: Lens' (MemorySystem addrType wordType) (HashMap Int (Device addrType wordType))
-deviceMgr f msys = (\memD -> msys { _deviceMgr = memD }) <$> f (_deviceMgr msys)
+memDevices :: Lens' (MemorySystem addrType wordType) (MemMappedDevices addrType wordType)
+memDevices f msys = (\memD -> msys { _memDevices = memD }) <$> f (_memDevices msys)
 
 -- | Lens for the memory-mapped device container
 nDevices :: Lens' (MemorySystem addrType wordType) Int
@@ -170,16 +174,17 @@ nDevices f msys = (\n -> msys { _nDevices = n }) <$> f (_nDevices msys)
 
 -- | Create an empty memory system (alternately: 'mempty')
 initialMemorySystem :: MemorySystem addrType wordType
-initialMemorySystem = MSys { _regions   = IM.empty
-                           , _deviceMgr = H.empty
-                           , _nDevices  = 0
+initialMemorySystem = MSys { _regions    = IM.empty
+                           , _memDevices = H.empty
+                           , _nDevices   = 0
                            }
 
--- | Lookup a memory-mapped device in the `MemorySystem` using its `Int` key.
+-- | Lookup a memory-mapped device in the `MemorySystem` using its `Int` key. Returns `Just x` if the device
+-- is present and is a memory-mapped device, otherwise `Nothing`.
 getMemMappedDev :: Int
                 -> MemorySystem addrType wordType
-                -> Maybe (Device addrType wordType)
-getMemMappedDev didx msys = H.lookup didx (view deviceMgr msys) >>= maybeMemMappedDevice
+                -> Maybe (MemMappedDevice addrType wordType)
+getMemMappedDev didx = H.lookup didx . view memDevices
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -226,7 +231,7 @@ mkDevRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType
             -- ^ Start address of the region
             -> addrType
             -- ^ End address of the region
-            -> Device addrType wordType
+            -> MemMappedDevice addrType wordType
             -- ^ The device type
             -> MemorySystem addrType wordType
             -- ^ Memory region to augment
@@ -235,9 +240,9 @@ mkDevRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType
 mkDevRegion sa ea dev msys =
   let devIdx = msys ^. nDevices
   in  if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
-      then (devIdx, msys & nDevices  +~ 1
-                         & regions   %~ IM.insertWith const (I.ClosedInterval sa ea) (DevMemRegion devIdx)
-                         & deviceMgr %~ H.insert devIdx dev)
+      then (devIdx, msys & nDevices   +~ 1
+                         & regions    %~ IM.insertWith const (I.ClosedInterval sa ea) (DevMemRegion devIdx)
+                         & memDevices %~ H.insert devIdx dev)
       else error ("mkDevRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -261,9 +266,9 @@ mRead !msys !addr =
   let -- Cute use of arrows to operate on the pair returned by 'devRead':
       getContent (vals', msys') _iv (DevMemRegion devIdx) =
         let doMemRead dev' = (vals' |>) *** doDevUpd $ memDevRead addr dev'
-            doDevUpd  dev' = msys' & deviceMgr %~ H.update (\_ -> Just dev') devIdx
+            doDevUpd  dev' = msys' & memDevices %~ H.update (\_ -> Just dev') devIdx
             defaultVal     = (vals' |> 0, msys')
-        in  maybe defaultVal doMemRead (H.lookup devIdx (msys' ^. deviceMgr))
+        in  maybe defaultVal doMemRead (H.lookup devIdx (msys' ^. memDevices))
       getContent (vals', msys') iv mr =
         let memval = fromMaybe (view contents mr ! fromIntegral (addr - I.lowerBound iv))
                                (lookupPendingWrite addr (mr ^. writesPending))
