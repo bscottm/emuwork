@@ -104,4 +104,5 @@ test-suite msystest
       Machine.Device,
       Machine.MemorySystem,
       Machine.ProgramCounter,
-      Machine.Utils
+      Machine.Utils,
+      Machine.Tests.TestDevice

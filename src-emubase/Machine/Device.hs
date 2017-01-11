@@ -8,9 +8,11 @@
 module Machine.Device
     ( -- * Fundamental device types
       Device(..)
-    , MemMappedDevice(..)
+    , isMemMappedDevice
+    , maybeMemMappedDevice
     -- * Device functions
     , DeviceOps(..)
+    , MemDevReader
     , memDevRead
     ) where
 
@@ -18,10 +20,17 @@ import           Control.Arrow              (second)
 import           Control.Monad.State.Strict (State, runState)
 
 -- | Boxed device type to cope with the existential 'dev' type.
-data Device where
-  Device :: (DeviceOps dev) =>
-            dev
-         -> Device
+data Device addrType wordType where
+  MemMappedDevice :: (DeviceOps dev, Show dev) =>
+                     MemDevReader dev addrType wordType
+                  -- ^ The reader embedded state transform function
+                  -> dev
+                  -- ^ The underlying device
+                  -> Device addrType wordType
+
+-- Show instance:
+instance Show (Device addrType wordType) where
+  show (MemMappedDevice _ dev) = "Device " ++ show dev
 
 -- | Type class required to operate on boxed devices
 class (Monoid dev) => DeviceOps dev where
@@ -32,37 +41,33 @@ class (Monoid dev) => DeviceOps dev where
               -- ^ Reset device state
   deviceReset _dev = mempty
 
+-- | Predicate for memory mapped devices
+isMemMappedDevice :: Device addrType wordType
+                  -> Bool
+isMemMappedDevice MemMappedDevice{} = True
+isMemMappedDevice _                 = False
+
+maybeMemMappedDevice :: Device addrType wordType
+                     -> Maybe (Device addrType wordType)
+maybeMemMappedDevice dev@MemMappedDevice{} = Just dev
+maybeMemMappedDevice _                     = Nothing
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Memory-mapped devices:
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Type signature for reading a memory-mapped device
-type MemDevReader addrType wordType = addrType -> State Device wordType
-
--- | Memory mapped device's internal state. This is a container for the reader function ('MemDevReader'), the writer
--- function and the actual underlying device itself. It is also a place where the underlying device's state ('_device')
--- can be updated when reading or writing to the device.
-data MemMappedDevice addrType wordType where
-  -- | A memory-mapped device
-  MemMappedDevice ::
-    { _reader :: MemDevReader addrType wordType
-    -- ^ The reader embedded state transform function
-    , _device :: Device
-    -- ^ The underlying device
-    } -> MemMappedDevice addrType wordType
-
-instance Show (MemMappedDevice addrType wordType) where
-  show dev = "MemMappedDevice " ++ show dev
+type MemDevReader dev addrType wordType = addrType -> State dev wordType
 
 -- | Read a word from a memory-mapped device
 memDevRead :: addrType
            -- ^ Address to read from
-           -> MemMappedDevice addrType wordType
+           -> Device addrType wordType
            -- ^ The memory-mapped device
-           -> (wordType, MemMappedDevice addrType wordType)
+           -> (wordType, Device addrType wordType)
            -- ^ Value/word read and updated device state pair
-memDevRead addr dev = let updateDev dev' = dev { _device = dev' }
-                      in  second updateDev (runState (_reader dev addr) (_device dev))
+memDevRead addr (MemMappedDevice reader dev) =
+  let updateDev = MemMappedDevice reader
+  in  second updateDev (runState (reader addr) dev)
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- I/O port devices: These are distinct from memory-mapped because they live in an entirely different
