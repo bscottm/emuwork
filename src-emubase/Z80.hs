@@ -20,7 +20,7 @@ import           Z80.InstructionSet (Z80instruction)
 import           Z80.Processor      (Z80memory, Z80state, z80initialState)
 
 -- | The Z80 processor instantiation.
-z80processor :: EmulatedProcessor Z80state Z80addr Z80instruction
+z80processor :: Z80emulation
 z80processor = EmulatedProcessor
                { _procPrettyName = "Zilog Z80"
                , _internals      = z80initialState

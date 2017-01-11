@@ -46,7 +46,7 @@ type Z80emulation = EmulatedProcessor Z80state Z80addr Z80instruction
 -- | Shorthand for a Z80 emulated system, with a phantom type. The phantom type
 -- acts as a discriminant between different kinds of Z80 systems, e.g., the
 -- TRS-80 Model I.
-type Z80system sysType = EmulatedSystem Z80state Z80addr Z80word Z80instruction
+type Z80system sysType = EmulatedSystem Z80state Z80addr Z80word Z80ioPort Z80word Z80instruction
 
 -- | The Z80 instruction set
 data Z80instruction where

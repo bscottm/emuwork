@@ -105,7 +105,7 @@ mkInitialDisassembly = Z80disassembly
 
 -- | Where the real work of the Z80 disassembly happens...
 disasm :: Z80disassembly                        -- ^ Incoming disassembly sequence and state
-       -> EmulatedSystem procInternals Z80addr Z80word Z80instruction
+       -> EmulatedSystem procInternals Z80addr Z80word Z80ioPort Z80word Z80instruction
                                                 -- ^ The emulated Z80 system
        -> Z80PC                                 -- ^ Current program counter
        -> Z80PC                                 -- ^ The disassembly's last address
@@ -219,5 +219,5 @@ z80DefaultPostProcessor :: Z80DisasmElt
 z80DefaultPostProcessor elt mem pc z80dstate = (pc, over disasmSeq (|> elt) z80dstate, mem)
 
 -- | 'Disassembler' type family instance for the Z80's disassembler
-instance Disassembler Z80disassembly Z80instruction Z80addr Z80word Z80PseudoOps where
+instance Disassembler Z80disassembly Z80instruction Z80addr Z80word Z80ioPort Z80word Z80PseudoOps where
   disassemble = disasm

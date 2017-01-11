@@ -173,39 +173,39 @@ mkLabeledAddress = Labeled
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | 'DisElement' post-processing function synonym
-type DisElementPostProc disasmState insnType memSys addrType wordType extPseudoType =
+type DisElementPostProc disasmState insnType memSys addrType wordType ioAddrType ioWordType extPseudoType =
   ( DisElement insnType addrType wordType extPseudoType
     -- Decoded instruction or pseudo-operation
-    -> MemorySystem addrType wordType
+    -> MemorySystem addrType wordType ioAddrType ioWordType
     -- Memory system
     -> ProgramCounter addrType
     -- Current program counter
     -> disasmState
     -- Incoming disassembly state
-    -> (ProgramCounter addrType, disasmState, MemorySystem addrType wordType)
+    -> (ProgramCounter addrType, disasmState, MemorySystem addrType wordType ioAddrType ioWordType)
     -- Resulting disassembly state
   )
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | The 'Disassembler' type class and generic interface to disassemblers.
-class Disassembler disasmState insnType addrType wordType extPseudoType where
+class Disassembler disasmState insnType addrType wordType ioAddrType ioWordType extPseudoType where
   -- | The main disassembler function
   disassemble :: disasmState
               -- ^ The incoming disassembly state. This data type should collect
               -- the disassembled instruction, associated pseudo-operations.
-              -> EmulatedSystem procInternals addrType wordType insnType
+              -> EmulatedSystem procInternals addrType wordType ioAddrType ioWordType insnType
               -- ^ Emulated system that contains the memory system and
               -- instruction decoder
               -> ProgramCounter addrType
               -- ^ Starting address to disassemble
               -> ProgramCounter addrType
               -- ^ Last address to disassemble
-              -> DisElementPostProc disasmState insnType memSys addrType wordType extPseudoType
+              -> DisElementPostProc disasmState insnType memSys addrType wordType ioAddrType ioWordType extPseudoType
               -- ^ Post-processing function that is be applied after disasembling
               -- an instruction. This is useful for situations such as the TRS-80
               -- BASIC ROM, where the \'RST 08\' instruction is always followed by
               -- a byte and two should be emitted together.
               -- in the actual disassembler.
-              -> (disasmState, MemorySystem addrType wordType)
+              -> (disasmState, MemorySystem addrType wordType ioAddrType ioWordType)
               -- ^ The resulting disassembly sequence
 
 -- | The null/empty pseudo operation. This is primarily useful for testing or in cases where the disassembled output is simply

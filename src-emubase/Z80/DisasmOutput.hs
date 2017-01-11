@@ -1,3 +1,6 @@
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_HADDOCK ignore-exports #-}
 
 -- | Z80 disassmbler output.

@@ -6,6 +6,7 @@ module Z80.Processor
     Z80word
   , Z80addr
   , Z80disp
+  , Z80ioPort
   , Z80registers(..)
   , Z80state(..)
   , Z80PC
@@ -45,8 +46,10 @@ type Z80addr          = Word16
 type Z80disp          = Int16
 -- | Z80 program counter
 type Z80PC            = ProgramCounter Z80addr
+-- | Z80 I/O ports are 8-bit
+type Z80ioPort        = Word8
 -- | Z80 memory system type
-type Z80memory        = MemorySystem Z80addr Z80word
+type Z80memory        = MemorySystem Z80addr Z80word Z80ioPort Z80word
 
 -- | The basic Z80 register file. The actual register file has two sides, the regular and prime. The prime
 -- registers are not generally visible except through the EXX instruction that exchanges the two sides.

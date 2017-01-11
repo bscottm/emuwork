@@ -29,7 +29,7 @@ import           Z80.Processor
 -- | 'DecodedInsn' shorthand for decoded Z80 instructions and resulting memory system
 type Z80decodedInsn = (DecodedInsn Z80instruction Z80addr, Z80memory)
 
-instance ProcessorOps Z80instruction Z80addr Z80word where
+instance ProcessorOps Z80instruction Z80addr Z80word Z80ioPort Z80word where
   idecode = z80InsDecode
 
 z80InsDecode :: ProgramCounter Z80addr
