@@ -1,5 +1,5 @@
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DeriveDataTypeable    #-}
+{-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 -- | Basic types for all machine disassemblers
@@ -36,8 +36,8 @@ import           Data.Vector.Unboxed    (Unbox, Vector)
 import qualified Data.Vector.Unboxed    as DVU
 import           Data.Word
 
-import           Machine.MemorySystem
 import           Machine.EmulatedSystem
+import           Machine.MemorySystem
 import           Machine.ProgramCounter
 
 -- | 'DisasmElement' is a dissassembly element: a disassembled instruction (with corresponding address and instruction

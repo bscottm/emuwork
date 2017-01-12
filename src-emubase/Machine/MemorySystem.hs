@@ -104,7 +104,7 @@ data MemorySystem addrType wordType ioAddrType ioWordType where
     -- ^ Number of devices (and device identifier generator)
     } -> MemorySystem addrType wordType ioAddrType ioWordType
 
-instance (Show addrType, Show wordType, DVU.Unbox wordType) => 
+instance (Show addrType, Show wordType, DVU.Unbox wordType) =>
          Show (MemorySystem addrType wordType ioAddrType ioWordType) where
   show msys = "MemorySystem " ++ show (msys ^. regions) ++ " " ++ show (msys ^. nDevices)
 
@@ -284,8 +284,8 @@ mRead !msys !addr =
       -- an exception, otherwise return the value.
       --
       -- Here, just return 0 if no value could be read from the memory regions.
-      ensureValue []       = 0
-      ensureValue vals     = head vals
+      ensureValue []   = 0
+      ensureValue vals = head vals
       -- And another use of an arrow on a pair.
   in  first ensureValue (IM.foldlWithKey getContent ([], msys) (IM.containing (msys ^. regions) addr))
 

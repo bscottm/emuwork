@@ -1,6 +1,6 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeSynonymInstances  #-}
 {-# OPTIONS_HADDOCK ignore-exports #-}
 
 module Z80.InsnDecode
@@ -62,11 +62,11 @@ group0decode :: Z80word                         -- ^ Current opcode
 
 group0decode opc mem pc xForm
   | z == 0 = case y of
-               0                  -> defResult NOP
-               1                  -> defResult (EXC AFAF')
-               2                  -> displacementInstruction mem pc DJNZ
-               3                  -> displacementInstruction mem pc JR
-               _otherwise         -> displacementInstruction mem pc $ JRCC (condC (y - 4))
+               0          -> defResult NOP
+               1          -> defResult (EXC AFAF')
+               2          -> displacementInstruction mem pc DJNZ
+               3          -> displacementInstruction mem pc JR
+               _otherwise -> displacementInstruction mem pc $ JRCC (condC (y - 4))
   | z == 1, q == 0 = mkAbsAddrIns (LD . RPair16ImmLoad (pairSP reg16XFormF p)) mem pc
   | z == 1, q == 1 = defResult ((ADD . ALU16) $ pairSP reg16XFormF p)
   | z == 2, q == 0 = case p of
@@ -82,8 +82,8 @@ group0decode opc mem pc xForm
                        3          -> mkAbsAddrIns (LD . AccImm16Indirect) mem pc
                        _otherwise -> undefined
   | z == 3 = case q of
-               0                  -> defResult (INC16 (pairSP reg16XFormF p))
-               1                  -> defResult (DEC16 (pairSP reg16XFormF p))
+               0          -> defResult (INC16 (pairSP reg16XFormF p))
+               1          -> defResult (DEC16 (pairSP reg16XFormF p))
                _otherwise -> undefined
   | z == 4 = let (newpc, theReg, msys')     = reg8 reg8XFormF mem pc y
              in  (DecodedInsn (newpc + 1) (INC theReg), msys')

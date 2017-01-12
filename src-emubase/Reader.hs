@@ -1,8 +1,8 @@
--- | Re-export module for 'Reader' 
+-- | Re-export module for 'Reader'
 module Reader
   ( module Reader.RawFormat
   , module Reader.IntelHex
   ) where
 
-import Reader.RawFormat
-import Reader.IntelHex
+import           Reader.IntelHex
+import           Reader.RawFormat

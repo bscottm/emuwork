@@ -19,9 +19,9 @@ module Machine.Device
 import           Control.Arrow              (second)
 import           Control.Monad.State.Strict (State, runState)
 
-import Machine.Utils
+import           Machine.Utils
 
--- | The emulated device type, in two varieties: `MemMappedDevice` and `IODevice`. `MemMappedDevice` is for 
+-- | The emulated device type, in two varieties: `MemMappedDevice` and `IODevice`. `MemMappedDevice` is for
 -- memory-mapped devices, whereas `IODevice` is for Zilog- and Intel-type processors, which have a separate
 -- I/O address space.
 data Device addrType wordType ioPortType ioWordType where
@@ -79,5 +79,5 @@ ioDevRead :: (ShowHex ioAddrType) =>
              -- ^ The memory-mapped device
              -> (wordType, Device addrType wordType ioAddrType ioPortType)
              -- ^ Value/word read and updated device state pair
-ioDevRead port (IODevice dev)        = second IODevice (runState (deviceReader port) dev)
-ioDevRead port _                     = error ("Non I/O device read @" ++ as0xHexS port)
+ioDevRead port (IODevice dev) = second IODevice (runState (deviceReader port) dev)
+ioDevRead port _              = error ("Non I/O device read @" ++ as0xHexS port)

@@ -5,8 +5,8 @@ module Machine.NullProcessor where
 
 import           Data.Word
 
-import           Machine.MemorySystem
 import           Machine.EmulatedSystem
+import           Machine.MemorySystem
 
 -- | There is no machine state for this processor.
 data NullProcState = NullProcState

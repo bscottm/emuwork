@@ -1,6 +1,6 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns         #-}
+{-# LANGUAGE OverloadedStrings    #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_HADDOCK ignore-exports #-}
 
 -- | Z80 disassmbler output.
@@ -66,8 +66,8 @@ fixupSymbols z80dstate =
   let symtab = z80dstate ^. symbolTab
       -- Translate an absolute address, generally hidden inside an instruction operand, into a symbolic address
       -- if present in the symbol table.
-      fixupSymbol addr@(AbsAddr absAddr)    = maybe addr SymAddr (absAddr `H.lookup` symtab)
-      fixupSymbol symAddr                   = symAddr
+      fixupSymbol addr@(AbsAddr absAddr) = maybe addr SymAddr (absAddr `H.lookup` symtab)
+      fixupSymbol symAddr                = symAddr
 
       -- Lookup address labels in the symbol table
       fixupEltAddress plain@(Plain absAddr) = maybe plain (Labeled absAddr) (absAddr `H.lookup` symtab)

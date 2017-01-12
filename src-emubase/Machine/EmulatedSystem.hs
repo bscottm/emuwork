@@ -1,18 +1,18 @@
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DeriveDataTypeable    #-}
+{-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TemplateHaskell       #-}
 
 -- | General data structures and type classes for emulated processors.
 module Machine.EmulatedSystem where
 
-import Data.Data
-import Control.Lens
-import qualified Data.Text as T
+import           Control.Lens
+import           Data.Data
+import qualified Data.Text              as T
 
-import Machine.MemorySystem
-import Machine.ProgramCounter
-import Machine.Utils
+import           Machine.MemorySystem
+import           Machine.ProgramCounter
+import           Machine.Utils
 
 -- | 'EmulatedProcessor' encapsulates general information about an emulated machine.
 data EmulatedProcessor procType addrType instructionSet where
@@ -76,7 +76,7 @@ sysAliases f sys = (\aliases -> sys { _sysAliases = aliases }) <$> f (_sysAliase
 -- Zilog)
 type SimpleEmulatedSystem procInternals addrType wordType instructionSet =
   EmulatedSystem procInternals addrType wordType addrType wordType instructionSet
-  
+
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | A (symbolic|absolute) address

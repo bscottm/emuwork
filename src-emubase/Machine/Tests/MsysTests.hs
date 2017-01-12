@@ -5,7 +5,7 @@ module Main where
 
 import           Control.Arrow                        (first)
 import           Control.Monad                        (replicateM, unless)
-import           Control.Monad.State.Strict           (get, put, runState, evalState)
+import           Control.Monad.State.Strict           (evalState, get, put, runState)
 import qualified Data.Foldable                        as Fold (foldl)
 import qualified Data.IntervalMap.Interval            as I
 import           Data.List                            (elemIndices)
@@ -26,8 +26,8 @@ import           Test.QuickCheck                      (Large, NonNegative, Prope
 -- import           Debug.Trace
 
 import qualified Machine.MemorySystem                 as M
-import           Machine.Utils                        (as0xHexS, ShowHex)
 import           Machine.Tests.TestDevice             (mkTestDevice)
+import           Machine.Utils                        (ShowHex, as0xHexS)
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Driver...
@@ -237,7 +237,7 @@ test_mappend :: TestParams -> Assertion
 test_mappend _args =
   let imgA     = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
       msysA    = M.mkROMRegion 0 imgA M.initialMemorySystem :: TestMemSystem
-      msysB    = M.mkRAMRegion 0x2000 0x1000 (M.mkRAMRegion 0x1000 0x1000 
+      msysB    = M.mkRAMRegion 0x2000 0x1000 (M.mkRAMRegion 0x1000 0x1000
                                M.initialMemorySystem :: TestMemSystem)
       msys     = msysA `mappend` msysB
       rlist    = map fst (M.regionList msys)

@@ -1,9 +1,9 @@
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE DeriveDataTypeable    #-}
+{-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE TypeSynonymInstances  #-}
 
 -- | The Z80 disassembler module
 module Z80.Disassembler
@@ -29,21 +29,21 @@ module Z80.Disassembler
   , disasmSeq
   ) where
 
-import           Control.Lens hiding ((|>))
+import           Control.Lens        hiding ((|>))
 import           Data.Data
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
-import           Data.Sequence (Seq, (|>))
-import qualified Data.Sequence as Seq
-import qualified Data.Text as T
+import           Data.Sequence       (Seq, (|>))
+import qualified Data.Sequence       as Seq
+import qualified Data.Text           as T
 -- import           Debug.Trace
 import qualified Data.Vector.Unboxed as DVU
 import           Data.Word
 
 import           Machine
-import           Z80.Processor
+import           Z80.InsnDecode      ()
 import           Z80.InstructionSet
-import           Z80.InsnDecode()
+import           Z80.Processor
 
 -- | Disassembly elements for the Z80
 type Z80DisasmElt = DisElement Z80instruction Z80addr Z80word Z80PseudoOps
@@ -60,8 +60,8 @@ data Z80PseudoOps where
 -- | Z80 instruction or pseudo operation contains an address?
 isZ80AddrIns :: Z80DisasmElt
              -> Bool
-isZ80AddrIns (ExtPseudo ByteExpression{})   = True
-isZ80AddrIns elt                            = disEltHasAddr elt
+isZ80AddrIns (ExtPseudo ByteExpression{}) = True
+isZ80AddrIns elt                          = disEltHasAddr elt
 
 -- | Extract address component from a Z80 disassembler element
 z80InsAddr :: Z80DisasmElt
@@ -73,7 +73,7 @@ z80InsAddr elt                                   = disEltGetAddr elt
 z80InsLength :: Z80DisasmElt
              -> Int
 z80InsLength (ExtPseudo ByteExpression{}) = 1
-z80InsLength elt                            = disEltGetLength elt
+z80InsLength elt                          = disEltGetLength elt
 
 -- | Disassembler state, which indexes the 'Disassembly' type family.
 data Z80disassembly =
@@ -151,7 +151,7 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate theMem
 
     mkZ80DisasmInsn :: Z80PC
                     -> Z80PC
-                    -> Z80memory 
+                    -> Z80memory
                     -> Z80instruction
                     -> (Z80DisasmElt, Z80memory)
     mkZ80DisasmInsn oldpc newpc msys ins =
