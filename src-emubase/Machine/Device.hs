@@ -31,7 +31,8 @@ instance Show (Device addrType wordType) where
 
 -- | Device-specific operations that don't depend on an address or a word type.
 class (Monoid dev) => DeviceThings dev where
-  -- | Device reset. The default assumes the device type is a 'Monoid', ignoring the argument and returning 'mempty'.
+  -- | Device reset. The default implementation assumes the device type is a 'Monoid', ignoring the argument and
+  -- returning 'mempty'.
   deviceReset :: dev
               -- ^ Original device state
               -> dev
@@ -44,14 +45,19 @@ type DevReaderFunc dev addrType wordType = addrType -> State dev wordType
 -- | Device-specific operations that depend on an address and a word type.
 class (DeviceThings dev) => DeviceIO dev addrType wordType where
   -- | Device reader function: Read a word (`wordType`) from the device at an address (`addrType`), potentially
-  -- changing the device's state. Returns the `(word, newDeviceState)` pair.
+  -- changing the device's state. Returns a '(word, newDeviceState)' pair, which is the same result as a `State`
+  -- function.
+  --
+  -- __Note__: Do not call this function directly, primarily because it is a `State` computation. Use `deviceRead`
+  -- instead.
   deviceReader :: DevReaderFunc dev addrType wordType
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Memory-mapped devices:
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
--- | Read a word from a device
+-- | Read a word from a device, returning a `(value, updatedDevState)` pair result. This function invokes
+-- `runState` to run the state forward.
 deviceRead :: addrType
            -- ^ Address to read from
            -> Device addrType wordType
