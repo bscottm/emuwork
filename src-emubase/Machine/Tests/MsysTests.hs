@@ -165,15 +165,15 @@ compareVectors l r lName rName
 -- here too, but it doesn't.
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 
-mRead_ :: (Integral addrType, ShowHex addrType, Num wordType, DVU.Unbox wordType) =>
-          M.UnifiedMemorySystem addrType wordType
+mRead_ :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
+          M.MemorySystem addrType wordType
        -> addrType
        -> wordType
 mRead_ msys = fst . M.mRead msys
 {-# INLINEABLE mRead_ #-}
 
 mReadN_ :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType) =>
-           M.UnifiedMemorySystem addrType wordType
+           M.MemorySystem addrType wordType
         -- ^ The memory system from which to read
         -> addrType
         -- ^ Starting address
@@ -184,7 +184,8 @@ mReadN_ :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordTyp
 mReadN_ msys addr = fst . M.mReadN msys addr
 {-# INLINEABLE mReadN_ #-}
 
-type TestMemSystem = M.UnifiedMemorySystem Word16 Word8
+-- | The test memory system
+type TestMemSystem = M.MemorySystem Word16 Word8
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 -- The tests...
@@ -468,9 +469,9 @@ test_RAMRandReads args ramBase ramSize = forAll (choose (1, DVU.length addrPairs
       in  M.sanityCheck msys && memvec == cmpvec
 
 writeRAM :: (Integral addrType, DVU.Unbox wordType) =>
-            M.UnifiedMemorySystem addrType wordType
+            M.MemorySystem addrType wordType
          -> (addrType, wordType)
-         -> M.UnifiedMemorySystem addrType wordType
+         -> M.MemorySystem addrType wordType
 writeRAM msys (addr, val) = M.mWrite addr val msys
 {-# INLINABLE writeRAM #-}
 

@@ -30,5 +30,5 @@ testDeviceReader :: (Integral wordType) => DevReaderFunc TestDevice addrType wor
 testDeviceReader _addr = get >>= (\x -> put (x + 1) >> return (fromIntegral x))
 
 mkTestDevice :: (Integral wordType) =>
-                Device addrType wordType ioAddrType ioWordType
-mkTestDevice = MemMappedDevice (mempty :: TestDevice)
+                Device addrType wordType
+mkTestDevice = Device (mempty :: TestDevice)

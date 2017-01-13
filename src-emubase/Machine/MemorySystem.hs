@@ -4,26 +4,31 @@
 {-# LANGUAGE GADTs                     #-}
 {-# LANGUAGE MultiParamTypeClasses     #-}
 
-{-| Representation of system memory.
+{-| General-purpose system memory, for both traditional memory and for port-based I/O systems.
 
-Emulated system memory is a collection of regions stored in an 'IntervalMap'. The 'IntervalMap' stores the
-start and end addresses for the region; each region stores its contents and a read-only flag. Memory regions __/may not/__
-overlap; they __/must/__ be distinct.
+Memory is a collection of address regions ('addrType') stored in an 'IntervalMap'. The 'IntervalMap' stores the start
+and end addresses for the region; each region may hold a `RAMRegion` (random access memory), a `ROMRegion` (read-only
+memory) or an index to a device (`DevRegion`). Both RAM and ROM regions store content as vectors of a `wordType`.
+Devices manage content as they see fit, although they may only return or store a `wordType`-sized item. Memory regions
+__/may not/__ overlap; they __/must/__ be distinct.
 
-Writing to a 'MemorySystem' places the modified word for an address into a priority search queue that acts as a LRU cache.
-This amortizes the penalty from updating the underlying vector holding the actual contents until the queue's size is
-exceeded (currently 29 elements.)
+Writing to a RAM region places the modified word into a priority search queue that acts as a LRU cache.
+This amortizes the penalty from updating the underlying content vector until the queue's size is
+exceeded (currently 71 elements.)
 
-How to use: Add regions to an 'initialMemorySystem' via 'mkRAMRegion' or 'mkROMRegion'. Example snippet from the TRS-80
-code:
+How to use: Add regions to an `initialMemorySystem` via `mkRAMRegion`, `mkROMRegion` or `mkDevRegion`. Example snippet
+from the testing code that creates two RAM regions, 0x0-0x0fff and 0x1400-0x23ff:
 
-> -- | Create the system's RAM
-> installMem :: TRS80ModelISystem
->            -> Int
->            -> Vector Z80word
->            -> TRS80ModelISystem
-> installMem sys memSize newROM =
->   sys & memory %~ mkROMRegion 0 newROM & memory %~ mkRAMRegion ramStart (memSize * 1024)
+> type TestMemSystem = M.MemorySystem Word16 Word8
+> 
+> let msys  = M.mkRAMRegion 0x1400 0x1000 (M.mkRAMRegion 0 0x1000 M.initialMemorySystem :: TestMemSystem)
+> in  ...
+
+Alternatively, you could use `mempty` instead of `initialMemorySystem`:
+
+> let msys  = M.mkRAMRegion 0x1400 0x1000 (M.mkRAMRegion 0 0x1000 mempty :: TestMemSystem)
+> in  ...
+
  -}
 
 module Machine.MemorySystem
@@ -83,16 +88,17 @@ type MemRegionMap addrType wordType = IM.IntervalMap (I.Interval addrType) (Memo
 -- | Shorthand for the device manager
 type DeviceManager addrType wordType = HashMap Int (Device addrType wordType)
 
-{- | `MemorySystem` provides a unified interface to an emulated memory sysstem: RAM, ROM, memory-mapped and I/O
-devices. (Note: I/O ports are conceptually a separate memory address space.)
+{- | `MemorySystem` provides a unified interface to an emulated memory system: RAM, ROM and devices that occupy memory
+address ranges. Note, though, that port-based I/O is also a type of memory system (see the `IOSystem` type alias), where
+the addresses are port numbers.
 
-Memory-mapped and I/O devices change state when read or written. Consequently, `MemorySystem` has a device manager
-to maintain consistent device state, which is updated after a read or a write. Reads and writes all return the updated
-memory system, with which the caller has to do something or maintain.
+Devices change state when read or written. Consequently, `MemorySystem` has a device table to maintain consistent device
+state, which is updated after a read or a write. Reads and writes all return the updated memory system, with which the
+caller has to use or reuse on subsequent memory system reads and writes.
 
-`MemorySystem` is part of the `Monoid` class, which makes it possible to merge memory systems together via
-'mappend' or -- 'mconcat', so long as the memory systems' regions do not overlap with each other. Regions in the
-merged memory system are distinct; they are not coalesced.
+`MemorySystem` is also part of the `Monoid` class, which makes it possible to merge memory systems together via
+'mappend' or -- 'mconcat', so long as the memory systems' regions do not overlap with each other. Regions in the merged
+memory system are distinct; they are not coalesced.
 -}
 data MemorySystem addrType wordType where
   MSys ::
@@ -136,9 +142,10 @@ initialMemorySystem = MSys { _regions  = IM.empty
                            , _nDevices = 0
                            }
 
--- | I/O systems based on ports, e.g., Zilog and Intel, are an address space of their own, which makes
--- a type alias appropriate.
-type IOSystem addrType wordType = MemorySystem addrType wordType
+-- | I/O system based on ports, e.g., Zilog and Intel, are an address space of their own, which makes
+-- a type alias for `MemorySystem` appropriate. Port-based I/O systems use ports for their address space and this
+-- results in a better code re-use.
+type IOSystem portType wordType = MemorySystem portType wordType
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
