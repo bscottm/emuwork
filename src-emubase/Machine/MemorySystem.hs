@@ -29,7 +29,7 @@ code:
 module Machine.MemorySystem
   ( -- * Data Types and Accessors
     MemorySystem(..)
-  , UnifiedMemorySystem
+  , IOSystem
   -- * Initialization
   , initialMemorySystem
   -- * Memory-mapped devices
@@ -81,7 +81,7 @@ import           Machine.Utils
 -- | Shorthand for the memory region interval map
 type MemRegionMap addrType wordType = IM.IntervalMap (I.Interval addrType) (MemoryRegion addrType wordType)
 -- | Shorthand for the device manager
-type DeviceManager addrType wordType ioAddrType ioWordType = HashMap Int (Device addrType wordType ioAddrType ioWordType)
+type DeviceManager addrType wordType = HashMap Int (Device addrType wordType)
 
 {- | `MemorySystem` provides a unified interface to an emulated memory sysstem: RAM, ROM, memory-mapped and I/O
 devices. (Note: I/O ports are conceptually a separate memory address space.)
@@ -94,22 +94,22 @@ memory system, with which the caller has to do something or maintain.
 'mappend' or -- 'mconcat', so long as the memory systems' regions do not overlap with each other. Regions in the
 merged memory system are distinct; they are not coalesced.
 -}
-data MemorySystem addrType wordType ioAddrType ioWordType where
+data MemorySystem addrType wordType where
   MSys ::
     { _regions    :: MemRegionMap addrType wordType
     -- ^ Region interval map
-    , _devices    :: DeviceManager addrType wordType ioAddrType ioWordType
+    , _devices    :: DeviceManager addrType wordType
     -- ^ Container for memory-mapped devices, indexed by an integer identifier
     , _nDevices   :: Int
     -- ^ Number of devices (and device identifier generator)
-    } -> MemorySystem addrType wordType ioAddrType ioWordType
+    } -> MemorySystem addrType wordType
 
 instance (Show addrType, Show wordType, DVU.Unbox wordType) =>
-         Show (MemorySystem addrType wordType ioAddrType ioWordType) where
+         Show (MemorySystem addrType wordType) where
   show msys = "MemorySystem " ++ show (msys ^. regions) ++ " " ++ show (msys ^. nDevices)
 
 -- Admit MemorySystem into the Monoid class
-instance (Ord addrType) => Monoid (MemorySystem addrType wordType ioAddrType ioWordType) where
+instance (Ord addrType) => Monoid (MemorySystem addrType wordType) where
   mempty              = initialMemorySystem
   msysA `mappend` msysB
     | IM.null (IM.intersection (msysA ^. regions) (msysB ^. regions))
@@ -118,27 +118,27 @@ instance (Ord addrType) => Monoid (MemorySystem addrType wordType ioAddrType ioW
     = error "MemorySystem:mappend: Overlapping memory regions between memory systems"
 
 -- | Lens for the memory region map inside a 'MemorySystem'
-regions :: Lens' (MemorySystem addrType wordType ioAddrType ioWordType) (MemRegionMap addrType wordType)
+regions :: Lens' (MemorySystem addrType wordType) (MemRegionMap addrType wordType)
 regions f msys = (\regions' -> msys { _regions = regions' }) <$> f (_regions msys)
 
 -- | Lens for the memory-mapped device container
-deviceMgr :: Lens' (MemorySystem addrType wordType ioAddrType ioWordType) (DeviceManager addrType wordType ioAddrType ioWordType)
+deviceMgr :: Lens' (MemorySystem addrType wordType) (DeviceManager addrType wordType)
 deviceMgr f msys = (\memD -> msys { _devices = memD }) <$> f (_devices msys)
 
 -- | Lens for the memory-mapped device container
-nDevices :: Lens' (MemorySystem addrType wordType ioAddrType ioWordType) Int
+nDevices :: Lens' (MemorySystem addrType wordType) Int
 nDevices f msys = (\n -> msys { _nDevices = n }) <$> f (_nDevices msys)
 
 -- | Create an empty memory system (alternately: 'mempty')
-initialMemorySystem :: MemorySystem addrType wordType ioAddrType ioWordType
+initialMemorySystem :: MemorySystem addrType wordType
 initialMemorySystem = MSys { _regions  = IM.empty
                            , _devices  = H.empty
                            , _nDevices = 0
                            }
 
--- | Memory system type for systems where the I/O address space is actually in the memory address space,
--- such as Motorola and PowerPC.
-type UnifiedMemorySystem addrType wordType = MemorySystem addrType wordType addrType wordType
+-- | I/O systems based on ports, e.g., Zilog and Intel, are an address space of their own, which makes
+-- a type alias appropriate.
+type IOSystem addrType wordType = MemorySystem addrType wordType
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -201,8 +201,8 @@ mkRAMRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType
             -- ^ RAM region start address
             -> Int
             -- ^ Length of the RAM region
-            -> MemorySystem addrType wordType ioAddrType ioWordType
-            -> MemorySystem addrType wordType ioAddrType ioWordType
+            -> MemorySystem addrType wordType
+            -> MemorySystem addrType wordType
 mkRAMRegion sa len msys =
   let ea        = sa + fromIntegral len
       newRegion = RAMRegion { _contents       = DVU.replicate len 0
@@ -220,9 +220,9 @@ mkROMRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType
             -- ^ Region's start address
             -> Vector wordType
             -- ^ ROM image to insert as the region's contents
-            -> MemorySystem addrType wordType ioAddrType ioWordType
+            -> MemorySystem addrType wordType
             -- ^ Memory system to alter
-            -> MemorySystem addrType wordType ioAddrType ioWordType
+            -> MemorySystem addrType wordType
             -- ^ Resulting memory system with the inserted ROM region
 mkROMRegion sa romImg msys =
   let ea        = sa + fromIntegral (DVU.length romImg)
@@ -237,11 +237,11 @@ mkDevRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType
             -- ^ Start address of the region
             -> addrType
             -- ^ End address of the region
-            -> Device addrType wordType ioAddrType ioWordType
+            -> Device addrType wordType
             -- ^ The device type
-            -> MemorySystem addrType wordType ioAddrType ioWordType
+            -> MemorySystem addrType wordType
             -- ^ Memory region to augment
-            -> (Int, MemorySystem addrType wordType ioAddrType ioWordType)
+            -> (Int, MemorySystem addrType wordType)
             -- ^ Resulting memory system with the device region inserted
 mkDevRegion sa ea dev msys =
   let devIdx = msys ^. nDevices
@@ -257,21 +257,21 @@ mkDevRegion sa ea dev msys =
 
 -- | Return type for 'mRead'. It has to be this way because devices __can__ (and usually __do__) change
 -- state when read, producing an altered 'MemorySystem'
-type MemRead addrType wordType ioAddrType ioWordType = (wordType, MemorySystem addrType wordType ioAddrType ioWordType)
+type MemRead addrType wordType = (wordType, MemorySystem addrType wordType)
 -- | Return type for 'mReadN'. Devices __can__ and usually __do__ change state when read, producing an altered
 -- 'MemorySystem'.
-type MemReadN addrType wordType  ioAddrType ioWordType = (Vector wordType, MemorySystem addrType wordType ioAddrType ioWordType)
+type MemReadN addrType wordType = (Vector wordType, MemorySystem addrType wordType)
 
 -- | Fetch a word from a memory address. Note: If the address does not correspond to a region (i.e., the address does not
 -- intersect a region), zero is returned.
-mRead :: (Integral addrType, ShowHex addrType, Num wordType, DVU.Unbox wordType) =>
-          MemorySystem addrType wordType ioAddrType ioWordType
+mRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
+          MemorySystem addrType wordType
        -> addrType
-       -> MemRead addrType wordType ioAddrType ioWordType
+       -> MemRead addrType wordType
 mRead !msys !addr =
   let -- Cute use of arrows to operate on the pair returned by 'devRead':
       getContent (vals', msys') _iv (DevMemRegion devIdx) =
-        let doMemRead dev' = (vals' |>) *** doDevUpd $ memMappedDevRead addr dev'
+        let doMemRead dev' = (vals' |>) *** doDevUpd $ deviceRead addr dev'
             doDevUpd  dev' = msys' & deviceMgr %~ H.update (\_ -> Just dev') devIdx
             defaultVal     = (vals' |> 0, msys')
         in  maybe defaultVal doMemRead (H.lookup devIdx (msys' ^. deviceMgr))
@@ -292,13 +292,13 @@ mRead !msys !addr =
 -- | Fetch a sequence of words from memory. The start and end addresses do not have reside in the same memory region;
 -- gaps between regions will be filled with zeroes.
 mReadN :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType) =>
-           MemorySystem addrType wordType ioAddrType ioWordType
+           MemorySystem addrType wordType
         -- ^ The memory system from which to read
         -> addrType
         -- ^ Starting address
         -> Int
         -- ^ Number of words to read
-        -> MemReadN addrType wordType ioAddrType ioWordType
+        -> MemReadN addrType wordType
         -- ^ Contents read from memory
 mReadN !msys !sa !nWords
   {- Trivial optimization: Could also do this for other small numbers, e.g., nWords <= 4 -}
@@ -341,22 +341,22 @@ mReadN !msys !sa !nWords
 
 -- | Fetch an entity from memory at the current program counter, return the (incremented pc, contents)
 -- pair.
-mReadAndIncPC :: (Integral addrType, ShowHex addrType, Num wordType, DVU.Unbox wordType) =>
+mReadAndIncPC :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
                   ProgramCounter addrType
                -- ^ Current program counter
-               -> MemorySystem addrType wordType ioAddrType ioWordType
+               -> MemorySystem addrType wordType
                -- ^ The memory system from which the word will be fetched
-               -> (ProgramCounter addrType, MemRead addrType wordType ioAddrType ioWordType)
+               -> (ProgramCounter addrType, MemRead addrType wordType)
                -- ^ Updated program counter and fetched word
 mReadAndIncPC !pc !mem = (pc + 1, mRead mem (unPC pc))
 
 -- | Fetch an entity from memory, pre-incrementing the program counter, returning the (incremented pc, contents)
-mIncPCAndRead :: (Integral addrType, ShowHex addrType, Num wordType, DVU.Unbox wordType) =>
+mIncPCAndRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
                   ProgramCounter addrType
               -- ^ Current progracm counter
-               -> MemorySystem addrType wordType ioAddrType ioWordType
+               -> MemorySystem addrType wordType
                -- ^ Memory system from which word will be fetched
-               -> (ProgramCounter addrType, MemRead addrType wordType ioAddrType ioWordType)
+               -> (ProgramCounter addrType, MemRead addrType wordType)
                -- ^ Updated program counter and fetched word
 mIncPCAndRead !pc !mem = let pc' = pc + 1
                          in  (pc', mRead mem (unPC pc'))
@@ -367,8 +367,8 @@ mIncPCAndRead !pc !mem = let pc' = pc + 1
 mWrite :: (Integral addrType, DVU.Unbox wordType) =>
           addrType
        -> wordType
-       -> MemorySystem addrType wordType ioAddrType ioWordType
-       -> MemorySystem addrType wordType ioAddrType ioWordType
+       -> MemorySystem addrType wordType
+       -> MemorySystem addrType wordType
 mWrite !addr !word !msys =
   let regs                 = IM.keys (IM.intersecting (msys ^. regions) (I.ClosedInterval addr addr))
       writeRegion msys' iv = over regions (IM.update (queuePending (I.lowerBound iv)) iv) msys'
@@ -384,9 +384,9 @@ mWriteN :: (Integral addrType, DVU.Unbox wordType) =>
         -- ^ Starting address
         -> Vector wordType
         -- ^ Content to write
-        -> MemorySystem addrType wordType ioAddrType ioWordType
+        -> MemorySystem addrType wordType
         -- ^ The memory system to be written
-        -> MemorySystem addrType wordType ioAddrType ioWordType
+        -> MemorySystem addrType wordType
         -- ^ Updated memory system
 mWriteN = doWrite False
 
@@ -397,9 +397,9 @@ mPatch :: (Integral addrType, DVU.Unbox wordType) =>
           -- ^ Starting address where patch is applied
        -> Vector wordType
           -- ^ The patch
-       -> MemorySystem addrType wordType ioAddrType ioWordType
+       -> MemorySystem addrType wordType
           -- ^ Memory system to which patch will be applied
-       -> MemorySystem addrType wordType ioAddrType ioWordType
+       -> MemorySystem addrType wordType
           -- ^ Patched memory system
 mPatch = doWrite True
 
@@ -411,9 +411,9 @@ doWrite :: (Integral addrType, DVU.Unbox wordType) =>
            -- ^ Starting address where patch is applied
         -> Vector wordType
            -- ^ The patch
-        -> MemorySystem addrType wordType ioAddrType ioWordType
+        -> MemorySystem addrType wordType
            -- ^ Memory system to which patch will be applied
-        -> MemorySystem addrType wordType ioAddrType ioWordType
+        -> MemorySystem addrType wordType
            -- ^ Patched memory system
 doWrite !forceWrite !paddr !patch !msys =
   let minterval                = I.ClosedInterval paddr ea
@@ -453,19 +453,19 @@ cullPendingWrites sa ea wp  = (length addrs, over lrucPsq (prunePsq addrs) wp)
     addrs            = [a | (a, _, _) <- wp ^. lrucPsq . to OrdPSQ.toList, a >= sa && a <= ea]
 
 -- | Count the number of regions in the memory system; used primarily for testing and debugging
-countRegions :: MemorySystem addrType wordType ioAddrType ioWordType
+countRegions :: MemorySystem addrType wordType
              -> Int
 countRegions msys = msys ^. regions . to IM.size
 
 -- | Generate a list of the regions, without the contents. (Note: Does not permit changing the region's contents, primarily
 -- intended as a test interface)
 regionList :: (DVU.Unbox wordType) =>
-              MemorySystem addrType wordType ioAddrType ioWordType
+              MemorySystem addrType wordType
            -> [(I.Interval addrType, MemoryRegion addrType wordType)]
 regionList msys = [ (i, r & contents .~ DVU.empty) | (i, r) <- IM.toList (msys ^. regions)]
 
 -- | Sanity check the memory system's
-sanityCheck :: MemorySystem addrType wordType ioAddrType ioWordType
+sanityCheck :: MemorySystem addrType wordType
             -> Bool
 sanityCheck msys =
   let verifyRegionSize reg = reg ^. writesPending . to sizeLRU == reg ^. nWritesPending

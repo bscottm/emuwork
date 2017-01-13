@@ -12,32 +12,22 @@ module Machine.Device
     , DeviceThings(..)
     , DeviceIO(..)
     , DevReaderFunc
-    , memMappedDevRead
-    , ioDevRead
+    , deviceRead
     ) where
 
 import           Control.Arrow              (second)
 import           Control.Monad.State.Strict (State, runState)
 
-import           Machine.Utils
-
--- | The emulated device type, in two varieties: `MemMappedDevice` and `IODevice`. `MemMappedDevice` is for
--- memory-mapped devices, whereas `IODevice` is for Zilog- and Intel-type processors, which have a separate
--- I/O address space.
-data Device addrType wordType ioPortType ioWordType where
-  MemMappedDevice :: (DeviceIO dev addrType wordType, Show dev) =>
-                     dev
-                  -- The underlying device
-                  -> Device addrType wordType ioPortType ioWordType
-
-  IODevice        :: (DeviceIO dev ioPortType ioWordType, Show dev) =>
-                     dev
-                  -> Device ioAddrType ioWordType ioPortType ioWordType
+-- | The emulated device type.
+data Device addrType wordType where
+  Device :: (DeviceIO dev addrType wordType, Show dev) =>
+            dev
+         -- The underlying device
+         -> Device addrType wordType
 
 -- Show instance:
-instance Show (Device addrType wordType ioPortType ioWordType) where
-  show (MemMappedDevice dev) = "MemMappedDevice " ++ show dev
-  show (IODevice dev)        = "IODevice " ++ show dev
+instance Show (Device addrType wordType) where
+  show (Device dev) = "Device " ++ show dev
 
 -- | Device-specific operations that don't depend on an address or a word type.
 class (Monoid dev) => DeviceThings dev where
@@ -62,22 +52,10 @@ class (DeviceThings dev) => DeviceIO dev addrType wordType where
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Read a word from a device
-memMappedDevRead :: (ShowHex addrType) =>
-                    addrType
-                 -- ^ Address to read from
-                 -> Device addrType wordType ioAddrType ioPortType
-                 -- ^ The memory-mapped device
-                 -> (wordType, Device addrType wordType ioAddrType ioPortType)
-                 -- ^ Value/word read and updated device state pair
-memMappedDevRead addr (MemMappedDevice dev) = second MemMappedDevice (runState (deviceReader addr) dev)
-memMappedDevRead addr _                     = error ("Non mem-mapped device read @" ++ as0xHexS addr)
-
-ioDevRead :: (ShowHex ioAddrType) =>
-             ioAddrType
-             -- ^ Address to read from
-             -> Device addrType wordType ioAddrType ioPortType
-             -- ^ The memory-mapped device
-             -> (wordType, Device addrType wordType ioAddrType ioPortType)
-             -- ^ Value/word read and updated device state pair
-ioDevRead port (IODevice dev) = second IODevice (runState (deviceReader port) dev)
-ioDevRead port _              = error ("Non I/O device read @" ++ as0xHexS port)
+deviceRead :: addrType
+           -- ^ Address to read from
+           -> Device addrType wordType
+           -- ^ The memory-mapped device
+           -> (wordType, Device addrType wordType)
+           -- ^ Value/word read and updated device state pair
+deviceRead addr (Device dev) = second Device (runState (deviceReader addr) dev)
