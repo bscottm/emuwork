@@ -20,7 +20,7 @@ How to use: Add regions to an `initialMemorySystem` via `mkRAMRegion`, `mkROMReg
 from the testing code that creates two RAM regions, 0x0-0x0fff and 0x1400-0x23ff:
 
 > type TestMemSystem = M.MemorySystem Word16 Word8
-> 
+>
 > let msys  = M.mkRAMRegion 0x1400 0x1000 (M.mkRAMRegion 0 0x1000 M.initialMemorySystem :: TestMemSystem)
 > in  ...
 
@@ -38,7 +38,7 @@ module Machine.MemorySystem
   -- * Initialization
   , initialMemorySystem
   -- * Memory-mapped devices
-  , deviceMgr
+  , deviceTable
   , nDevices
   -- * Memory Regions
   , mkRAMRegion
@@ -128,8 +128,8 @@ regions :: Lens' (MemorySystem addrType wordType) (MemRegionMap addrType wordTyp
 regions f msys = (\regions' -> msys { _regions = regions' }) <$> f (_regions msys)
 
 -- | Lens for the memory-mapped device container
-deviceMgr :: Lens' (MemorySystem addrType wordType) (DeviceManager addrType wordType)
-deviceMgr f msys = (\memD -> msys { _devices = memD }) <$> f (_devices msys)
+deviceTable :: Lens' (MemorySystem addrType wordType) (DeviceManager addrType wordType)
+deviceTable f msys = (\memD -> msys { _devices = memD }) <$> f (_devices msys)
 
 -- | Lens for the memory-mapped device container
 nDevices :: Lens' (MemorySystem addrType wordType) Int
@@ -253,9 +253,9 @@ mkDevRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType
 mkDevRegion sa ea dev msys =
   let devIdx = msys ^. nDevices
   in  if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
-      then (devIdx, msys & nDevices   +~ 1
-                         & regions    %~ IM.insertWith const (I.IntervalCO sa ea) (DevMemRegion devIdx)
-                         & deviceMgr  %~ H.insert devIdx dev)
+      then (devIdx, msys & nDevices     +~ 1
+                         & regions      %~ IM.insertWith const (I.IntervalCO sa ea) (DevMemRegion devIdx)
+                         & deviceTable  %~ H.insert devIdx dev)
       else error ("mkDevRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -272,16 +272,19 @@ type MemReadN addrType wordType = (Vector wordType, MemorySystem addrType wordTy
 -- | Fetch a word from a memory address. Note: If the address does not correspond to a region (i.e., the address does not
 -- intersect a region), zero is returned.
 mRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
-          MemorySystem addrType wordType
-       -> addrType
-       -> MemRead addrType wordType
-mRead !msys !addr =
+         addrType
+      -- ^ Address to read
+      -> MemorySystem addrType wordType
+      -- ^ Memory system, current state
+      -> MemRead addrType wordType
+      -- ^ Memory system, resulting state
+mRead !addr !msys =
   let -- Cute use of arrows to operate on the pair returned by 'devRead':
       getContent (vals', msys') _iv (DevMemRegion devIdx) =
         let doMemRead dev' = (vals' |>) *** doDevUpd $ deviceRead addr dev'
-            doDevUpd  dev' = msys' & deviceMgr %~ H.update (\_ -> Just dev') devIdx
+            doDevUpd  dev' = msys' & deviceTable %~ H.update (\_ -> Just dev') devIdx
             defaultVal     = (vals' |> 0, msys')
-        in  maybe defaultVal doMemRead (H.lookup devIdx (msys' ^. deviceMgr))
+        in  maybe defaultVal doMemRead (H.lookup devIdx (msys' ^. deviceTable))
       getContent (vals', msys') iv mr =
         let memval = fromMaybe (view contents mr ! fromIntegral (addr - I.lowerBound iv))
                                (lookupPendingWrite addr (mr ^. writesPending))
@@ -310,7 +313,7 @@ mReadN :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType
 mReadN !msys !sa !nWords
   {- Trivial optimization: Could also do this for other small numbers, e.g., nWords <= 4 -}
   | nWords == 1
-  = first DVU.singleton (mRead msys sa)
+  = first DVU.singleton (mRead sa msys)
   | otherwise
   = let memRegions                           = IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea)
         ea                                   = sa + fromIntegral (nWords - 1)
@@ -355,7 +358,7 @@ mReadAndIncPC :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
                -- ^ The memory system from which the word will be fetched
                -> (ProgramCounter addrType, MemRead addrType wordType)
                -- ^ Updated program counter and fetched word
-mReadAndIncPC !pc !mem = (pc + 1, mRead mem (unPC pc))
+mReadAndIncPC !pc !mem = (pc + 1, mRead (unPC pc) mem)
 
 -- | Fetch an entity from memory, pre-incrementing the program counter, returning the (incremented pc, contents)
 mIncPCAndRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
@@ -366,7 +369,7 @@ mIncPCAndRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
                -> (ProgramCounter addrType, MemRead addrType wordType)
                -- ^ Updated program counter and fetched word
 mIncPCAndRead !pc !mem = let pc' = pc + 1
-                         in  (pc', mRead mem (unPC pc'))
+                         in  (pc', mRead (unPC pc') mem)
 
 -- | Write a word into the memory system: inserts the word into the pending write LRU cache, flushing the cache to make
 -- space if necessary, commiting updates to the underlying region's contents. If the memory region is not 'readWrite',
