@@ -12,6 +12,8 @@ import           Data.Vector.Unboxed             (Vector, (!), (//))
 import qualified Data.Vector.Unboxed             as DVU
 
 import           Machine.Device
+import qualified Machine.MemorySystem            as M
+import           Machine.Utils
 
 -- | A very simple counter device
 newtype TestDevice = TestDevice Int
@@ -50,19 +52,22 @@ mkTestDevice :: (Integral wordType) => Device addrType wordType
 mkTestDevice = Device (mempty :: TestDevice)
 
 {- Test video device: -}
-data VideoDevice where
+data VideoDevice addrType where
   VideoDevice ::
-    { _vidRAM :: Vector Word8
-    } -> VideoDevice
+    { _vidRAM   :: M.MemorySystem addrType Word8
+    , _baseAddr :: addrType
+    } -> VideoDevice addrType
 
-instance Monoid VideoDevice where
+instance (Num addrType, Ord addrType, ShowHex addrType) => Monoid (VideoDevice addrType) where
   mempty = VideoDevice {
-             _vidRAM = DVU.replicate (64 * 16) (0 :: Word8)
+             _vidRAM   = M.mkRAMRegion 0 (64 * 24) mempty
+           , _baseAddr = 0
            }
   _ `mappend` vidB = vidB
 
-instance DeviceThings VideoDevice
+instance (Num addrType, Ord addrType, ShowHex addrType) => DeviceThings (VideoDevice addrType)
 
-instance DeviceIO VideoDevice addrType wordType where
+instance (Num addrType, Ord addrType, ShowHex addrType) =>
+         DeviceIO (VideoDevice addrType) addrType wordType where
   deviceReader = undefined
   deviceWriter = undefined
