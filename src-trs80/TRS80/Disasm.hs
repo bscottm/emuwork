@@ -293,7 +293,7 @@ trs80RomPostProcessor :: Z80DisasmElt
                       -> Z80disassembly
                       -> (Z80PC, Z80disassembly, Z80memory)
 trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) memSys pc dstate =
-  let (byte, memSys') = mRead memSys (unPC pc)
+  let (byte, memSys') = mRead (unPC pc) memSys
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
       pseudo = if byte >= 0x20 && byte <= 0x7f then
                  mkAscii
