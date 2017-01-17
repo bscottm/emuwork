@@ -36,7 +36,7 @@ z80InsDecode :: ProgramCounter Z80addr
              -> Z80memory
              -> Z80decodedInsn
 z80InsDecode pc mem =
-  let (opc, opcMsys)              = mRead mem (unPC pc)
+  let (opc, opcMsys)              = mRead (unPC pc) mem
       indexedPrefix xForm idxMsys =
         case mIncPCAndRead pc idxMsys of
           (pc', (0xcb, msys'))   -> undocBitOpsDecode opc pc' msys'
@@ -468,9 +468,9 @@ z80getAddr :: Z80memory                 -- ^ Memory from which address is fetche
            -> Z80PC                     -- ^ The program counter
            -> Z80decodedInsn
 z80getAddr mem pc = let lo, hi     :: Z80word
-                        (lo, mem')  = mRead mem  (unPC pc)
-                        (hi, mem'') = mRead mem' (unPC (pc + 1))
-                    in (DecodedAddr (pc + 2) (shiftL (fromIntegral hi) 8 .|. fromIntegral lo), mem'')
+                        (lo, mem')  = mRead (unPC pc) mem
+                        (hi, mem'') = mRead (unPC (pc + 1)) mem'
+                    in  (DecodedAddr (pc + 2) (shiftL (fromIntegral hi) 8 .|. fromIntegral lo), mem'')
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Index register transform functions:

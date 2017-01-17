@@ -20,7 +20,8 @@ module Machine.Device
 import           Control.Arrow              (second)
 import           Control.Monad.State.Strict (State, runState, execState)
 
--- | The emulated device type.
+-- | The emulated device type. This is simply a box around an existential type. Each `Device` must implement the `DeviceIO`
+-- type class.
 data Device addrType wordType where
   Device :: (DeviceIO dev addrType wordType, Show dev) =>
             dev
@@ -79,9 +80,13 @@ deviceRead :: addrType
 deviceRead addr (Device dev) = second Device (runState (deviceReader addr) dev)
 
 -- | Write a word to a device, returning the new device state as its result. This function invokes `execState`
--- to run the state forward, since only the state is important.
+-- to run the device's state forward, since only the state is important.
 deviceWrite :: addrType
+            -- ^ Address being written to
             -> wordType
+            -- ^ Value being written
             -> Device addrType wordType
+            -- ^ Current device state
             -> Device addrType wordType
+            -- ^ Result device state
 deviceWrite addr word (Device dev) = Device (execState (deviceWriter addr word) dev)

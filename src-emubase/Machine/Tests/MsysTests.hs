@@ -3,9 +3,9 @@
 
 module Main where
 
-import           Control.Arrow                        (first)
+import           Control.Arrow                        (first, second)
 import           Control.Monad                        (replicateM, unless)
-import           Control.Monad.State.Strict           (evalState, get, put, runState)
+import           Control.Monad.State.Strict           (evalState, runState, state)
 import qualified Data.Foldable                        as Fold (foldl)
 import qualified Data.IntervalMap.Interval            as I
 import           Data.List                            (elemIndices)
@@ -38,8 +38,8 @@ main =
   do
     stdGen  <- getStdGen
     -- Generate the various random vectors we need to test:
-    let (romImg, stdGen')        = generateROMImg stdGen 4096
-        (writePairs, stdGen'')   = generateRandWrites stdGen' 32768
+    let (romImg, stdGen')        = generateROMImg 4096 stdGen
+        (writePairs, stdGen'')   = generateRandWrites 32768 stdGen'
         options                  = TestParams { randROMImg     = DVU.fromList romImg
                                               , randWrites     = DVU.fromList writePairs
                                               , randWritesMVec = writeRAMInitial randWritesSize
@@ -48,25 +48,17 @@ main =
     setStdGen stdGen''
     defaultMain (mkMsysTests options)
   where
-    generateROMImg gen = finiteRandList gen (0, 0xff)
+    generateROMImg = finiteRandList (0, 0xff)
 
     randWritesBase = 0x0
     randWritesSize = 0x1000 :: Int
 
-    generateRandWrites gen lim =
-      let (bytes, gen')  = finiteRandList gen  (0, 0xff) lim
-          (addrs, gen'') = finiteRandList gen' (0, fromIntegral (randWritesSize - 1)) lim
-      in  (zip addrs bytes, gen'')
+    generateRandWrites lim gen =
+      let recombine (bytes, (addrs, gen')) = (zip addrs bytes, gen')
+      in  recombine $ second (finiteRandList (0, fromIntegral (randWritesSize - 1)) lim) $ finiteRandList (0, 0xff) lim gen
 
-finiteRandList :: (Random a) => StdGen -> (a, a) -> Int -> ([a], StdGen)
-finiteRandList gen range lim =
-  let -- There is eta reduction here: the State 's' is an implied extra argument to this function. Note that 'return x'
-      -- is really '(return x) s'
-      -- genRandom :: StateT StdGen Identity a
-      genRandom =
-        get >>= (\gen' -> let (x, gen'') = randomR range gen'
-                          in  put gen'' >> return x)
-  in  runState (replicateM lim genRandom) gen
+finiteRandList :: (Random a) => (a, a) -> Int -> StdGen -> ([a], StdGen)
+finiteRandList range lim = runState (replicateM lim (state (randomR range)))
 
 -- Generated data that gets used by various tests...
 data TestParams =
@@ -124,8 +116,8 @@ mkMsysTests args =
                       (testProperty "Random write pairs         " (test_RAMRandReads args 0 0x1000))-}
     ]
   , testGroup "Memory-mapped devices"
-    [ testCase "Create                     " (test_MemMappedDeviceCreate args)
-    , testCase "Multiple reads             " (test_MemMappedDeviceReads args)
+    [ testCase "Create TestDevice          " (test_MemMappedDeviceCreate args)
+    , testCase "Repeated TestDevice reads  " (test_MemMappedDeviceReads args)
     ]
   ]
   where
@@ -166,10 +158,10 @@ compareVectors l r lName rName
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 
 mRead_ :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
-          M.MemorySystem addrType wordType
-       -> addrType
+          addrType
+       -> M.MemorySystem addrType wordType
        -> wordType
-mRead_ msys = fst . M.mRead msys
+mRead_ addr = fst . M.mRead addr
 {-# INLINEABLE mRead_ #-}
 
 mReadN_ :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType) =>
@@ -193,8 +185,8 @@ type TestMemSystem = M.MemorySystem Word16 Word8
 
 test_randLists :: Assertion
 test_randLists =
-  getStdGen >>= (\stdGen -> let (l1, gen1) = finiteRandList stdGen (0, 0x1000) 10240 :: ([Int], StdGen)
-                                (l2, gen2) = finiteRandList gen1   (0, 0x1000) 10240 :: ([Int], StdGen)
+  getStdGen >>= (\stdGen -> let (l1, gen1) = finiteRandList (0, 0x1000) 10240 stdGen :: ([Int], StdGen)
+                                (l2, gen2) = finiteRandList (0, 0x1000) 10240 gen1   :: ([Int], StdGen)
                             in  setStdGen gen2 >> assertBool "l1 == l2" (l1 /= l2))
 
 test_mkROMRegion :: TestParams -> Assertion
@@ -262,39 +254,38 @@ randROMMsys :: Vector Word8 -> TestMemSystem
 randROMMsys img = M.mkROMRegion 0 img M.initialMemorySystem
 
 test_ROMread1 :: TestParams -> Assertion
-test_ROMread1 _args = assertBool "Read byte from ROM, 1 != 1" (mRead_ simpleROMMsys 1 == 1)
+test_ROMread1 _args = assertBool "Read byte from ROM, 1 != 1" (mRead_ 1 simpleROMMsys == 1)
 
 test_ROMsequential :: TestParams -> Assertion
 test_ROMsequential _args =
-  let mReads = [mRead_ simpleROMMsys (fromIntegral i) == fromIntegral (i `mod` 256) | i <- [0..DVU.length readROMImg - 1]]
+  let mReads = [mRead_ (fromIntegral i) simpleROMMsys == fromIntegral (i `mod` 256) | i <- [0..DVU.length readROMImg - 1]]
       wrong  = elemIndices False mReads
   in  assertBool ("Mismatched reads at indices: " ++ show wrong) (and mReads)
 
 prop_ROMrandom :: Property
 prop_ROMrandom =
-  let readROM idx = mRead_ simpleROMMsys (fromIntegral idx) == fromIntegral (idx  `mod` 256)
+  let readROM idx = mRead_ (fromIntegral idx) simpleROMMsys == fromIntegral (idx  `mod` 256)
   in  forAll (choose (0, DVU.length readROMImg - 1)) readROM
 
 test_randROMread1 :: TestParams -> Assertion
 test_randROMread1 args =
-  let img       = randROMImg args
-      msys      = randROMMsys img
-      val       = mRead_ msys 1
-  in assertBool ("Read byte 1 from random ROM image: expected 1, got " ++ show val)
-                (val == img ! 1)
+  let img = randROMImg args
+      val = mRead_ 1 (randROMMsys img)
+  in  assertBool ("Read byte 1 from random ROM image: expected 1, got " ++ show val)
+                 (val == img ! 1)
 
 test_randROMsequential :: TestParams -> Assertion
 test_randROMsequential args =
   let img    = randROMImg args
       msys   = randROMMsys img
-      mReads = [mRead_ msys (fromIntegral i) == img ! i | i <- [0..DVU.length readROMImg - 1]]
+      mReads = [mRead_ (fromIntegral i) msys == img ! i | i <- [0..DVU.length readROMImg - 1]]
       wrong  = elemIndices False mReads
   in  assertBool ("Mismatched reads at indices: " ++ show wrong) (and mReads)
 
 prop_randROMrandom :: TestParams -> Property
 prop_randROMrandom args =
   let img         = randROMImg args
-  in  forAll (choose (0, DVU.length img - 1)) (\idx -> mRead_ (randROMMsys img) (fromIntegral idx) == img ! idx)
+  in  forAll (choose (0, DVU.length img - 1)) (\idx -> mRead_ (fromIntegral idx) (randROMMsys img) == img ! idx)
 
 -- | start address for the gapped ROM region tests. this is a prime number instead of a power-of-2.
 gapROM_addr_1, gapROM_addr_2 :: Word16
@@ -407,7 +398,7 @@ test_RAMwrite1 _args =
   let ramSize = 12 * 1024
       ramBase = 0x0000
       msys    = M.mWrite 0 0xff (writeRAMMsys ramBase ramSize)
-      mem0    = mRead_ msys 0
+      mem0    = mRead_ 0 msys
   in  assertBool ("Write RAM, expected 0xff, got " ++ as0xHexS mem0)
                  (mem0 == 0xff && M.sanityCheck msys)
 
@@ -498,8 +489,7 @@ test_MemMappedDeviceReads :: TestParams -> Assertion
 test_MemMappedDeviceReads _args =
   let (_didx, msys) = testMemMappedDev
       nElts         = 18
-      readMem       = get >>= (\msys' -> let (x, msys'') = M.mRead msys' 0x100
-                                         in  put msys'' >> return x)
-      mReads         = evalState (replicateM nElts readMem) msys
+      readMem       = M.mRead 0x100
+      mReads        = evalState (replicateM nElts (state readMem)) msys
       expected      = take nElts (iterate (+ 1) 19)
   in  assertBool ("Expected: " ++ show expected ++ ", got " ++ show mReads) (mReads == expected)
