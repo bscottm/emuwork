@@ -26,20 +26,23 @@ instance DeviceThings TestDevice
 
 -- Instantiate the DeviceIO class
 instance (Integral wordType) => DeviceIO TestDevice addrType wordType where
-  deviceReader = testDeviceReader
+  deviceReader _addr       = state testDeviceReader
+  deviceWriter _addr _word = state (\s -> (-1, s))
 
 -- | Example device reader function that just increments the counter as the updated state. Slightly less overhead
 -- than using MonadState 'get' and 'put'. The address is ignored.
-testDeviceReader :: (Integral wordType) => DevReaderFunc TestDevice addrType wordType
-testDeviceReader _addr = state (\(TestDevice x) -> (fromIntegral x, TestDevice (x+ 1)))
-
-{- An alternative implementation that uses MonadState 'get' and 'put':
-
-testDeviceReader :: (Integral wordType) => DevReaderFunc TestDevice addrType wordType
-testDeviceReader _addr = get >>= (\x -> put (x + 1) >> return (fromIntegral x))
--}
+--
+-- An alternative implementation that uses MonadState 'get' and 'put':
+--
+-- > instance (Integral wordType) => DeviceIO TestDevice addrType wordType where
+-- >   deviceReader = testDeviceReader
+-- >
+-- > testDeviceReader :: (Integral wordType) => DevReaderFunc TestDevice addrType wordType
+-- >testDeviceReader _addr = get >>= (\x -> put (x + 1) >> return (fromIntegral x))
+--
+testDeviceReader :: (Integral wordType) => (wordType, TestDevice)
+testDeviceReader (TestDevice x) = return (fromIntegral x, TestDevice (x+ 1))
 
 -- | And finally, a factory constructor function.
-mkTestDevice :: (Integral wordType) =>
-                Device addrType wordType
+mkTestDevice :: (Integral wordType) => Device addrType wordType
 mkTestDevice = Device (mempty :: TestDevice)
