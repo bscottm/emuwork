@@ -302,15 +302,15 @@ mRead !addr !msys =
 -- | Fetch a sequence of words from memory. The start and end addresses do not have reside in the same memory region;
 -- gaps between regions will be filled with zeroes.
 mReadN :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType) =>
-           MemorySystem addrType wordType
-        -- ^ The memory system from which to read
-        -> addrType
-        -- ^ Starting address
-        -> Int
-        -- ^ Number of words to read
-        -> MemReadN addrType wordType
-        -- ^ Contents read from memory
-mReadN !msys !sa !nWords
+          addrType
+       -- ^ Starting address
+       -> Int
+       -- ^ Number of words to read
+       -> MemorySystem addrType wordType
+       -- ^ The memory system from which to read
+       -> MemReadN addrType wordType
+       -- ^ Contents read from memory
+mReadN !sa !nWords !msys
   {- Trivial optimization: Could also do this for other small numbers, e.g., nWords <= 4 -}
   | nWords == 1
   = first DVU.singleton (mRead sa msys)
