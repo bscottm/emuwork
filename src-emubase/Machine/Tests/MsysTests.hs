@@ -4,7 +4,7 @@
 module Main where
 
 import           Control.Arrow                        (first, second)
-import           Control.Monad                        (replicateM, unless)
+import           Control.Monad                        (replicateM, unless, mapM_)
 import           Control.Monad.State.Strict           (evalState, runState, state)
 import qualified Data.Foldable                        as Fold (foldl)
 import qualified Data.IntervalMap.Interval            as I
@@ -165,15 +165,15 @@ mRead_ addr = fst . M.mRead addr
 {-# INLINEABLE mRead_ #-}
 
 mReadN_ :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType) =>
-           M.MemorySystem addrType wordType
-        -- ^ The memory system from which to read
-        -> addrType
+           addrType
         -- ^ Starting address
         -> Int
         -- ^ Number of words to read
+        -> M.MemorySystem addrType wordType
+        -- ^ The memory system from which to read
         -> Vector wordType
         -- ^ Contents read from memory
-mReadN_ msys addr = fst . M.mReadN msys addr
+mReadN_ addr nWords = fst . M.mReadN addr nWords
 {-# INLINEABLE mReadN_ #-}
 
 -- | The test memory system
@@ -310,7 +310,7 @@ gapROMMsys    = M.mkROMRegion gapROM_addr_2 gapROMImg_2 (M.mkROMRegion gapROM_ad
 test_gapROMTotal :: TestParams -> Assertion
 test_gapROMTotal _args =
   do
-    let (memvec, _) = M.mReadN gapROMMsys gapROM_addr_1 gapROMTotal
+    let (memvec, _) = M.mReadN gapROM_addr_1 gapROMTotal gapROMMsys
         cmpvec      = DVU.concat [gapROMImg_1, DVU.replicate gapROMGap 0, gapROMImg_2]
     assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                (memvec == cmpvec)
@@ -318,7 +318,7 @@ test_gapROMTotal _args =
 test_gapROMBefore :: TestParams -> Assertion
 test_gapROMBefore _args =
   do
-    let (memvec, _) = M.mReadN gapROMMsys (gapROM_addr_1 - 17) (17 + 19)
+    let (memvec, _) = M.mReadN (gapROM_addr_1 - 17) (17 + 19) gapROMMsys
     let cmpvec      = DVU.concat [DVU.replicate 17 0, DVU.slice 0 19 gapROMImg_1]
     assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                (memvec == cmpvec)
@@ -334,16 +334,18 @@ test_gapWindows _args =
       inner toRead = and <$> sequence [gapReadOverWindow toRead (fromIntegral i) | i <- [0..(totalLen - toRead)]]
 
       gapReadOverWindow toRead offs =
-        let memvec = mReadN_ gapROMMsys (gapROM_addr_1 + offs) toRead
+        let memvec = mReadN_ (gapROM_addr_1 + offs) toRead gapROMMsys
             cmpvec = DVU.slice (fromIntegral offs) toRead totalGapVec
             passed = memvec == cmpvec
         in  unless passed
-              ( hPutStrLn stderr ("gapWindows/inner@" ++ as0xHexS offs ++
-                                  ", toRead = " ++ show toRead ++
-                                  " cmpvec " ++ show (DVU.length cmpvec) ++
-                                  " memvec " ++ show (DVU.length memvec))
-                >> hPutStrLn stderr (as0xHexS (DVU.toList memvec))
-                >> hPutStrLn stderr (as0xHexS (DVU.toList cmpvec))
+              ( mapM_ (hPutStrLn stderr)
+                  [ "gapWindows/inner@" ++ as0xHexS offs ++
+                    ", toRead = " ++ show toRead ++
+                    " cmpvec " ++ show (DVU.length cmpvec) ++
+                    " memvec " ++ show (DVU.length memvec)
+                  , as0xHexS (DVU.toList memvec)
+                  , as0xHexS (DVU.toList cmpvec)
+                  ]
               )
             >> return passed
 
@@ -357,7 +359,7 @@ test_patchROM01 _args =
       pvec   = DVU.fromList [ 0x11, 0x22, 0x33, 0x44, 0x55, 0x66]
       msys'  = M.mPatch 14 pvec msys
       cmpvec = DVU.concat [ DVU.fromList [0x0c, 0x0d ], pvec, DVU.fromList [ 0x14, 0x15 ]]
-      memvec = mReadN_ msys' 12 (DVU.length cmpvec)
+      memvec = mReadN_ 12 (DVU.length cmpvec) msys'
   in  assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                  (memvec == cmpvec)
 
@@ -369,7 +371,7 @@ test_patchROM02 _args =
   let pvec   = DVU.concat [ DVU.fromList [0x11, 0x22 ], DVU.replicate 4 0, DVU.fromList [ 0x33, 0x44, 0x55, 0x66 ]]
       msys'  = M.mPatch 14 pvec patchROMMsys_1
       cmpvec = DVU.concat [ DVU.fromList [ 0x00, 0x00 ], pvec ]
-      memvec = mReadN_ msys' 12 (DVU.length cmpvec)
+      memvec = mReadN_ 12 (DVU.length cmpvec) msys'
   in assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                 (memvec == cmpvec)
 
@@ -378,7 +380,7 @@ test_patchROM03 _args =
   let pvec   = DVU.concat [ DVU.fromList [ 0x11, 0x22 ], DVU.replicate 4 0, DVU.fromList [ 0x33, 0x44, 0x55, 0x66 ]]
       msys'  = M.mPatch 14 pvec patchROMMsys_1
       cmpvec = DVU.concat [ DVU.fromList [ 0x00, 0x00 ], pvec, DVU.fromList [ 0x00, 0x00, 0x00 ]]
-      memvec = mReadN_ msys' 12 (DVU.length cmpvec)
+      memvec = mReadN_ 12 (DVU.length cmpvec) msys'
   in assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                 (memvec == cmpvec)
 
@@ -405,7 +407,7 @@ test_RAMwrite1 _args =
 test_RAMwrite5 :: TestParams -> Assertion
 test_RAMwrite5 _args =
   let msys    = Fold.foldl writeRAM (writeRAMMsys 0 0x00ff) [(0, 0xff), (3, 0xaa), (2, 0xbb), (1, 0xcc), (4, 0x55)]
-      memvec  = mReadN_ msys 0 7
+      memvec  = mReadN_ 0 7 msys
       cmpvec  = DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x05, 0x06]
   in  assertBool (if not (M.sanityCheck msys)
                   then "msys sanity check failed: " ++ show msys
@@ -415,7 +417,7 @@ test_RAMwrite5 _args =
 test_RAMwrite5n :: TestParams -> Assertion
 test_RAMwrite5n _args =
   let msys   = M.mWriteN 0x11 (DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55]) (writeRAMMsys 0 0x00ff)
-      memvec = mReadN_ msys 0x11 7
+      memvec = mReadN_ 0x11 7 msys
       cmpvec = DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x016, 0x17]
   in  assertBool (if not (M.sanityCheck msys)
                   then "msys sanity check failed: " ++ show msys
@@ -426,7 +428,7 @@ test_RAMwrite5n2 :: TestParams -> Assertion
 test_RAMwrite5n2 _args =
   let msys   = M.mWriteN 0x11 (DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55]) (writeRAMMsys 0 0x00ff)
       msys'  = M.mWriteN 0x13 (DVU.fromList [0xbe, 0xee, 0x66]) msys
-      memvec = mReadN_ msys' 0x11 7
+      memvec = mReadN_ 0x11 7 msys'
       cmpvec = DVU.fromList [0xff, 0xcc, 0xbe, 0xee, 0x66, 0x016, 0x17]
   in  assertBool (if not (M.sanityCheck msys)
                   then "msys sanity check failed: " ++ show msys
@@ -439,7 +441,7 @@ test_RAMSequentialWrite _args =
       ramBase = 0x0100 :: Word16
       pairs   = [(fromIntegral addr + ramBase, val) | addr <- [0..ramSize - 1], let val = fromIntegral (addr `mod` 256)]
       msys    = Fold.foldl writeRAM (M.mkRAMRegion ramBase ramSize (mempty :: TestMemSystem)) pairs
-      memvec  = mReadN_ msys ramBase ramSize
+      memvec  = mReadN_ ramBase ramSize msys
       cmpvec  = DVU.generate ramSize (\x -> fromIntegral (x `mod` 256))
   in assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                 (memvec == cmpvec && M.sanityCheck msys)
@@ -455,7 +457,7 @@ test_RAMRandReads args ramBase ramSize = forAll (choose (1, DVU.length addrPairs
       let m'      = getLarge (getNonNegative m)
           writes  = DVU.slice n (min m' (DVU.length addrPairs - n)) addrPairs
           msys    = DVU.foldl' writeRAM ramMsys writes
-          memvec  = mReadN_ msys ramBase ramSize
+          memvec  = mReadN_ ramBase ramSize msys
           cmpvec  = DVU.update ramMvec (DVU.map (first fromIntegral) writes)
       in  M.sanityCheck msys && memvec == cmpvec
 

@@ -11,7 +11,7 @@ module TRS80.Disasm
 
 import           Control.Arrow (second)
 import           Control.Lens (over, (^.), (%~), (.~), (&))
-import           Control.Monad (unless)
+import           Control.Monad (unless, mapM_)
 import           Data.Binary
 import           Data.Bits
 import qualified Data.ByteString.Lazy as BCL
@@ -20,7 +20,7 @@ import           Data.Digest.Pure.MD5
 import qualified Data.Foldable as Foldable
 import qualified Data.HashMap.Strict as H
 import           Data.Maybe
-import           Data.Sequence (Seq, (|>), (><))
+import           Data.Sequence ((|>), (><))
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
@@ -58,8 +58,10 @@ disasmCmd sys opts =
                 gresult <- Y.decodeFileEither gFile :: IO (Either Y.ParseException G.Guidance)
                 case gresult of
                   Right guidance -> trs80disassemble sys imgRdr image msize guidance
-                  Left  err      -> hPutStrLn stderr (gFile ++ ":")
-                                    >> hPutStrLn stderr (Y.prettyPrintParseException err)
+                  Left  err      -> mapM_ (hPutStrLn stderr)
+                                      [ gFile ++ ":"
+                                      , Y.prettyPrintParseException err
+                                      ]
 
             (_, _) -> hPutStrLn stderr "Invalid disassembler options. Exiting."
                       >> showUsage
@@ -117,7 +119,7 @@ trs80disassemble :: Z80system z80sys
                  -> IO ()
 trs80disassemble sys imgReader imgName msize guidance =
   trs80System imgName imgReader (fromIntegral msize) sys
-  >>= (\trs80 -> let (img, msys') = mReadN (trs80 ^. memory) theOrigin (fromIntegral (theEndAddr - theOrigin) + 1)
+  >>= (\trs80 -> let (img, _msys') = mReadN theOrigin (fromIntegral (theEndAddr - theOrigin) + 1) (trs80 ^. memory)
                  in  case G.getMatchingSection guidance (romMD5 img) of
                        Just dirs ->
                          let (dis, _msys) = collectRom trs80 (initialDisassembly img dirs) dirs
@@ -125,11 +127,12 @@ trs80disassemble sys imgReader imgName msize guidance =
                                checkAddrContinuity dis
                                 >> z80AnalyticDisassemblyOutput stdout dis
                        Nothing ->
-                         hPutStrLn stderr ("Could not find guidance section for " ++ T.unpack (romMD5Hex img))
-                         >> hPutStrLn stderr ("Origin = " ++ as0xHexS theOrigin)
-                         >> hPutStrLn stderr ("End addr = " ++ as0xHexS theEndAddr)
-                         >> hPutStrLn stderr ("img length = " ++ show (DVU.length img))
-                         >> return ()
+                        mapM_ (hPutStrLn stderr)
+                          [ "Could not find guidance section for " ++ T.unpack (romMD5Hex img)
+                          , "Origin = " ++ as0xHexS theOrigin
+                          , "End addr = " ++ as0xHexS theEndAddr
+                          , "img length = " ++ show (DVU.length img)
+                          ]
       )
   where
     theOrigin              = G.origin guidance
@@ -231,7 +234,7 @@ highbitCharTable memSys sAddr nBytes z80dstate =
   let sAddr'              = fromIntegral sAddr
       nBytes'             = fromIntegral nBytes
       -- Fetch the block from memory as a 'Vector'
-      (memBlock, memSys') = mReadN memSys sAddr nBytes'
+      (memBlock, memSys') = mReadN sAddr nBytes' memSys
       -- Look for the high bit characters within the address range, then convert back to addresses
       byteidxs            = DVU.findIndices (>= 0x80) memBlock
       -- Set up a secondary index vector to make a working zipper
@@ -280,7 +283,7 @@ jumpTable mem sAddr nBytes dstate =
         where
           operAddrPseudo theAddr msys = let (addrPseudo, msys') = operAddr theAddr msys
                                         in  (over disasmSeq (|> addrPseudo) z80dstate, msys')
-          operAddr       theAddr msys = let (addrVec, msys') = mReadN msys addr 2
+          operAddr       theAddr msys = let (addrVec, msys') = mReadN addr 2 msys
                                         in  (mkAddr addr (AbsAddr theAddr) addrVec, msys')
   in  generateAddr mem sAddr dstate
 
