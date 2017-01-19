@@ -1,18 +1,23 @@
-{-# LANGUAGE FlexibleInstances          #-}
-{-# LANGUAGE GADTs                      #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE GADTs                 #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 {- | Test devices for memory system testing.
 -}
-module Machine.Tests.TestDevice ( mkTestDevice ) where
+module Machine.Tests.TestDevice
+        ( mkTestDevice
+        , mkVideoDevice
+        ) where
 
+import           Control.Arrow              (second)
+import           Control.Lens               (Lens', set, (^.), (&), (%~))
 import           Control.Monad.State.Strict (state)
-import Data.Word
-import           Data.Vector.Unboxed             (Vector, (!), (//))
-import qualified Data.Vector.Unboxed             as DVU
+import           Data.Word
+import qualified Data.Vector.Unboxed as DVU
 
 import           Machine.Device
-import qualified Machine.MemorySystem            as M
+import qualified Machine.MemorySystem       as M
 import           Machine.Utils
 
 -- | A very simple counter device
@@ -49,25 +54,75 @@ testDeviceReader (TestDevice x) = (fromIntegral x, TestDevice (x+ 1))
 
 -- | And finally, a factory constructor function.
 mkTestDevice :: (Integral wordType) => Device addrType wordType
-mkTestDevice = Device (mempty :: TestDevice)
+mkTestDevice = mkDevice (mempty :: TestDevice)
 
-{- Test video device: -}
-data VideoDevice addrType where
+-- | Test video device. This exists primarily to test `MemorySystem` reusability. Also, the video device has
+-- a specific address type (`Word16`) and word type (`Word8`). So, if the emulated machine's memory system
+-- doesn't have the same `Word16`/`Word8` address and word types, one would have to create a new `DeviceIO`
+-- instance that does the appropriate address and word type conversions (`fromIntegral`). (Note: This is
+-- what an interface card would have to do anyway... except one has to do it explicitly here.)
+data VideoDevice where
   VideoDevice ::
-    { _vidRAM   :: M.MemorySystem addrType Word8
-    , _baseAddr :: addrType
-    } -> VideoDevice addrType
+    { _vidRAM   :: VideoRAM
+    } -> VideoDevice
+  deriving (Show)
 
-instance (Num addrType, Ord addrType, ShowHex addrType) => Monoid (VideoDevice addrType) where
-  mempty = VideoDevice {
-             _vidRAM   = M.mkRAMRegion 0 (64 * 24) mempty
-           , _baseAddr = 0
-           }
+-- | Underlying video memory is a `Word16` address, `Word8` word type memory system.
+type VideoRAM = M.MemorySystem Word16 Word8
+
+-- | Getter/setter lens for _vidRAM
+vidRAM :: Lens' VideoDevice VideoRAM
+vidRAM f vdev = (\vram -> vdev { _vidRAM = vram}) <$> f (_vidRAM vdev)
+
+-- | The `Monoid` instance
+instance Monoid VideoDevice where
+  mempty           = VideoDevice {
+                      _vidRAM   = M.mkRAMRegion 0 vidLinearSize M.initialMemorySystem
+                     }
   _ `mappend` vidB = vidB
 
-instance (Num addrType, Ord addrType, ShowHex addrType) => DeviceThings (VideoDevice addrType)
+-- | Default instance for `DeviceThings`
+instance DeviceThings VideoDevice
 
-instance (Num addrType, Ord addrType, ShowHex addrType) =>
-         DeviceIO (VideoDevice addrType) addrType wordType where
-  deviceReader = undefined
-  deviceWriter = undefined
+-- | `DeviceIO` for the video memory
+instance DeviceIO VideoDevice Word16 Word8 where
+  deviceReader      = state . videoReader
+  deviceWriter addr = state . videoWriter addr
+
+-- | Number of rows for this video device
+vidRows :: Int
+vidRows = 24
+--- | Number of columns for this video device
+vidCols :: Int
+vidCols = 64
+-- | Linear size of the video RAM
+vidLinearSize :: Int
+vidLinearSize = vidRows * vidCols
+
+-- | Read a byte from the video device's memory
+videoReader :: Word16
+            -> VideoDevice
+            -> (Word8, VideoDevice)
+videoReader addr vdev = second updVidRAM (M.mRead addr (vdev ^. vidRAM))
+  where
+    updVidRAM vram = set vidRAM vram vdev
+
+-- | Write a byte to the video device's memory
+videoWriter :: Word16
+            -> Word8
+            -> VideoDevice
+            -> (Word8, VideoDevice)
+videoWriter addr val vdev = (val, vdev & vidRAM %~ M.mWrite addr val)
+
+-- | Make  a new video device at a given base address, adding it to an existing `MemorySystem`
+mkVideoDevice :: (Num addrType,
+                  Ord addrType,
+                  ShowHex addrType,
+                  DVU.Unbox wordType,
+                  DeviceIO VideoDevice addrType wordType) =>
+                 addrType
+              -- ^ Video RAM's base address
+              -> M.MemorySystem addrType wordType
+              -- ^ The video device
+              -> (Int, M.MemorySystem addrType wordType)
+mkVideoDevice base = M.mkDevRegion base (base + fromIntegral vidLinearSize) (mkDevice (mempty :: VideoDevice))

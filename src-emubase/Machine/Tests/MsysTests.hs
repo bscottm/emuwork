@@ -26,7 +26,7 @@ import           Test.QuickCheck                      (Large, NonNegative, Prope
 -- import           Debug.Trace
 
 import qualified Machine.MemorySystem                 as M
-import           Machine.Tests.TestDevice             (mkTestDevice)
+import           Machine.Tests.TestDevice             (mkTestDevice, mkVideoDevice)
 import           Machine.Utils                        (ShowHex, as0xHexS)
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -118,6 +118,8 @@ mkMsysTests args =
   , testGroup "Memory-mapped devices"
     [ testCase "Create TestDevice          " (test_MemMappedDeviceCreate args)
     , testCase "Repeated TestDevice reads  " (test_MemMappedDeviceReads args)
+    , testCase "Create VideoDevice         " (test_VideoDeviceCreate args)
+    , testCase "Read from VideoDevice      " (test_VideoDeviceReads args)
     ]
   ]
   where
@@ -469,7 +471,7 @@ writeRAM msys (addr, val) = M.mWrite addr val msys
 {-# INLINABLE writeRAM #-}
 
 testMemMappedDev :: (Int, TestMemSystem)
-testMemMappedDev = M.mkDevRegion 0x100 0x101 mkTestDevice (mempty :: TestMemSystem)
+testMemMappedDev = M.mkDevRegion 0x100 0x101 mkTestDevice mempty
 
 test_MemMappedDeviceCreate :: TestParams -> Assertion
 test_MemMappedDeviceCreate _args =
@@ -495,3 +497,22 @@ test_MemMappedDeviceReads _args =
       mReads        = evalState (replicateM nElts (state readMem)) msys
       expected      = take nElts (iterate (+ 1) 19)
   in  assertBool ("Expected: " ++ show expected ++ ", got " ++ show mReads) (mReads == expected)
+
+test_VideoDeviceCreate :: TestParams -> Assertion
+test_VideoDeviceCreate _args =
+  let (didx, msys) = mkVideoDevice 0x3c00 (mempty :: TestMemSystem)
+      rlist        = map fst (M.regionList msys)
+      nRegions     = M.countRegions msys == 1
+      mRegions     = rlist == [I.IntervalCO 0x3c00 0x4200]
+      diagnose | didx /= 0
+               = "Expected device index == 0"
+               | not nRegions
+               = "Expected one memory region" ++ show (M.countRegions msys)
+               | not mRegions
+               = "Region mismatch: " ++ show rlist
+               | otherwise
+               = "Huh?"
+  in  assertBool diagnose (didx == 0 && nRegions && mRegions)
+
+test_VideoDeviceReads :: TestParams -> Assertion
+test_VideoDeviceReads _args = return ()

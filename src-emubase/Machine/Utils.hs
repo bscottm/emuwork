@@ -41,8 +41,8 @@ class ShowHex x where
 
 -- | Output the lowest order byte of the input as 2 digit hex
 hexbyte :: (Integral a) => a -> T.Text
-hexbyte x = let zeroC = ord '0'
-                alphaC = ord 'a' - 10
+hexbyte x = let zeroC      = ord '0'
+                alphaC     = ord 'a' - 10
                 hexdigit d = chr(d + if d < 10 then zeroC else alphaC)
             in  T.cons (hexdigit (fromIntegral x `shiftR` 4 .&. 0xf)) ((T.singleton . hexdigit) (fromIntegral x .&. 0xf))
 
@@ -60,6 +60,12 @@ instance ShowHex Word16 where
 instance ShowHex Int16 where
   asHex x = asHex (fromIntegral x :: Word16)
   {-# INLINE asHex #-}
+
+instance ShowHex Word32 where
+  asHex x = T.append (asHex (fromIntegral (x `shiftR` 16) :: Word16)) (asHex (fromIntegral (x .&. 0xffff) :: Word16))
+
+instance ShowHex Int32 where
+  asHex x = asHex (fromIntegral x :: Word32)
 
 instance (ShowHex x) => ShowHex [x] where
   asHex   x = T.append "[" $ asHexList asHex   x T.empty

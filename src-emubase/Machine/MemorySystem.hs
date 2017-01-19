@@ -280,10 +280,11 @@ mRead :: (Integral addrType, Num wordType, DVU.Unbox wordType) =>
       -- ^ Memory system, resulting state
 mRead !addr !msys =
   let -- Cute use of arrows to operate on the pair returned by 'devRead':
-      getContent (vals', msys') _iv (DevMemRegion devIdx) =
-        let doMemRead dev' = (vals' |>) *** doDevUpd $ deviceRead addr dev'
+      getContent (vals', msys') mr (DevMemRegion devIdx) =
+        let doMemRead dev' = (vals' |>) *** doDevUpd $ deviceRead (addr - baseOffset) dev'
             doDevUpd  dev' = msys' & deviceTable %~ H.update (\_ -> Just dev') devIdx
             defaultVal     = (vals' |> 0, msys')
+            baseOffset     = IM.lowerBound mr
         in  maybe defaultVal doMemRead (H.lookup devIdx (msys' ^. deviceTable))
       getContent (vals', msys') iv mr =
         let memval = fromMaybe (view contents mr ! fromIntegral (addr - I.lowerBound iv))

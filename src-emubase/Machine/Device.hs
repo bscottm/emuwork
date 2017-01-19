@@ -6,8 +6,9 @@
 
 -}
 module Machine.Device
-    ( -- * Fundamental device types
+    ( -- * Fundamental device types and constructors
       Device(..)
+    , mkDevice
     -- * Device functions
     , DeviceThings(..)
     , DeviceIO(..)
@@ -55,11 +56,17 @@ class (DeviceThings dev) => DeviceIO dev addrType wordType where
   -- changing the device's state. Returns a '(word, newDeviceState)' pair, which is the same result as a `State`
   -- function.
   --
+  -- Addresses are calculated relative to the base address of the memory region in which the device was created.
+  -- Consequently, the address is an offset (0, 1, 2, 3, ...) rather than an aboslute address (0x1000, 0x1001, ...)
+  --
   -- __Note__: Do not call this function directly, primarily because it is a `State` computation. Use `deviceRead`
   -- instead.
   deviceReader :: DevReaderFunc dev addrType wordType
   -- | Device writer function: Write a word (`wordType`) to the device at an address (`addrType`), which definitely
   -- changes the device's state. Returns the new device state.
+  --
+  -- Addresses are calculated relative to the base address of the memory region in which the device was created.
+  -- Consequently, the address is an offset (0, 1, 2, 3, ...) rather than an aboslute address (0x1000, 0x1001, ...)
   --
   -- __Note__: Do not call this function directly, primarily because it is a `State` computation. Use `deviceWrite`
   -- instead.
@@ -70,9 +77,11 @@ class (DeviceThings dev) => DeviceIO dev addrType wordType where
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Read a word from a device, returning a `(value, updatedDevState)` pair result. This function invokes
--- `runState` to run the state forward.
+-- `runState` to run the state forward. Addresses are calculated relative to the memory region's start, e.g.,
+-- if the device's memory region starts at `0x1000` and the read address is `0x10ff`, then the address
+-- passed to `deviceRead` is `0x00ff` (`0x10ff - 0x1000`).
 deviceRead :: addrType
-           -- ^ Address to read from
+           -- ^ Address to read from, relative to the memory region's start
            -> Device addrType wordType
            -- ^ The memory-mapped device
            -> (wordType, Device addrType wordType)
@@ -90,3 +99,11 @@ deviceWrite :: addrType
             -> Device addrType wordType
             -- ^ Result device state
 deviceWrite addr word (Device dev) = Device (execState (deviceWriter addr word) dev)
+
+-- | Make a new device (wrapper around the `Device` constructor)
+mkDevice :: (Show dev,
+             DeviceIO dev addrType wordType
+            ) =>
+            dev
+         -> Device addrType wordType
+mkDevice = Device
