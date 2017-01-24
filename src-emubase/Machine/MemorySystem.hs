@@ -37,9 +37,10 @@ module Machine.MemorySystem
   , IOSystem
   -- * Initialization
   , initialMemorySystem
-  -- * Memory-mapped devices
+  -- * Devices
   , deviceTable
   , nDevices
+  , lookupDevice
   -- * Memory Regions
   , mkRAMRegion
   , mkROMRegion
@@ -63,6 +64,8 @@ module Machine.MemorySystem
 
 import           Control.Arrow                   (first, (***))
 import           Control.Lens                    (Lens', over, to, view, (%~), (&), (+~), (-~), (.~), (^.), (|>))
+import           Control.Monad                   (mapM)
+import           Control.Monad.State.Strict      (runState, state)
 import qualified Data.Foldable                   as Fold (foldl')
 import           Data.HashMap.Strict             (HashMap)
 import qualified Data.HashMap.Strict             as H
@@ -239,7 +242,11 @@ mkROMRegion sa romImg msys =
       else error ("mkROMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- | Create a new region for a memory-mapped device.
-mkDevRegion :: (Ord addrType, Num addrType, ShowHex addrType, DVU.Unbox wordType) =>
+mkDevRegion :: ( Ord addrType
+               , Num addrType
+               , ShowHex addrType
+               , DVU.Unbox wordType
+               ) =>
                addrType
             -- ^ Start address of the region
             -> addrType
@@ -257,6 +264,12 @@ mkDevRegion sa ea dev msys =
                          & regions      %~ IM.insertWith const (I.IntervalCO sa ea) (DevMemRegion devIdx)
                          & deviceTable  %~ H.insert devIdx dev)
       else error ("mkDevRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
+
+-- | Utility function: Lookup a device (glorified wrapper around `HashMap.lookup`.)
+lookupDevice :: Int
+              -> MemorySystem addrType wordType
+              -> Maybe (Device addrType wordType)
+lookupDevice devIdx msys = H.lookup devIdx (msys ^. deviceTable)
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Read/write memory
@@ -302,7 +315,10 @@ mRead !addr !msys =
 
 -- | Fetch a sequence of words from memory. The start and end addresses do not have reside in the same memory region;
 -- gaps between regions will be filled with zeroes.
-mReadN :: (Integral addrType, Num wordType, ShowHex addrType, DVU.Unbox wordType) =>
+mReadN :: (Integral addrType,
+           Num wordType,
+           ShowHex addrType,
+           DVU.Unbox wordType) =>
           addrType
        -- ^ Starting address
        -> Int
@@ -318,28 +334,40 @@ mReadN !sa !nWords !msys
   | otherwise
   = let memRegions                           = IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea)
         ea                                   = sa + fromIntegral (nWords - 1)
-        ((_, remain', accum, resultMsys), _) = IM.mapAccumWithKey getContent (sa, nWords, ([] ++), msys) memRegions
-        getContent (addr, remaining, vl, msys') ivl reg
+        ((_, remain', accum, resultMsys), _) = IM.mapAccumWithKey accumContent (sa, nWords, ([] ++), msys) memRegions
+
+        accumContent (addr, remaining, vl, msys') ivl reg
           {-  | trace ("addr = " ++ as0xHexS addr ++ " remaining = " ++ show remaining) False = undefined -}
-          | DevMemRegion _devIdx <- reg
-          = undefined
-          {- Other regions must have actual content -}
-          | addr >= lb  = let vl'    = (vl [DVU.slice (fromIntegral addr - fromIntegral lb) nb rcontent] ++)
-                              nb     = min (fromIntegral ub - fromIntegral addr) remaining
-                              accum' = (addr + fromIntegral nb, remaining - nb, vl', msys')
+          | addr >= lb  = let (memVals, msys'') = getContent (fromIntegral (addr - lb)) nb msys' reg
+                              vl'               = (vl [memVals] ++)
+                              nb                = min (fromIntegral (ub - addr)) remaining
+                              accum'            = (addr + fromIntegral nb, remaining - nb, vl', msys'')
                           in  (accum', reg)
-          | addr < lb   = let flen   = fromIntegral (lb - addr)
-                              nb'    = min (fromIntegral (ub - lb)) (remaining - flen)
-                              nread  = nb' + flen
-                              vl'    = (vl [DVU.replicate flen 0, DVU.slice 0 nb' rcontent] ++)
-                              accum' = (addr + fromIntegral nread, remaining - nread, vl', msys')
+          | addr < lb   = let flen              = fromIntegral (lb - addr)
+                              nb'               = min (fromIntegral (ub - lb)) (remaining - flen)
+                              nread             = nb' + flen
+                              (memVals, msys'') = getContent 0 nb' msys' reg
+                              vl'               = (vl [DVU.replicate flen 0, memVals] ++)
+                              accum'            = (addr + fromIntegral nread, remaining - nread, vl', msys'')
                           in  (accum', reg)
-          -- Squelch GHC pattern warning...
+          -- Squelch GHC pattern warning... because it really can't happen.
           | otherwise   = error ("How'd I get here? addr = " ++ as0xHexS addr ++ " remaining " ++ show remaining)
           where
             lb       = I.lowerBound ivl
             ub       = I.upperBound ivl
-            rcontent = reg ^. contents
+
+        getContent offs len contentMsys (DevMemRegion devIdx) =
+          let dev              = fromMaybe (error ("MemmorySystem.mReadN: Device not found for device index " ++ show devIdx))
+                                           (H.lookup devIdx (msys ^. deviceTable))
+              -- Ensure the memory system has an updated device after reading... the sensible thing
+              updDevTable dev' = contentMsys & deviceTable %~ H.update (\_ -> Just dev') devIdx
+              -- Generate the addresses to read from the device, turn them into StateT device reader functiosn, then
+              -- runState over the resulting list. (Note: Eta reduction here, 'dev' is the implied parameter.)
+              readDevice       = runState (mapM (state . deviceRead) [fromIntegral a | a <- [offs..offs + len]])
+          in  DVU.fromList *** updDevTable $ readDevice dev
+
+        getContent offs len contentMsys memRegion             = (DVU.slice offs len (memRegion ^. contents), contentMsys)
+
         endfill                    = [DVU.replicate remain' 0]
         -- And ensure that pending writes in the regions are also included. This uses the same pattern that 'showS' uses,
         -- threading a list function across the regions so that concatenation only happens once and has linear performance.

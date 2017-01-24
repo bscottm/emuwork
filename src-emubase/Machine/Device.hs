@@ -1,7 +1,8 @@
+{-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-{- | Emulated devices.
+{- | Device emulation.
 
 
 -}
@@ -9,22 +10,25 @@ module Machine.Device
     ( -- * Fundamental device types and constructors
       Device(..)
     , mkDevice
-    -- * Device functions
+    -- * Device classes and types
     , DeviceThings(..)
     , DeviceIO(..)
     , DevReaderFunc
     , DevWriterFunc
+    -- * High level device functions
     , deviceRead
     , deviceWrite
+    -- * Constant device
+    , constDevice
     ) where
 
 import           Control.Arrow              (second)
-import           Control.Monad.State.Strict (State, runState, execState)
+import           Control.Monad.State.Strict (State, execState, runState, state)
 
 -- | The emulated device type. This is simply a box around an existential type. Each `Device` must implement the `DeviceIO`
 -- type class.
 data Device addrType wordType where
-  Device :: (DeviceIO dev addrType wordType, Show dev) =>
+  Device :: ( DeviceIO dev addrType wordType ) =>
             dev
          -- The underlying device
          -> Device addrType wordType
@@ -51,7 +55,10 @@ type DevWriterFunc dev addrType wordType = addrType -> wordType -> State dev wor
 
 -- | Device-specific operations that depend on an address and a word type. This type class is necessary because the
 -- actual device `dev` in the `Device` type is existential; the type class unboxes `dev`.
-class (DeviceThings dev) => DeviceIO dev addrType wordType where
+class ( Show dev
+      , DeviceThings dev
+      ) =>
+      DeviceIO dev addrType wordType where
   -- | Device reader function: Read a word (`wordType`) from the device at an address (`addrType`), potentially
   -- changing the device's state. Returns a '(word, newDeviceState)' pair, which is the same result as a `State`
   -- function.
@@ -73,7 +80,7 @@ class (DeviceThings dev) => DeviceIO dev addrType wordType where
   deviceWriter :: DevWriterFunc dev addrType wordType
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- Memory-mapped devices:
+-- Higher level device functions:
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Read a word from a device, returning a `(value, updatedDevState)` pair result. This function invokes
@@ -101,9 +108,35 @@ deviceWrite :: addrType
 deviceWrite addr word (Device dev) = Device (execState (deviceWriter addr word) dev)
 
 -- | Make a new device (wrapper around the `Device` constructor)
-mkDevice :: (Show dev,
-             DeviceIO dev addrType wordType
-            ) =>
+mkDevice :: ( DeviceIO dev addrType wordType ) =>
             dev
          -> Device addrType wordType
 mkDevice = Device
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- Constant device:
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | A very simple constant device: Always returns the same value when read, stores a new value when
+-- written
+newtype ConstDevice wordType = ConstDevice wordType
+  deriving (Show)
+
+instance (Num wordType) => Monoid (ConstDevice wordType) where
+  mempty                                    = ConstDevice 0
+  (ConstDevice a) `mappend` (ConstDevice b) = ConstDevice (a + b)
+
+-- Instantiate the DeviceThings type class:
+instance (Num wordType) => DeviceThings (ConstDevice wordType)
+
+-- Instantiate the DeviceIO class
+instance ( Integral wordType
+         , Show wordType) =>
+         DeviceIO (ConstDevice wordType) addrType wordType where
+  deviceReader _addr       = state constDeviceReader
+  deviceWriter _addr word  = state (const (word, ConstDevice word))
+
+constDeviceReader :: (Integral wordType) => ConstDevice wordType -> (wordType, ConstDevice wordType)
+constDeviceReader dev@(ConstDevice x) = (fromIntegral x, dev)
+
+constDevice :: (Num wordType) => ConstDevice wordType
+constDevice = mempty

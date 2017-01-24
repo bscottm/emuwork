@@ -4,7 +4,7 @@
 module Main where
 
 import           Control.Arrow                        (first, second)
-import           Control.Monad                        (replicateM, unless, mapM_)
+import           Control.Monad                        (mapM_, replicateM, unless)
 import           Control.Monad.State.Strict           (evalState, runState, state)
 import qualified Data.Foldable                        as Fold (foldl)
 import qualified Data.IntervalMap.Interval            as I
