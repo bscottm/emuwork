@@ -49,7 +49,9 @@ instance (Integral wordType) => DeviceIO TestDevice addrType wordType where
 -- > testDeviceReader :: (Integral wordType) => DevReaderFunc TestDevice addrType wordType
 -- >testDeviceReader _addr = get >>= (\x -> put (x + 1) >> return (fromIntegral x))
 --
-testDeviceReader :: (Integral wordType) => TestDevice -> (wordType, TestDevice)
+testDeviceReader :: (Integral wordType) => 
+                    TestDevice 
+                 -> (wordType, TestDevice)
 testDeviceReader (TestDevice x) = (fromIntegral x, TestDevice (x+ 1))
 
 -- | And finally, a factory constructor function.
