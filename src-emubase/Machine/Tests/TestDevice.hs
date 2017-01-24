@@ -14,6 +14,7 @@ import           Control.Arrow              (second)
 import           Control.Lens               (Lens', set, (^.), (&), (%~))
 import           Control.Monad.State.Strict (state)
 import           Data.Word
+import Data.Vector.Unboxed (Vector)
 import qualified Data.Vector.Unboxed as DVU
 
 import           Machine.Device
@@ -50,7 +51,7 @@ instance (Integral wordType) => DeviceIO TestDevice addrType wordType where
 -- >testDeviceReader _addr = get >>= (\x -> put (x + 1) >> return (fromIntegral x))
 --
 testDeviceReader :: (Integral wordType) => TestDevice -> (wordType, TestDevice)
-testDeviceReader (TestDevice x) = (fromIntegral x, TestDevice (x+ 1))
+testDeviceReader (TestDevice x) = (fromIntegral x, TestDevice (x + 1))
 
 -- | And finally, a factory constructor function.
 mkTestDevice :: (Integral wordType) => Device addrType wordType
@@ -121,8 +122,9 @@ mkVideoDevice :: (Num addrType,
                   DVU.Unbox wordType,
                   DeviceIO VideoDevice addrType wordType) =>
                  addrType
-              -- ^ Video RAM's base address
+              -- ^ Video device's base address
               -> M.MemorySystem addrType wordType
-              -- ^ The video device
+              -- ^ Existing memory system into which video device is inserted
               -> (Int, M.MemorySystem addrType wordType)
+              -- ^ Device index, updated memory system pair
 mkVideoDevice base = M.mkDevRegion base (base + fromIntegral vidLinearSize) (mkDevice (mempty :: VideoDevice))
