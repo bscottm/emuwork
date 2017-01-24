@@ -1,6 +1,6 @@
+{-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FlexibleInstances #-}
 
 {- | Device emulation.
 
@@ -23,7 +23,7 @@ module Machine.Device
     ) where
 
 import           Control.Arrow              (second)
-import           Control.Monad.State.Strict (State, state, runState, execState)
+import           Control.Monad.State.Strict (State, execState, runState, state)
 
 -- | The emulated device type. This is simply a box around an existential type. Each `Device` must implement the `DeviceIO`
 -- type class.

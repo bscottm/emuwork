@@ -1,7 +1,7 @@
+{-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE GADTs                 #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 {- | Test devices for memory system testing.
 -}
@@ -11,11 +11,11 @@ module Machine.Tests.TestDevice
         ) where
 
 import           Control.Arrow              (second)
-import           Control.Lens               (Lens', set, (^.), (&), (%~))
+import           Control.Lens               (Lens', set, (%~), (&), (^.))
 import           Control.Monad.State.Strict (state)
+import           Data.Vector.Unboxed        (Vector)
+import qualified Data.Vector.Unboxed        as DVU
 import           Data.Word
-import Data.Vector.Unboxed (Vector)
-import qualified Data.Vector.Unboxed as DVU
 
 import           Machine.Device
 import qualified Machine.MemorySystem       as M
