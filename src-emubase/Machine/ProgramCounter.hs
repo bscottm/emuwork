@@ -1,5 +1,4 @@
 {-# LANGUAGE DeriveFunctor              #-}
-{-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Machine.ProgramCounter where

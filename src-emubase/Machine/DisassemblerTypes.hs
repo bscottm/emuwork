@@ -1,6 +1,4 @@
 {-# LANGUAGE DeriveDataTypeable    #-}
-{-# LANGUAGE GADTs                 #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 
 -- | Basic types for all machine disassemblers
 module Machine.DisassemblerTypes

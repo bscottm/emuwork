@@ -1,4 +1,3 @@
-
 {- | 'MemorySystem' exercise module -}
 
 module Main where

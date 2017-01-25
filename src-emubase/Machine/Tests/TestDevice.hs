@@ -1,7 +1,5 @@
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE GADTs                 #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 
 {- | Test devices for memory system testing.
 -}
@@ -13,7 +11,6 @@ module Machine.Tests.TestDevice
 import           Control.Arrow              (second)
 import           Control.Lens               (Lens', set, (%~), (&), (^.))
 import           Control.Monad.State.Strict (state)
-import           Data.Vector.Unboxed        (Vector)
 import qualified Data.Vector.Unboxed        as DVU
 import           Data.Word
 
@@ -50,8 +47,8 @@ instance (Integral wordType) => DeviceIO TestDevice addrType wordType where
 -- > testDeviceReader :: (Integral wordType) => DevReaderFunc TestDevice addrType wordType
 -- >testDeviceReader _addr = get >>= (\x -> put (x + 1) >> return (fromIntegral x))
 --
-testDeviceReader :: (Integral wordType) => 
-                    TestDevice 
+testDeviceReader :: (Integral wordType) =>
+                    TestDevice
                  -> (wordType, TestDevice)
 testDeviceReader (TestDevice x) = (fromIntegral x, TestDevice (x + 1))
 

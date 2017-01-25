@@ -1,6 +1,4 @@
 {-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE GADTs                 #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 
 {- | Device emulation.
 
@@ -41,10 +39,10 @@ instance Show (Device addrType wordType) where
 class (Monoid dev) => DeviceThings dev where
   -- | Device reset. The default implementation assumes the device type is a 'Monoid', ignoring the argument and
   -- returning 'mempty'.
-  deviceReset :: dev
-              -- ^ Original device state
-              -> dev
-              -- ^ Reset device state
+  deviceReset      :: dev
+                   -- ^ Original device state
+                   -> dev
+                   -- ^ Reset device state
   deviceReset _dev = mempty
 
 -- | Type signature for device reader functions
