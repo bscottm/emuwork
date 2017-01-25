@@ -14,7 +14,7 @@ import           Data.Monoid                          (mempty)
 import           Data.Vector.Unboxed                  (Vector, (!))
 import qualified Data.Vector.Unboxed                  as DVU
 import           Data.Word
-import           System.IO                            (hPutStrLn, stderr)
+import           System.IO                            (hPutStrLn, hPrint, stderr)
 import           System.Random                        (Random, StdGen, getStdGen, randomR, setStdGen)
 import           Test.Framework                       (Test, defaultMain, plusTestOptions, testGroup)
 import           Test.Framework.Options               (TestOptions' (..))
@@ -515,4 +515,8 @@ test_VideoDeviceCreate _args =
   in  assertBool diagnose (didx == 0 && nRegions && mRegions)
 
 test_VideoDeviceReads :: TestParams -> Assertion
-test_VideoDeviceReads _args = return ()
+test_VideoDeviceReads _args = 
+  let (didx, msys) = mkVideoDevice 0x3c00 (mempty :: TestMemSystem)
+  in  do
+        hPrint stderr (mReadN_ 0x3c00 24 msys)
+        return ()
