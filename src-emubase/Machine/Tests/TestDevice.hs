@@ -12,6 +12,8 @@ import           Control.Arrow              (second)
 import           Control.Lens               (Lens', set, (%~), (&), (^.))
 import           Control.Monad.State.Strict (state)
 import qualified Data.Vector.Unboxed        as DVU
+import Data.Char (ord)
+import Data.List (cycle)
 import           Data.Word
 
 import           Machine.Device
@@ -33,8 +35,8 @@ instance DeviceThings TestDevice
 
 -- Instantiate the DeviceIO class
 instance (Integral wordType) => DeviceIO TestDevice addrType wordType where
-  deviceReader _addr       = state testDeviceReader
-  deviceWriter _addr _word = state (\s -> (-1, s))
+  readDeviceWord _addr       = state testDeviceReader
+  writeDeviceWord _addr _word = state (\s -> (-1, s))
 
 -- | Example device reader function that just increments the counter as the updated state. Slightly less overhead
 -- than using MonadState 'get' and 'put'. The address is ignored.
@@ -42,7 +44,7 @@ instance (Integral wordType) => DeviceIO TestDevice addrType wordType where
 -- An alternative implementation that uses MonadState 'get' and 'put' (which is the actual implementation of `state`, BTW):
 --
 -- > instance (Integral wordType) => DeviceIO TestDevice addrType wordType where
--- >   deviceReader = testDeviceReader
+-- >   readDeviceWord = testDeviceReader
 -- >
 -- > testDeviceReader :: (Integral wordType) => DevReaderFunc TestDevice addrType wordType
 -- >testDeviceReader _addr = get >>= (\x -> put (x + 1) >> return (fromIntegral x))
@@ -74,11 +76,15 @@ type VideoRAM = M.MemorySystem Word16 Word8
 vidRAM :: Lens' VideoDevice VideoRAM
 vidRAM f vdev = (\vram -> vdev { _vidRAM = vram}) <$> f (_vidRAM vdev)
 
+-- | Test pattern for video device.
+videoTestPattern :: [Word8]
+videoTestPattern = map (fromIntegral . ord) $ take vidLinearSize (cycle (['0'..'9'] ++ ['A'..'Z'] ++ ['a'..'z']))
+
 -- | The `Monoid` instance
 instance Monoid VideoDevice where
   mempty           = VideoDevice {
                       _vidRAM   = M.mkRAMRegion 0 vidLinearSize M.initialMemorySystem
-                     }
+                     } & vidRAM %~ M.mPatch 0 (DVU.fromList videoTestPattern)
   _ `mappend` vidB = vidB
 
 -- | Default instance for `DeviceThings`
@@ -86,8 +92,8 @@ instance DeviceThings VideoDevice
 
 -- | `DeviceIO` for the video memory
 instance DeviceIO VideoDevice Word16 Word8 where
-  deviceReader      = state . videoReader
-  deviceWriter addr = state . videoWriter addr
+  readDeviceWord       = state . videoReader
+  writeDeviceWord addr = state . videoWriter addr
 
 -- | Number of rows for this video device
 vidRows :: Int

@@ -34,7 +34,6 @@ module Machine.MemorySystem
   -- * Devices
   , deviceTable
   , nDevices
-  , lookupDevice
   -- * Memory Regions
   , mkRAMRegion
   , mkROMRegion
@@ -258,12 +257,6 @@ mkDevRegion sa ea dev msys =
                          & regions      %~ IM.insertWith const (I.IntervalCO sa ea) (DevMemRegion devIdx)
                          & deviceTable  %~ H.insert devIdx dev)
       else error ("mkDevRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
-
--- | Utility function: Lookup a device (glorified wrapper around `HashMap.lookup`.)
-lookupDevice :: Int
-              -> MemorySystem addrType wordType
-              -> Maybe (Device addrType wordType)
-lookupDevice devIdx msys = H.lookup devIdx (msys ^. deviceTable)
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Read/write memory

@@ -66,7 +66,7 @@ class ( Show dev
   --
   -- __Note__: Do not call this function directly, primarily because it is a `State` computation. Use `deviceRead`
   -- instead.
-  deviceReader :: DevReaderFunc dev addrType wordType
+  readDeviceWord  :: DevReaderFunc dev addrType wordType
   -- | Device writer function: Write a word (`wordType`) to the device at an address (`addrType`), which definitely
   -- changes the device's state. Returns the new device state.
   --
@@ -75,7 +75,7 @@ class ( Show dev
   --
   -- __Note__: Do not call this function directly, primarily because it is a `State` computation. Use `deviceWrite`
   -- instead.
-  deviceWriter :: DevWriterFunc dev addrType wordType
+  writeDeviceWord :: DevWriterFunc dev addrType wordType
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Higher level device functions:
@@ -91,7 +91,7 @@ deviceRead :: addrType
            -- ^ The memory-mapped device
            -> (wordType, Device addrType wordType)
            -- ^ Value/word read and updated device state pair
-deviceRead addr (Device dev) = second Device (runState (deviceReader addr) dev)
+deviceRead addr (Device dev) = second Device (runState (readDeviceWord addr) dev)
 
 -- | Write a word to a device, returning the new device state as its result. This function invokes `execState`
 -- to run the device's state forward, since only the state is important.
@@ -103,7 +103,7 @@ deviceWrite :: addrType
             -- ^ Current device state
             -> Device addrType wordType
             -- ^ Result device state
-deviceWrite addr word (Device dev) = Device (execState (deviceWriter addr word) dev)
+deviceWrite addr word (Device dev) = Device (execState (writeDeviceWord addr word) dev)
 
 -- | Make a new device (wrapper around the `Device` constructor)
 mkDevice :: ( DeviceIO dev addrType wordType ) =>
@@ -130,8 +130,8 @@ instance (Num wordType) => DeviceThings (ConstDevice wordType)
 instance ( Integral wordType
          , Show wordType) =>
          DeviceIO (ConstDevice wordType) addrType wordType where
-  deviceReader _addr       = state constDeviceReader
-  deviceWriter _addr word  = state (const (word, ConstDevice word))
+  readDeviceWord _addr       = state constDeviceReader
+  writeDeviceWord _addr word  = state (const (word, ConstDevice word))
 
 constDeviceReader :: (Integral wordType) => ConstDevice wordType -> (wordType, ConstDevice wordType)
 constDeviceReader dev@(ConstDevice x) = (fromIntegral x, dev)
