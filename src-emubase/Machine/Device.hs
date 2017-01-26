@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 {- | Device emulation.
 
@@ -6,10 +7,10 @@
 -}
 module Machine.Device
     ( -- * Fundamental device types and constructors
-      Device(..)
-    , mkDevice
+    {-  Device(..)
+    , mkDevice -}
     -- * Device classes and types
-    , DeviceThings(..)
+      Device(..)
     , DeviceIO(..)
     , DevReaderFunc
     , DevWriterFunc
@@ -20,23 +21,30 @@ module Machine.Device
     , constDevice
     ) where
 
-import           Control.Arrow              (second)
-import           Control.Monad.State.Strict (State, execState, runState, state)
+{-import           Control.Arrow              (second)-}
+import Data.Functor.Identity
+{-import           Control.Monad.State.Strict (State, StateT, execState, execStateT, runState, runStateT, state, liftM)-}
+import           Control.Monad.State.Strict (StateT, execStateT, runStateT, state)
 
+{-
 -- | The emulated device type. This is simply a box around an existential type. Each `Device` must implement the `DeviceIO`
 -- type class.
-data Device addrType wordType where
-  Device :: ( DeviceIO dev addrType wordType ) =>
-            dev
-         -- The underlying device
-         -> Device addrType wordType
+data DeviceM devM addrType wordType where
+  DeviceM :: ( DeviceIO dev devM addrType wordType ) =>
+             dev
+          -- The (unboxed) device
+          -> DeviceM devM addrType wordType
+
+-- | Simple devices that don't require a special inner `Monad`; the monad is specialized to `Identity`
+type Device addrType wordType = DeviceM Identity addrType wordType
 
 -- Show instance:
-instance Show (Device addrType wordType) where
-  show (Device dev) = "Device " ++ show dev
+instance Show (DeviceM devM addrType wordType) where
+  show (DeviceM dev) = "Device " ++ show dev
+-}
 
 -- | Device-specific operations that don't depend on an address or a word type.
-class (Monoid dev) => DeviceThings dev where
+class (Monoid dev) => Device dev where
   -- | Device reset. The default implementation assumes the device type is a 'Monoid', ignoring the argument and
   -- returning 'mempty'.
   deviceReset      :: dev
@@ -45,18 +53,29 @@ class (Monoid dev) => DeviceThings dev where
                    -- ^ Reset device state
   deviceReset _dev = mempty
 
--- | Type signature for device reader functions
-type DevReaderFunc dev addrType wordType = addrType -> State dev wordType
+-- | Type signature for general-purpose device reader functions, in which the inner `Monad` is something
+-- other than `Identity` (e.g., a GUI)
+type DevReaderFuncT dev devM addrType wordType = addrType -> StateT dev devM wordType
 
--- | Type signature for device writer functions
-type DevWriterFunc dev addrType wordType = addrType -> wordType -> State dev wordType
+-- | Type signature for simplified device reader functions; the inner `Monad` (like `State` vs. `StateT`)
+-- is `Identitiy`.
+type DevReaderFunc dev addrType wordType = DevReaderFuncT dev Identity addrType wordType
+
+-- | Type signature for gemeral-purpose device writer functions, in which the inner `Monad` is something
+-- other than `Identity` (e.g., a GUI)
+type DevWriterFuncT dev devM addrType wordType = addrType -> wordType -> StateT dev devM wordType
+
+-- | Type signature for simplified device reader functions; the inner `Monad` (like `State` vs. `StateT`)
+-- is `Identitiy`.
+type DevWriterFunc dev addrType wordType = DevWriterFuncT dev Identity addrType wordType
 
 -- | Device-specific operations that depend on an address and a word type. This type class is necessary because the
 -- actual device `dev` in the `Device` type is existential; the type class unboxes `dev`.
 class ( Show dev
-      , DeviceThings dev
+      , Device dev
+      , Monad devM
       ) =>
-      DeviceIO dev addrType wordType where
+      DeviceIO dev devM addrType wordType where
   -- | Device reader function: Read a word (`wordType`) from the device at an address (`addrType`), potentially
   -- changing the device's state. Returns a '(word, newDeviceState)' pair, which is the same result as a `State`
   -- function.
@@ -66,7 +85,7 @@ class ( Show dev
   --
   -- __Note__: Do not call this function directly, primarily because it is a `State` computation. Use `deviceRead`
   -- instead.
-  readDeviceWord  :: DevReaderFunc dev addrType wordType
+  readDeviceWord  :: DevReaderFuncT dev devM addrType wordType
   -- | Device writer function: Write a word (`wordType`) to the device at an address (`addrType`), which definitely
   -- changes the device's state. Returns the new device state.
   --
@@ -75,7 +94,7 @@ class ( Show dev
   --
   -- __Note__: Do not call this function directly, primarily because it is a `State` computation. Use `deviceWrite`
   -- instead.
-  writeDeviceWord :: DevWriterFunc dev addrType wordType
+  writeDeviceWord :: DevWriterFuncT dev devM addrType wordType
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Higher level device functions:
@@ -85,31 +104,40 @@ class ( Show dev
 -- `runState` to run the state forward. Addresses are calculated relative to the memory region's start, e.g.,
 -- if the device's memory region starts at `0x1000` and the read address is `0x10ff`, then the address
 -- passed to `deviceRead` is `0x00ff` (`0x10ff - 0x1000`).
-deviceRead :: addrType
+deviceRead :: ( {-Monad devM, Device dev,-} DeviceIO dev devM addrType wordType ) =>
+              addrType
            -- ^ Address to read from, relative to the memory region's start
-           -> Device addrType wordType
+           -> dev -- DeviceM devM addrType wordType
            -- ^ The memory-mapped device
-           -> (wordType, Device addrType wordType)
+           -> devM (wordType, dev)
            -- ^ Value/word read and updated device state pair
-deviceRead addr (Device dev) = second Device (runState (readDeviceWord addr) dev)
+deviceRead addr = runStateT (readDeviceWord addr)
 
 -- | Write a word to a device, returning the new device state as its result. This function invokes `execState`
 -- to run the device's state forward, since only the state is important.
-deviceWrite :: addrType
+deviceWrite :: ( {-Monad devM, Device dev,-} DeviceIO dev devM addrType wordType ) =>
+               addrType
             -- ^ Address being written to
             -> wordType
             -- ^ Value being written
-            -> Device addrType wordType
+            -> dev -- DeviceM devM addrType wordType
             -- ^ Current device state
-            -> Device addrType wordType
+            -> devM dev -- DeviceM devM addrType wordType
             -- ^ Result device state
-deviceWrite addr word (Device dev) = Device (execState (writeDeviceWord addr word) dev)
+deviceWrite addr word = execStateT (writeDeviceWord addr word)
 
--- | Make a new device (wrapper around the `Device` constructor)
-mkDevice :: ( DeviceIO dev addrType wordType ) =>
+{-
+-- | Make a new device (wrapper around the `DeviceM` constructor)
+mkDeviceM :: ( DeviceIO dev devM addrType wordType ) =>
+             dev
+          -> DeviceM devM addrType wordType
+mkDeviceM = DeviceM
+
+-- | Make a (simplified) device
+mkDevice :: ( DeviceIO dev Identity addrType wordType ) =>
             dev
          -> Device addrType wordType
-mkDevice = Device
+mkDevice = Device-}
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Constant device:
@@ -124,12 +152,13 @@ instance (Num wordType) => Monoid (ConstDevice wordType) where
   (ConstDevice a) `mappend` (ConstDevice b) = ConstDevice (a + b)
 
 -- Instantiate the DeviceThings type class:
-instance (Num wordType) => DeviceThings (ConstDevice wordType)
+instance (Num wordType) => Device (ConstDevice wordType)
 
 -- Instantiate the DeviceIO class
 instance ( Integral wordType
-         , Show wordType) =>
-         DeviceIO (ConstDevice wordType) addrType wordType where
+         , Show wordType
+         ) =>
+         DeviceIO (ConstDevice wordType) Identity addrType wordType where
   readDeviceWord _addr       = state constDeviceReader
   writeDeviceWord _addr word  = state (const (word, ConstDevice word))
 

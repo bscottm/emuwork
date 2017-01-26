@@ -6,6 +6,8 @@
 module Machine.Tests.TestDevice
         ( mkTestDevice
         , mkVideoDevice
+        , vidLinearSize
+        , videoTestPattern
         ) where
 
 import           Control.Arrow              (second)
@@ -76,10 +78,6 @@ type VideoRAM = M.MemorySystem Word16 Word8
 vidRAM :: Lens' VideoDevice VideoRAM
 vidRAM f vdev = (\vram -> vdev { _vidRAM = vram}) <$> f (_vidRAM vdev)
 
--- | Test pattern for video device.
-videoTestPattern :: [Word8]
-videoTestPattern = map (fromIntegral . ord) $ take vidLinearSize (cycle (['0'..'9'] ++ ['A'..'Z'] ++ ['a'..'z']))
-
 -- | The `Monoid` instance
 instance Monoid VideoDevice where
   mempty           = VideoDevice {
@@ -104,6 +102,9 @@ vidCols = 64
 -- | Linear size of the video RAM
 vidLinearSize :: Int
 vidLinearSize = vidRows * vidCols
+-- | Test pattern for video device.
+videoTestPattern :: [Word8]
+videoTestPattern = map (fromIntegral . ord) $ take vidLinearSize (cycle (['0'..'9'] ++ ['A'..'Z'] ++ ['a'..'z']))
 
 -- | Read a byte from the video device's memory
 videoReader :: Word16
@@ -130,6 +131,6 @@ mkVideoDevice :: (Num addrType,
               -- ^ Video device's base address
               -> M.MemorySystem addrType wordType
               -- ^ Existing memory system into which video device is inserted
-              -> (Int, M.MemorySystem addrType wordType)
+              -> M.MemorySystem addrType wordType
               -- ^ Device index, updated memory system pair
 mkVideoDevice base = M.mkDevRegion base (base + fromIntegral vidLinearSize) (mkDevice (mempty :: VideoDevice))

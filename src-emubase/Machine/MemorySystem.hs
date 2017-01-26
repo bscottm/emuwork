@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-| General-purpose system memory, for both traditional memory and for port-based I/O systems.
 
 Memory is a collection of address regions ('addrType') stored in an 'IntervalMap'. The 'IntervalMap' stores the start
@@ -57,7 +58,6 @@ module Machine.MemorySystem
 
 import           Control.Arrow                   (first, (***))
 import           Control.Lens                    (Lens', over, to, view, (%~), (&), (+~), (-~), (.~), (^.), (|>))
-import           Control.Monad                   (mapM)
 import           Control.Monad.State.Strict      (runState, state)
 import qualified Data.Foldable                   as Fold (foldl')
 import           Data.HashMap.Strict             (HashMap)
@@ -67,6 +67,7 @@ import qualified Data.IntervalMap.Interval       as I
 import           Data.Maybe                      (fromMaybe)
 import           Data.Monoid
 import qualified Data.OrdPSQ                     as OrdPSQ
+import           Data.Traversable                (traverse)
 import           Data.Vector.Unboxed             (Vector, (!), (//))
 import qualified Data.Vector.Unboxed             as DVU
 import           Prelude                         hiding (lookup)
@@ -81,8 +82,13 @@ import           Machine.Utils
 
 -- | Shorthand for the memory region interval map
 type MemRegionMap addrType wordType = IM.IntervalMap (I.Interval addrType) (MemoryRegion addrType wordType)
+
+-- | Box for devices living in the `DeviceManager`
+data MemDevice where
+  MemDevice :: (Device dev) => dev -> MemDevice
+
 -- | Shorthand for the device manager
-type DeviceManager addrType wordType = HashMap Int (Device addrType wordType)
+type DeviceManager = HashMap Int MemDevice
 
 {- | `MemorySystem` provides a unified interface to an emulated memory system: RAM, ROM and devices that occupy memory
 address ranges. Note, though, that port-based I/O is also a type of memory system (see the `IOSystem` type alias), where
@@ -100,7 +106,7 @@ data MemorySystem addrType wordType where
   MSys ::
     { _regions    :: MemRegionMap addrType wordType
     -- ^ Region interval map
-    , _devices    :: DeviceManager addrType wordType
+    , _devices    :: DeviceManager
     -- ^ Container for memory-mapped devices, indexed by an integer identifier
     , _nDevices   :: Int
     -- ^ Number of devices (and device identifier generator)
@@ -124,7 +130,7 @@ regions :: Lens' (MemorySystem addrType wordType) (MemRegionMap addrType wordTyp
 regions f msys = (\regions' -> msys { _regions = regions' }) <$> f (_regions msys)
 
 -- | Lens for the memory-mapped device container
-deviceTable :: Lens' (MemorySystem addrType wordType) (DeviceManager addrType wordType)
+deviceTable :: Lens' (MemorySystem addrType wordType) DeviceManager
 deviceTable f msys = (\memD -> msys { _devices = memD }) <$> f (_devices msys)
 
 -- | Lens for the memory-mapped device container
@@ -239,23 +245,24 @@ mkDevRegion :: ( Ord addrType
                , Num addrType
                , ShowHex addrType
                , DVU.Unbox wordType
+               , Device dev
                ) =>
                addrType
             -- ^ Start address of the region
             -> addrType
             -- ^ End address of the region
-            -> Device addrType wordType
+            -> dev
             -- ^ The device type
             -> MemorySystem addrType wordType
             -- ^ Memory region to augment
-            -> (Int, MemorySystem addrType wordType)
+            -> MemorySystem addrType wordType
             -- ^ Resulting memory system with the device region inserted
 mkDevRegion sa ea dev msys =
   let devIdx = msys ^. nDevices
   in  if   IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
-      then (devIdx, msys & nDevices     +~ 1
-                         & regions      %~ IM.insertWith const (I.IntervalCO sa ea) (DevMemRegion devIdx)
-                         & deviceTable  %~ H.insert devIdx dev)
+      then msys & nDevices     +~ 1
+                & regions      %~ IM.insertWith const (I.IntervalCO sa ea) (DevMemRegion devIdx)
+                & deviceTable  %~ H.insert devIdx (MemDevice dev)
       else error ("mkDevRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -350,7 +357,7 @@ mReadN !sa !nWords !msys
               updDevTable dev' = contentMsys & deviceTable %~ H.update (\_ -> Just dev') devIdx
               -- Generate the addresses to read from the device, turn them into StateT device reader functiosn, then
               -- runState over the resulting list. (Note: Eta reduction here, 'dev' is the implied parameter.)
-              readDevice       = runState (mapM (state . deviceRead) [fromIntegral a | a <- [offs..offs + len]])
+              readDevice       = runState (traverse (state . deviceRead) [fromIntegral a | a <- [offs..offs + len - 1]])
           in  DVU.fromList *** updDevTable $ readDevice dev
 
         getContent offs len contentMsys memRegion             = (DVU.slice offs len (memRegion ^. contents), contentMsys)

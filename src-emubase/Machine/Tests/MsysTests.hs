@@ -5,6 +5,7 @@ module Main where
 import           Control.Arrow                        (first, second)
 import           Control.Monad                        (mapM_, replicateM, unless)
 import           Control.Monad.State.Strict           (evalState, runState, state)
+import           Data.Char                            (ord)
 import qualified Data.Foldable                        as Fold (foldl)
 import qualified Data.IntervalMap.Interval            as I
 import           Data.List                            (elemIndices)
@@ -13,7 +14,7 @@ import           Data.Monoid                          (mempty)
 import           Data.Vector.Unboxed                  (Vector, (!))
 import qualified Data.Vector.Unboxed                  as DVU
 import           Data.Word
-import           System.IO                            (hPutStrLn, hPrint, stderr)
+import           System.IO                            (hPutStrLn, stderr)
 import           System.Random                        (Random, StdGen, getStdGen, randomR, setStdGen)
 import           Test.Framework                       (Test, defaultMain, plusTestOptions, testGroup)
 import           Test.Framework.Options               (TestOptions' (..))
@@ -25,7 +26,7 @@ import           Test.QuickCheck                      (Large, NonNegative, Prope
 -- import           Debug.Trace
 
 import qualified Machine.MemorySystem                 as M
-import           Machine.Tests.TestDevice             (mkTestDevice, mkVideoDevice)
+import           Machine.Tests.TestDevice             (mkTestDevice, mkVideoDevice, vidLinearSize, videoTestPattern)
 import           Machine.Utils                        (ShowHex, as0xHexS)
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -469,28 +470,26 @@ writeRAM :: (Integral addrType, DVU.Unbox wordType) =>
 writeRAM msys (addr, val) = M.mWrite addr val msys
 {-# INLINABLE writeRAM #-}
 
-testMemMappedDev :: (Int, TestMemSystem)
+testMemMappedDev :: TestMemSystem
 testMemMappedDev = M.mkDevRegion 0x100 0x101 mkTestDevice mempty
 
 test_MemMappedDeviceCreate :: TestParams -> Assertion
 test_MemMappedDeviceCreate _args =
-  let (didx, msys) = testMemMappedDev
+  let msys         = testMemMappedDev
       rlist        = map fst (M.regionList msys)
       nRegions     = M.countRegions msys == 1
       mRegions     = rlist == [I.IntervalCO 0x100 0x101]
-      diagnose | didx /= 0
-               = "Expected device index == 0"
-               | not nRegions
+      diagnose | not nRegions
                = "Expected one memory region" ++ show (M.countRegions msys)
                | not mRegions
                = "Region mismatch: " ++ show rlist
                | otherwise
                = "Huh?"
-  in  assertBool diagnose (didx == 0 && nRegions && mRegions)
+  in  assertBool diagnose (nRegions && mRegions)
 
 test_MemMappedDeviceReads :: TestParams -> Assertion
 test_MemMappedDeviceReads _args =
-  let (_didx, msys) = testMemMappedDev
+  let msys          = testMemMappedDev
       nElts         = 18
       readMem       = M.mRead 0x100
       mReads        = evalState (replicateM nElts (state readMem)) msys
@@ -499,23 +498,20 @@ test_MemMappedDeviceReads _args =
 
 test_VideoDeviceCreate :: TestParams -> Assertion
 test_VideoDeviceCreate _args =
-  let (didx, msys) = mkVideoDevice 0x3c00 (mempty :: TestMemSystem)
+  let msys         = mkVideoDevice 0x3c00 (mempty :: TestMemSystem)
       rlist        = map fst (M.regionList msys)
       nRegions     = M.countRegions msys == 1
       mRegions     = rlist == [I.IntervalCO 0x3c00 0x4200]
-      diagnose | didx /= 0
-               = "Expected device index == 0"
-               | not nRegions
+      diagnose | not nRegions
                = "Expected one memory region" ++ show (M.countRegions msys)
                | not mRegions
                = "Region mismatch: " ++ show rlist
                | otherwise
                = "Huh?"
-  in  assertBool diagnose (didx == 0 && nRegions && mRegions)
+  in  assertBool diagnose (nRegions && mRegions)
 
 test_VideoDeviceReads :: TestParams -> Assertion
-test_VideoDeviceReads _args = 
-  let (didx, msys) = mkVideoDevice 0x3c00 (mempty :: TestMemSystem)
-  in  do
-        hPrint stderr (mReadN_ 0x3c00 24 msys)
-        return ()
+test_VideoDeviceReads _args =
+  let msys         = mkVideoDevice 0x3c00 (mempty :: TestMemSystem)
+      vram         = mReadN_ 0x3c00 vidLinearSize msys
+  in assertBool "vram readback mismatch" (vram == DVU.fromList videoTestPattern)
