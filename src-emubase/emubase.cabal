@@ -79,7 +79,6 @@ test-suite msystest
     build-depends:
       base,
       Cabal,
-      comonad,
       HUnit >= 1.2,
       QuickCheck >= 2,
       test-framework >= 0.8,

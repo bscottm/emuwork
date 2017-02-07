@@ -12,18 +12,20 @@ module Machine.Tests.TestDevice
         , videoTestPattern
         ) where
 
-import           Control.Arrow              (second)
-import           Control.Lens               (Lens', set, (%~), (&), (^.))
-import           Control.Monad.State.Strict (state)
-import           Data.Char                  (ord)
-import           Data.List                  (cycle)
-import qualified Data.Vector.Unboxed        as DVU
+import           Control.Arrow               (second)
+import           Control.Lens                (Lens', set, (%~), (&), (^.))
+import           Control.Monad.State.Strict  (state)
+import           Data.Char                   (ord)
+import           Data.List                   (cycle)
+import qualified Data.Vector.Unboxed         as DVU
 import           Data.Word
 
+-- import Debug.Trace
+
 import           Machine.Device
-import qualified Machine.MemorySystem       as M
-import           Machine.Types              (Device, DeviceFuncs (..), DeviceIO (..), EmulatedSystem, SimpleDeviceSystem,
-                                             mkSimpleDeviceSystem)
+import qualified Machine.MemorySystem        as M
+import           Machine.Types               (Device, DeviceFuncs (..), DeviceIO (..), EmulatedSystem, SimpleDeviceSystem,
+                                              mkSimpleDeviceSystem)
 import           Machine.Utils
 
 
@@ -65,6 +67,7 @@ testDeviceReader (TestDevice x) = (fromIntegral x, TestDevice (x + 1))
 mkTestDevice :: (Integral wordType) => Device addrType wordType
 mkTestDevice = mkDevice (mempty :: TestDevice)
 
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 -- | Test video device. This exists primarily to test `MemorySystem` reusability. Also, the video device has
 -- a specific address type (`Word16`) and word type (`Word8`). So, if the emulated machine's memory system
 -- doesn't have the same `Word16`/`Word8` address and word types, one would have to create a new `DeviceIO`
