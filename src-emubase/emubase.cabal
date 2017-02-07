@@ -1,4 +1,4 @@
-cabal-version:  >= 1.12
+cabal-version:  3.6
 name:           emubase
 version:        0.1
 build-type:     Simple
@@ -6,38 +6,40 @@ author:         B. Scott Michel
 synopsis:       A processor emulation framework
 
 description:    An processor emulation framework
-license:        GPL-3
+license:        GPL-3.0-or-later
 
 library
   default-language:     Haskell2010
 
   build-depends:
     base,
-    comonad,
-    time,
-    primitive,
-    filepath,
-    directory,
-    deepseq,
-    containers,
-    unordered-containers,
-    bytestring,
-    text,
-    vector,
-    mtl >= 2,
-    psqueues,
-    hashable,
-    old-locale,
-    comonad,
     IntervalMap,
-    lens,
-    mtl,
+    bytestring,
+    comonad,
+    containers,
+    deepseq,
+    directory,
+    filepath,
+    generics-sop,
+    hashable,
+    microlens-platform,
+    transformers,
+    old-locale,
+    parsec,
+    primitive,
+    psqueues,
     syb,
-    parsec
+    text,
+    time,
+    uniplate,
+    unordered-containers,
+    vector
 
+  -- cpp-options: -DTEST_DEBUG
   ghc-options: -Wall -O2
 
   default-extensions:
+    CPP,
     GADTs,
     MultiParamTypeClasses,
     TypeSynonymInstances,
@@ -49,55 +51,61 @@ library
   exposed-modules:
     Machine,
     Reader,
-    Z80,
 
     Machine.Device,
     Machine.DisassemblerTypes,
     Machine.MemorySystem,
-    Machine.ProgramCounter
+    Machine.ProgramCounter,
     Machine.NullProcessor,
-    Machine.Types,
+    Machine.System,
     Machine.Utils,
 
     Reader.RawFormat,
     Reader.IntelHex,
-    Reader.ErrorHandling,
-
-    Z80.InstructionSet,
-    Z80.InsnDecode,
-    Z80.Processor,
-    Z80.Disassembler,
-    Z80.DisasmOutput,
-    Z80.ParseAnalytic,
-    Z80.System
+    Reader.ErrorHandling
 
 test-suite msystest
     default-language:   Haskell2010
     type:               exitcode-stdio-1.0
     main-is:            Machine/Tests/MsysTests.hs
+    -- cpp-options:        -DTEST_DEBUG
     ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-N4
     build-depends:
       base,
+      random,
       Cabal,
-      comonad,
       HUnit >= 1.2,
       QuickCheck >= 2,
       test-framework >= 0.8,
       test-framework-hunit >= 0.3,
       test-framework-quickcheck2 >= 0.3,
-      mtl,
-      lens,
       IntervalMap,
-      unordered-containers,
       bytestring,
-      text,
-      mtl >= 2,
-      vector,
+      comonad,
+      containers,
+      deepseq,
+      directory,
+      filepath,
+      generics-sop,
+      hashable,
+      microlens-platform,
+      transformers,
+      old-locale,
+      parsec,
+      primitive,
       psqueues,
-      random
+      syb,
+      text,
+      time,
+      uniplate,
+      unordered-containers,
+      vector
     default-extensions:
+      CPP,
       GADTs,
       MultiParamTypeClasses,
+      TypeSynonymInstances,
+      RankNTypes,
       OverloadedStrings,
       BangPatterns,
       TemplateHaskell
@@ -105,6 +113,6 @@ test-suite msystest
       Machine.Device,
       Machine.MemorySystem,
       Machine.ProgramCounter,
-      Machine.Types,
+      Machine.System,
       Machine.Utils,
       Machine.Tests.TestDevice

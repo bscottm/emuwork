@@ -1,8 +1,13 @@
+.#*
+.cabal-sandbox
+.ghc.environment.*
+.stack-work
 *.swp
 *~
 \#*
-.#*
-.cabal-sandbox
 cabal.sandbox.config
 dist
-.stack-work
+dist-newstyle
+emuwork.sublime-workspace
+src-emubase/cabal.project.local
+stack.yaml.lock

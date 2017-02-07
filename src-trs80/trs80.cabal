@@ -1,4 +1,4 @@
-cabal-version:  >= 1.12
+cabal-version:  3.6
 name:           trs80
 version:        0.1
 build-type:     Simple
@@ -6,64 +6,73 @@ author:         B. Scott Michel
 synopsis:       TRS-80 system emulator
 
 description:    The venerable TRS-80 ("Trash 80")
-license:        GPL-3
+license:        GPL-3.0-or-later
 
 library
-  default-language:
-                   Haskell2010
+  default-language: Haskell2010
 
   build-depends:
-      aeson,
-      array,
-      base,
-      binary,
-      bytestring,
-      containers,
-      emubase,
-      hashable,
-      lens,
-      pureMD5,
-      scientific,
-      text,
-      unordered-containers,
-      vector,
-      yaml
+    aeson,
+    array,
+    base,
+    binary,
+    bytestring,
+    containers,
+    emubase,
+    generics-sop,
+    hashable,
+    json-sop,
+    lens,
+    microlens,
+    parsec,
+    pureMD5,
+    scientific,
+    text,
+    transformers,
+    unordered-containers,
+    vector,
+    yaml,
+    z80
 
-  ghc-options:
-              -Wall -O2
+  ghc-options: -Wall -O2
 
   default-extensions:
-      GADTs,
-      MultiParamTypeClasses,
-      OverloadedStrings,
-      TemplateHaskell
+    CPP,
+    GADTs,
+    MultiParamTypeClasses,
+    OverloadedStrings,
+    TemplateHaskell
 
   exposed-modules:
-      TRS80
+    TRS80
 
   other-modules:
-      TRS80.System
-      TRS80.Disasm
-      TRS80.CommonOptions
-      TRS80.Disasm.Guidance
+    TRS80.System
+    TRS80.Disasm
+    TRS80.CommonOptions
+    TRS80.Disasm.Guidance
 
 test-suite yamltest
     default-language:   Haskell2010
     Type:               exitcode-stdio-1.0
-    Build-Depends:      base,
-                        Cabal,
-                        HUnit,
-                        hashable,
-                        unordered-containers,
-                        bytestring,
-                        text,
-                        raw-strings-qq,
-                        pureMD5,
-                        aeson,
-                        scientific,
-                        yaml,
-                        vector,
-                        emubase
+    Build-Depends:
+        aeson,
+        base,
+        bytestring,
+        Cabal,
+        emubase,
+        generics-sop,
+        hashable,
+        HUnit,
+        json-sop,
+        pureMD5,
+        raw-strings-qq,
+        scientific,
+        text,
+        unordered-containers,
+        vector,
+        yaml,
+        z80
     Main-is:            TRS80/Disasm/YamlTest.hs
     Other-Modules:      TRS80.Disasm.Guidance
     default-extensions: GADTs,

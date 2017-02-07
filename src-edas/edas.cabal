@@ -1,5 +1,5 @@
 cabal-version:  >= 1.12
-name:           emuwork
+name:           edas
 version:        0.1
 build-type:     Simple
 author:         B. Scott Michel
@@ -11,6 +11,7 @@ license:        GPL-3
 
 executable edas
   default-language:     Haskell2010
+  enable-dynamic:       True
   hs-source-dirs:       src-edas
   Main-Is:              EDAS.hs
   Build-Depends:        base,
@@ -22,7 +23,6 @@ executable edas
                         vector,
                         deepseq,
                         trs80,
-                        zilog-emu,
                         emubase
   ghc-options:          -Wall -O2
   default-extensions:   GADTs,
@@ -56,7 +56,6 @@ executable edas-tests
                         transformers,
                         parsec,
                         HUnit,
-                        zilog-emu,
                         emubase
   ghc-options:          -Wall -O2
   default-extensions:   GADTs,
@@ -80,7 +79,6 @@ executable edas-pptest
                         deepseq,
                         transformers,
                         parsec,
-                        zilog-emu,
                         emubase
   ghc-options:          -Wall -O2
   default-extensions:   GADTs,

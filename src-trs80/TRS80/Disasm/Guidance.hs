@@ -1,370 +1,309 @@
-{-# LANGUAGE FlexibleContexts    #-}
-{-# LANGUAGE OverloadedStrings   #-}
-{-# LANGUAGE RankNTypes          #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE FlexibleContexts     #-}
+{-# LANGUAGE GADTs                #-}
+{-# LANGUAGE LambdaCase           #-}
+{-# LANGUAGE RankNTypes           #-}
+{-# LANGUAGE ScopedTypeVariables  #-}
+{-# LANGUAGE TemplateHaskell      #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module TRS80.Disasm.Guidance
   ( Guidance(..)
   , Directive(..)
+  , Z80guidanceAddr(..)
+  , Z80guidanceDisp(..)
+  , Z80guidanceAddrRange(..)
+  , tryit
+  , tryit2
   , getKnownSymbols
+  , invertKnownSymbols
   , getMatchingSection
   , ToJSON(..)
   , FromJSON(..)
-  ) where
+  )
+where
 
-import qualified Data.Aeson.Types     as AT
+import           Control.Applicative            ( (<|>) )
+import           Data.Aeson.Types               ( (.=) )
+import qualified Data.Aeson.KeyMap as AKM       ( lookup )
 import           Data.Bits
-import qualified Data.ByteString.Lazy as BCL
-import qualified Data.Char            as C
-import           Data.Either
-import qualified Data.Foldable        as Foldable
-import qualified Data.HashMap.Strict  as H
-import           Data.Maybe
-import qualified Data.Scientific      as S
-import qualified Data.Text            as T
-import qualified Data.Vector          as V
-import           Data.Yaml            (FromJSON (..), ToJSON (..), (.=))
-import qualified Data.Yaml            as Y
+import qualified Data.ByteString.Lazy          as B
+import qualified Data.Char                     as C
+import           Data.Either                    ( lefts
+                                                , rights
+                                                )
+import qualified Data.HashMap.Strict           as H
+import           Data.Maybe                     ( fromMaybe
+                                                , isJust
+                                                , fromJust
+                                                )
+import qualified Data.Scientific               as S
+import qualified Data.Text                     as T
+import           Data.Vector                    ( (!) )
+import qualified Data.Vector                   as V
+import           Data.Yaml                      ( FromJSON(..)
+                                                , Parser
+                                                , ToJSON(..)
+                                                , object
+                                                )
+import qualified Data.Yaml                     as Y
+import           Generics.SOP                   ( ConstructorName
+                                                , DatatypeName
+                                                , FieldName
+                                                )
+import           Generics.SOP.JSON              ( JsonFieldName
+                                                , JsonOptions(..)
+                                                , JsonTagName
+                                                , defaultJsonOptions
+                                                , gparseJSON
+                                                , gtoJSON
+                                                )
+import           Generics.SOP.TH                ( deriveGeneric )
 -- import           Debug.Trace
 
-import           Machine.Utils        (as0xHex, asHex)
-import           Z80                  (Z80addr, Z80disp)
+import           Machine.Utils                  ( ShowHex(..)
+                                                , as0xHex
+                                                , as0xHexS
+                                                , asHex
+                                                )
+import           Z80                            ( Z80addr
+                                                , Z80disp
+                                                )
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- <sigh> orphan instance...
+instance e ~ T.Text => MonadFail (Either e) where
+  fail = Left . T.pack
 
--- | Disassembler "guidance": When to disassemble, when to dump bytes, ... basically guidance to the drive
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Wrapper type for 'Z80addr' so that we can write our own 'Value' parser
+data Z80guidanceAddr =
+    FromCurPC
+  |  GuidanceAddr Z80addr
+  deriving (Eq)
+
+instance Show Z80guidanceAddr where
+  show FromCurPC           = "$"
+  show (GuidanceAddr addr) = as0xHexS addr
+
+instance ShowHex Z80guidanceAddr where
+  asHex FromCurPC           = "$"
+  asHex (GuidanceAddr addr) = as0xHex addr
+
+-- | Wrapper type for 'Z80disp' so that we can write our own 'Value' parser
+newtype Z80guidanceDisp =
+  Z80guidanceDisp
+  {
+    unZ80guidanceDisp :: Z80disp
+  } deriving (Eq, Ord)
+
+instance Show Z80guidanceDisp where
+  show = as0xHexS . unZ80guidanceDisp
+
+-- | Wrapper type for address ranges pairs. This accepts "[start address, end address]" or "start", "end"/"nbytes", "nBytes"
+-- attribute/value pairs.
+data Z80guidanceAddrRange =
+    AbsRange Z80guidanceAddr Z80guidanceAddr
+  -- ^ Absolute range, where the end address is absolute
+  | RelRange Z80guidanceAddr Z80guidanceDisp
+  -- ^ Relative range, wher ethe end address is a displacement (i.e., relative)
+  deriving (Eq)
+
+instance Show Z80guidanceAddrRange where
+  show (AbsRange sAddr eAddr) = "AbsRange(" ++ as0xHexS sAddr ++ ", " ++ as0xHexS eAddr ++ ")"
+  show (RelRange sAddr disp ) = "RelRange(" ++ as0xHexS sAddr ++ ", " ++ (as0xHexS . unZ80guidanceDisp) disp ++ ")"
+
+-- | Wrapper type for MD5 signatures
+newtype Z80guidanceMD5Sig =
+  Z80guidanceMD5Sig {
+    unZ80guidanceMD5Sig :: B.ByteString
+  } deriving (Eq, Show)
+
+-- | Disassembler guidance: When to disassemble, when to dump bytes, ... basically guidance to the drive
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
-data Guidance where
-  Guidance ::
-    { origin      :: Z80addr
-                  -- Disassembly origin address (where to start disassembling)
-    , haveOrigin  :: Bool
-                  -- Avoids using Maybe to test if the origin was specified
-    , endAddr     :: Z80addr
-                  -- End disassembly address
-    , haveEndAddr :: Bool
-    , sections    :: H.HashMap T.Text (V.Vector Directive)
-                  -- Map of section names to a list of directives to apply
-    } -> Guidance
+data Guidance =
+  Guidance
+    { origin   :: Z80guidanceAddr
+      -- Disassembly origin address (where to start disassembling)
+    , endAddr  :: Z80guidanceAddr
+      -- End disassembly address
+    , sections :: H.HashMap T.Text (V.Vector Directive)
+      -- Map of section names to a list of directives to apply
+    }
   deriving (Eq, Show)
 
-instance ToJSON Guidance where
-  toJSON (Guidance org _haveOrg ea _haveEA sects)  =
-    Y.Object $ H.insert "end" (Y.String $ as0xHex ea) $
-               H.insert "origin" (Y.String $ as0xHex org) $
-               H.map (Y.Array . V.map toJSON) sects
+data Directive =
+    MD5Sum Z80guidanceMD5Sig
+    -- ^ MD5 signature: Conditionally apply the directives iff the section's signature matches
+  | SymEquate T.Text Z80guidanceAddr
+    -- Symbolic name and value associated iwth with the symbolic name
+  | Comment T.Text
+    -- Comment text
+  | DoDisasm Z80guidanceAddrRange
+    -- Start disassembly address and number of bytes to disassemble
+  | GrabBytes Z80guidanceAddrRange
+    -- Start of range, number of bytes to grab
+  | GrabAsciiZ Z80guidanceAddr
+    -- Start address to start grabbing 0-terminated ASCII string
+  | GrabAscii Z80guidanceAddrRange
+    -- Start of range, number of bytes to grab
+  | HighBitTable Z80guidanceAddrRange
+    -- Start of table, table length
+  | JumpTable Z80guidanceAddrRange
+    -- Jump table start, table length
+  | KnownSymbols (H.HashMap T.Text Z80guidanceAddr)
+    -- Mapping between symbols and addresses for a more user friendly output
+  deriving (Eq, Show)
+
+deriveGeneric ''Directive
+deriveGeneric ''Guidance
 
 instance FromJSON Guidance where
-  parseJSON (Y.Object o) =
-    {- trace ("FromJSON object: " ++ (show o)) -}
-    repackage $ Foldable.foldl collectGuidance
-                               (return Guidance { origin      = 0x0
-                                                , haveOrigin  = False
-                                                , endAddr     = 0x0
-                                                , haveEndAddr = False
-                                                , sections    = H.empty
-                                                })
-                               (H.toList o)
+  parseJSON json = gparseJSON guidanceFields json >>= check
     where
-      collectGuidance :: Either T.Text Guidance
-                      -> (T.Text, Y.Value)
-                      -> Either T.Text Guidance
-      collectGuidance guidance ("origin", orgAddr)   = either (fail . T.unpack) (mkOrigin orgAddr) guidance
-      collectGuidance guidance ("end", ea)           = either (fail . T.unpack) (mkEndAddr ea) guidance
-      collectGuidance guidance (section, directives) = either (fail . T.unpack) (mkSection section directives) guidance
+      check guidance
+        | origin guidance == FromCurPC
+        = fail "Disassembly origin cannot be '$'."
+        | endAddr guidance == FromCurPC
+        = fail "Disassembly end cannot be '$'."
+        | otherwise
+        = pure guidance
 
-      repackage = either (fail . T.unpack) return
+instance ToJSON Guidance where
+  toJSON = gtoJSON guidanceFields
 
-  {- Catchall -}
-  parseJSON invalid = AT.typeMismatch "Guidance" invalid
+instance FromJSON Directive where
+  parseJSON = gparseJSON guidanceFields
 
-mkOrigin :: AT.Value
-         -> Guidance
-         -> Either T.Text Guidance
-mkOrigin (Y.String s) g = (\org -> g { origin = org, haveOrigin = True }) <$> convertWord16 s
-mkOrigin (Y.Number n) g = maybe (outOfRange minZ80addr maxZ80addr ((T.pack . show) n))
-                               (\n' -> return $ g { origin = n', haveOrigin = True })
-                               (S.toBoundedInteger n)
-mkOrigin something _g   = Left $ T.concat ["origin expected a numeric value, got '"
-                                          , T.pack (show something)
-                                          , singleQuote
-                                          ]
+instance ToJSON Directive where
+  toJSON = gtoJSON guidanceFields
 
-mkEndAddr :: AT.Value
-          -> Guidance
-          -> Either T.Text Guidance
-mkEndAddr (Y.String s) g = (\ea -> g { endAddr = ea, haveEndAddr = True }) <$> convertWord16 s
-mkEndAddr (Y.Number n) g = maybe (outOfRange minZ80addr maxZ80addr ((T.pack . show) n))
-                                 (\n' -> Right $ g { endAddr =  n', haveEndAddr = True})
-                                 (S.toBoundedInteger n)
-mkEndAddr something _g   = Left $ T.concat ["end expected a numeric value, got '"
-                                           , T.pack (show something)
-                                           , singleQuote
-                                           ]
+instance FromJSON Z80guidanceAddr where
+  parseJSON = repackResult . parseZ80guidanceAddr
 
-mkSection :: T.Text
-          -> Y.Value
-          -> Guidance
-          -> Either T.Text Guidance
-mkSection sectName (Y.Array directives) g =
-  let dirs   = V.toList $ V.map parseDirective directives
-      errs   = lefts dirs
-      result = (V.fromList . rights) dirs
-  in  {-  | trace ("directives = " ++ (show directives)) -}
-    if null errs
-    then Right $ g { sections = H.insert sectName result (sections g) }
-    else Left (T.unlines errs)
-mkSection sectName _directives _ = fail (T.unpack $ T.concat [ "Section '"
-                                                             , sectName
-                                                             , singleQuote
-                                                             , " expects a directive list."
-                                                             ])
+instance ToJSON Z80guidanceAddr where
+  toJSON FromCurPC           = Y.String "$"
+  toJSON (GuidanceAddr addr) = (Y.String . as0xHex) addr
+
+instance FromJSON Z80guidanceDisp where
+  parseJSON = repackResult . parseZ80Disp
+
+instance ToJSON Z80guidanceDisp where
+  toJSON = Y.String . as0xHex . unZ80guidanceDisp
+
+instance FromJSON Z80guidanceAddrRange where
+  parseJSON (Y.Array vals)
+    | V.length vals /= 2 = fail "Address range must have 2 elements, [start, end]"
+    | otherwise          = repackResult $ AbsRange <$> parseZ80guidanceAddr (vals ! 1) <*> parseZ80guidanceAddr (vals ! 0)
+  parseJSON (Y.Object attrs) = repackResult $ parseAddrRange attrs
+  parseJSON _                = fail "Address range should have 'start' and 'end' or 'nbytes'/'nBytes' attributes"
+
+instance ToJSON Z80guidanceAddrRange where
+  toJSON (AbsRange sAddr eAddr) = object ["addr" .= as0xHex sAddr, "end" .= as0xHex eAddr]
+  toJSON (RelRange sAddr disp ) = object ["addr" .= as0xHex sAddr, "nbytes" .= (as0xHex . unZ80guidanceDisp) disp]
+
+instance FromJSON Z80guidanceMD5Sig where
+  parseJSON (Y.String s) = if all (\x -> T.compareLength x 2 == EQ) strChunks && length bytes == 16 && null errs
+    then pure $ (Z80guidanceMD5Sig . B.pack . rights) bytes
+    else (fail . T.unpack . T.unlines) errs
+   where
+    strChunks = T.chunksOf 2 s
+    bytes     = map convertBytes strChunks
+    convertBytes x = fromIntegral <$> convertHex x
+    errs = lefts bytes
+  parseJSON _ = fail "md5 signature expects a 16 byte hex string, no '0x'."
+
+instance ToJSON Z80guidanceMD5Sig where
+  toJSON = Y.String . T.concat . map asHex . B.unpack . unZ80guidanceMD5Sig
+
+parseZ80guidanceAddr :: Y.Value -> Either T.Text Z80guidanceAddr
+parseZ80guidanceAddr (Y.String strval) | strval == "$" = pure FromCurPC
+                                       | otherwise     = GuidanceAddr <$> convertZ80addr strval
+parseZ80guidanceAddr (Y.Number numval) =
+  maybe (fail "address exceeds 16-bit unsigned integer range") (pure <$> GuidanceAddr) (S.toBoundedInteger numval)
+parseZ80guidanceAddr invalid = fail $ "Invalid Z80 address: " ++ show invalid
+
+parseAddrRange :: Y.Object -> Either T.Text Z80guidanceAddrRange
+parseAddrRange attrs = maybe (fail "Missing 'addr' attribute")
+                             parseRange
+                             (AKM.lookup "addr" attrs)
+ where
+  endAddrAttr = AKM.lookup "end" attrs
+  nBytesAttr  = AKM.lookup "nbytes" attrs <|> AKM.lookup "nBytes" attrs
+  parseRange sAddrAttr
+    | isJust endAddrAttr
+    = AbsRange <$> parseZ80guidanceAddr sAddrAttr <*> parseZ80guidanceAddr (fromJust endAddrAttr)
+    | isJust nBytesAttr
+    = RelRange <$> parseZ80guidanceAddr sAddrAttr <*>  parseZ80Disp (fromJust nBytesAttr)
+    | otherwise
+    = fail "Incomplete address range: Missing 'end' or 'nbytes'/'nBytes' attributes."
+
+parseZ80Disp :: Y.Value -> Either T.Text Z80guidanceDisp
+parseZ80Disp (Y.String strval) = Z80guidanceDisp <$> convertZ80disp strval
+parseZ80Disp (Y.Number numval) =
+  maybe (fail "displacement exceeds 16-bit signed integer range") (pure <$> Z80guidanceDisp) (S.toBoundedInteger numval)
+parseZ80Disp invalid = fail $ "Invalid Z80 displacement: " ++ show invalid
+
+repackResult :: Either T.Text a -> Parser a
+repackResult = either (fail <$> T.unpack) pure
+
+guidanceFields :: JsonOptions
+guidanceFields = defaultJsonOptions { jsonFieldName = renameFields, jsonTagName = renameDirective }
+
+renameFields :: DatatypeName -> FieldName -> JsonFieldName
+renameFields "Guidance"  "endAddr"  = "end"
+renameFields "Guidance"  "sections" = "section"
+renameFields "Guidance"  "origin"   = "origin"
+renameFields "Directive" fname      = renameDirective fname
+renameFields dtName      fname      = dtName ++ ":" ++ fname
+
+renameDirective :: ConstructorName -> JsonTagName
+renameDirective tag = fromMaybe ("unknown Directive tag: " ++ tag) $ H.lookup tag directiveRenameTable
+
+-- | Translation table mapping 'Directive' constructor names to tags in the YAML/JSON source
+directiveRenameTable :: H.HashMap String String
+directiveRenameTable = H.fromList
+  [ ("MD5Sum"      , "md5")
+  , ("SymEquate"   , "equate")
+  , ("Comment"     , "comment")
+  , ("DoDisasm"    , "disasm")
+  , ("GrabBytes"   , "bytes")
+  , ("GrabAsciiZ"  , "asciiz")
+  , ("GrabAscii"   , "ascii")
+  , ("HighBitTable", "highbits")
+  , ("JumpTable"   , "jumptable")
+  , ("KnownSymbols", "symbols")
+  ]
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-data Directive where
-  MD5Sum         :: BCL.ByteString
-                 -- MD5 signature: Conditionally apply the directives iff the section's signature matches
-                 -> Directive
-  SymEquate      :: T.Text
-                 -- Symbolic name
-                 -> Z80addr
-                 -- Value associated iwth with the symbolic name
-                 -> Directive
-  Comment        :: T.Text
-                 -- Comment text
-                 -> Directive
-  DoDisasm       :: Z80addr
-                 -- Start disassembly address
-                 -> Z80disp
-                 -- Number of bytes to disassemble
-                 -> Directive
-  GrabBytes      :: Z80addr
-                 -- Start of range
-                 -> Z80disp
-                 -- Number of bytes to grab
-                 -> Directive
-  GrabAsciiZ     :: Z80addr
-                    -- Start address to start grabbing 0-terminated ASCII string
-                 -> Directive
-  GrabAscii      :: Z80addr
-                 -- Start of range
-                 -> Z80disp
-                 -- Number of bytes to grab
-                 -> Directive
-  HighBitTable   :: Z80addr
-                 -- Start of table
-                 -> Z80disp
-                 -- Table length
-                 -> Directive
-  JumpTable      :: Z80addr
-                 -- Jump table start
-                 -> Z80disp
-                 -- Jump table length
-                 -> Directive
-  KnownSymbols   :: H.HashMap Z80addr T.Text
-                    -- Mapping between addresses and symbols, more user friendly output
-                 -> Directive
-  deriving (Eq, Show)
+-- | Convert a text string to a Z80 address. The converted value's range is checked to ensure it is
+-- a proper 16-bit quantity.
+convertZ80addr :: T.Text -> Either T.Text Z80addr
+convertZ80addr str = convertWord16 str >>= checkRange minZ80addr maxZ80addr
 
-instance ToJSON Directive where
-  toJSON (MD5Sum md5sum)          = Y.object ["md5" .= md5AsText md5sum]
-  toJSON (SymEquate sym addr)     = Y.object ["equate" .= Y.object [ "name" .= sym
-                                                                   , "value" .= as0xHex addr]
-                                             ]
-  toJSON (Comment comment)        = Y.object ["comment" .= comment]
-  toJSON (DoDisasm addr disp)     = Y.object ["disasm" .= Y.object [ "addr" .= as0xHex addr
-                                                                   , "nbytes" .= as0xHex disp]
-                                             ]
-  toJSON (GrabBytes addr disp)    = Y.object ["bytes" .= Y.object [ "addr" .= as0xHex addr
-                                                                  , "nbytes" .= as0xHex disp
-                                                                  ]
-                                             ]
-  toJSON (GrabAsciiZ addr)        = Y.object ["asciiz" .= addr]
-  toJSON (GrabAscii addr disp)    = Y.object ["ascii" .= Y.object [ "addr" .= as0xHex addr
-                                                                  , "nbytes" .= as0xHex disp
-                                                                  ]
-                                             ]
-  toJSON (HighBitTable addr disp) = Y.object ["highbits" .= Y.object [ "addr" .= as0xHex addr
-                                                                     , "nbytes" .= as0xHex disp
-                                                                     ]
-                                             ]
-  toJSON (JumpTable addr disp)    = Y.object ["jumptable" .= Y.object ["addr" .= as0xHex addr
-                                                                      , "nbytes" .= as0xHex disp
-                                                                      ]
-                                             ]
-  toJSON (KnownSymbols _syms)     = undefined
+-- | Convert a text string to a Z80 displacement. The converted value's range is checked to ensure it is
+-- a proper 16-bit quantity.
+convertZ80disp :: T.Text -> Either T.Text Z80disp
+convertZ80disp str = convertWord16 str >>= checkRange minZ80disp maxZ80disp
 
-{-
-  toEncoding (SetOrigin addr) = pairs ("addr" .= addr)
-  toEncoding (SymEquate sym addr) = pairs ("equate" .= object [sym .= addr])
-  toEncoding (Comment comment) = pairs ("comment" .= comment)
-  toEncoding (DoDisasm addr disp) = pairs ("disasm" .= object ["start" .= addr, "nbytes" .= disp])
-  toEncoding (GrabBytes addr disp) = pairs ("bytes" .= object ["addr" .= addr, "nbytes" .= disp])
-  toEncoding (GrabAsciiZ addr) = pairs ("asciiz" .= addr)
-  toEncoding (GrabAscii addr disp) = pairs ("ascii" .= object ["addr" .= addr, "len" .= disp])
-  toEncoding (HighBitTable addr disp) = pairs ("highbits" .= object ["addr" .= addr, "nbytes" .= disp])
-  toEncoding (JumpTable addr disp) = pairs ("jumptable" .= object ["addr" .= addr, "nbytes" .= disp])
--}
+-- | Ensure that a converted value (see 'convertZ80addr' and 'convertZ80disp') is properly bounded.
+checkRange :: (Integral a) => Int -> Int -> Int -> Either T.Text a
+checkRange lower upper val
+  | val >= lower && val <= upper = Right (fromIntegral val)
+  | otherwise = Left
+  $ T.concat ["Value range exceeded (", T.pack (show lower), " <= x <= ", T.pack (show upper), "): ", T.pack (show val)]
 
-md5AsText :: BCL.ByteString -> T.Text
-md5AsText = BCL.foldl (\accum digit -> T.append accum $ asHex digit) T.empty
+convertWord16 :: T.Text -> Either T.Text Int
+convertWord16 t | T.isPrefixOf "0x" t = convertHex (T.drop 2 t)
+                | T.isPrefixOf "0o" t = convertOctal (T.drop 2 t)
+                | T.isPrefixOf "0" t  = convertOctal (T.tail t)
+                | otherwise           = convertNum 10 C.isDigit "Invalid decimal constant" t
 
-instance FromJSON Directive where
-  parseJSON val@(Y.Object _) = either (fail . T.unpack) return (parseDirective val)
-  parseJSON invalid          = AT.typeMismatch "Directive" invalid
-
-parseDirective :: Y.Value
-                -> Either T.Text Directive
-parseDirective (Y.Object o)
-    | (v, exists) <- probe "comment" o
-    , exists
-    -- , trace ("comment: v = " ++ (show v)) True
-    = mkComment v
-    | (v, exists) <- probe "equate" o
-    -- , trace ("comment: v = " ++ (show v)) True
-    , exists
-    = mkEquate v
-    | (v, exists) <- probe "disasm" o
-    -- , trace ("disasm: v = " ++ (show v)) True
-    , exists
-    = mkDisasm v
-    | (v, exists) <- probe "bytes" o
-    -- , trace ("bytes: v = " ++ (show v)) True
-    , exists
-    = mkGrabBytes v
-    | (v, exists) <- probe "asciiz" o
-    -- , trace ("asciiz: v = " ++ (show v)) True
-    , exists
-    = mkAsciiZ v
-    | (v, exists) <- probe "ascii" o
-    -- , trace ("ascii: v = " ++ (show v)) True
-    , exists
-    = mkGrabAscii v
-    | (v, exists) <- probe "highbits" o
-    -- , trace ("highbits: v = " ++ (show v)) True
-    , exists
-    = mkHighBitTable v
-    | (v, exists) <- probe "jumptable" o
-    -- , trace ("jumptable: v = " ++ (show v)) True
-    , exists
-    = mkJumpTable v
-    | (v, exists) <- probe "symbols" o
-    {-  , trace ("symbols: v = " ++ (show v)) True -}
-    , exists
-    = mkKnownSymbols v
-    | (v, exists) <- probe "md5" o
-    {-  , trace ("md5: v = " ++ (show v)) True -}
-    , exists
-    = mkMD5Sum v
-    | otherwise
-    = fail ("Valid directive expected, got: " ++ show o)
-    where
-      probe k h   = let v = H.lookup k h
-                    in  (v, isJust v)
-
-parseDirective _invalid = Left "Expected a directive (key: value) pair."
-
-mkComment :: Maybe AT.Value -> Either T.Text Directive
-mkComment (Just (Y.String s)) = Right $ Comment s
-mkComment _                   = Left "Comment guidance expects a string."
-
-mkEquate :: Maybe AT.Value -> Either T.Text Directive
-mkEquate (Just (Y.Object o'))  =
-  let symname = H.lookup "name" o'
-      symval  = H.lookup "value" o'
-  in case symname of
-       Just (AT.String symname') -> if validSymName symname'
-                                    then case symval of
-                                           Just (AT.String symval') -> SymEquate symname' <$> convertWord16 symval'
-                                           Just (AT.Number symval') -> maybe (outOfRange minZ80addr maxZ80addr
-                                                                                        ((T.pack . show ) symval'))
-                                                                             (Right . SymEquate symname')
-                                                                             (S.toBoundedInteger symval')
-                                           Just something           -> Left $ T.concat ["String expected for equate value: '"
-                                                                                       , T.pack (show something)
-                                                                                       , singleQuote
-                                                                                       ]
-                                           Nothing                  -> Left "Missing symbol value in equate"
-                                    else Left $ T.concat ["Invalid equate name (max 15 chars, '[A-Z]$_@' first char)': '"
-                                                         , symname'
-                                                         , singleQuote
-                                                         ]
-       Just something            -> Left $ T.concat ["String expected for equate symbol name: '"
-                                                    , T.pack (show something)
-                                                    , singleQuote
-                                                    ]
-       Nothing                   -> Left "Missing symbol name in equate"
-mkEquate _                    = Left "equate directive expects a name and a value (name, value dict.)"
-
-mkAsciiZ :: Maybe AT.Value -> Either T.Text Directive
-mkAsciiZ (Just (Y.String addr)) = GrabAsciiZ <$> convertWord16 addr
-mkAsciiZ (Just (Y.Number addr)) = maybe (outOfRange minZ80addr maxZ80addr addr) (Right . GrabAsciiZ) (S.toBoundedInteger addr)
-mkAsciiZ _                      = Left "asciiz expects an address"
-
-mkDisasm :: Maybe AT.Value -> Either T.Text Directive
-mkDisasm = rdStartAndLength DoDisasm
-
-mkGrabBytes :: Maybe AT.Value -> Either T.Text Directive
-mkGrabBytes = rdStartAndLength GrabBytes
-
-mkGrabAscii :: Maybe AT.Value -> Either T.Text Directive
-mkGrabAscii = rdStartAndLength GrabAscii
-
-mkHighBitTable :: Maybe AT.Value -> Either T.Text Directive
-mkHighBitTable = rdStartAndLength HighBitTable
-
-mkJumpTable :: Maybe AT.Value -> Either T.Text Directive
-mkJumpTable = rdStartAndLength JumpTable
-
-mkKnownSymbols :: Maybe AT.Value -> Either T.Text Directive
-mkKnownSymbols (Just (Y.Object syms)) =
-  let syms'                      = H.toList $ H.mapWithKey symConvert syms
-
-      symConvert _k (Y.String s) = convertWord16 s
-      symConvert _k (Y.Number n) = maybe (outOfRange minZ80addr maxZ80addr n) Right (S.toBoundedInteger n)
-      symConvert k  something    = Left $ T.concat [ "Expected an address in '"
-                                                   , k
-                                                   , singleQuote
-                                                   , " mapping, got "
-                                                   , (T.pack . show) something
-                                                   ]
-
-      cvtErrs                    = [ getLeft (snd x)  | x <- syms', isLeft (snd x) ]
-      getLeft (Left x)  = x
-      getLeft (Right _) = error "Should only have Left elements in this list."
-
-      goodElts                   = [ (getRight (snd x), fst x) | x <- syms', isRight (snd x) ]
-      getRight (Right x)         = x
-      getRight (Left _)          = error "Should only have Right elements in this list."
-  in  if   null cvtErrs
-      then Right $ KnownSymbols $ H.fromList goodElts
-      else Left $ T.unlines cvtErrs
-mkKnownSymbols _ = Left "symbols expects a map of symbol names to addresses"
-
-mkMD5Sum ::  Maybe AT.Value -> Either T.Text Directive
-mkMD5Sum (Just (Y.String s)) =
-  let strBytes = T.chunksOf 2 s
-      bytes    = map convertHex strBytes
-      errs     = lefts bytes
-  in  if all (\x -> T.compareLength x 2 == EQ) strBytes && length bytes == 16 && null errs
-      then (Right . MD5Sum . BCL.pack . rights) bytes
-      else Left (T.unlines errs)
-mkMD5Sum _                   = Left "md5 expects a 16 byte hex string (no '0x')"
-
-convertWord16 :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
-convertWord16 t
-  | T.isPrefixOf "0x" t
-  = convertHex (T.drop 2 t)
-  | T.isPrefixOf "0o" t
-  = convertOctal (T.drop 2 t)
-  | T.isPrefixOf "0" t
-  = convertOctal (T.tail t)
-  | otherwise
-  = convertDecimal t
-  | otherwise
-  = Left (T.concat ["Invalid 16-bit constant: '", t, singleQuote])
+convertHex, convertOctal :: T.Text -> Either T.Text Int
+convertHex = convertNum 16 C.isHexDigit "Invalid hexadecimal constant"
+convertOctal = convertNum 8 C.isOctDigit "Invalid octal constant"
 
 minZ80addr :: Int
 minZ80addr = fromIntegral (minBound :: Z80addr)
@@ -378,122 +317,51 @@ minZ80disp = fromIntegral (minBound :: Z80disp)
 maxZ80disp :: Int
 maxZ80disp = fromIntegral (maxBound :: Z80disp)
 
-convertHex :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
-convertHex t =
-  let val = fst $ T.mapAccumR (\v c -> (v * 16 + hexDigit c, c)) 0 $ T.reverse t
-      hexDigit c = let i = fromEnum c
-                   in  (i .&. 0xf) + ((i .&. 0x40) `shiftR` 6) * 9
-      vMin = fromIntegral (minBound :: a)
-      vMax = fromIntegral (maxBound :: a)
-  in if T.all (\c -> let c' = fromEnum c
-                             in (c' >= fromEnum '0' && (c' <= fromEnum '9')) ||
-                                (c' >= fromEnum 'a' && (c' <= fromEnum 'f')) ||
-                                (c' >= fromEnum 'A' && (c' <= fromEnum 'F'))) t
-      then if val >= vMin && val <= vMax           then Right $ fromIntegral val
-           else outOfRange vMin vMax t
-     else Left $ T.concat ["Invalid hexadecimal constant: '", t, singleQuote]
-
-convertOctal :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
-convertOctal octstr =
-  let val = fst $ T.mapAccumR (\v c -> (v * 8 + (fromEnum c .&. 0xf), c)) 0 (T.reverse octstr)
-      validOctal = T.all (\c -> let c' = fromEnum c
-                                in  (c' >= fromEnum '0' && c' <= fromEnum '7'))
-      vMin = fromIntegral (minBound :: a)
-      vMax = fromIntegral (maxBound :: a)
-  in  if validOctal octstr
-      then if val >= vMin && val <= vMax
-           then (Right . fromIntegral) val
-           else outOfRange minBound maxBound octstr
-      else Left $ T.concat ["Invalid octal constant: '", octstr, singleQuote]
-
-convertDecimal :: forall a. (Integral a, Bounded a) => T.Text -> Either T.Text a
-convertDecimal str =
-  let val = fst $ T.mapAccumR (\v c -> (v * 10 + (fromEnum c .&. 0xf), c)) 0 (T.reverse str)
-      vMin = fromIntegral (minBound :: a)
-      vMax = fromIntegral (maxBound :: a)
-  in  if T.all C.isDigit str
-      then if val >= vMin && val <= vMax
-           then Right (fromIntegral val)
-           else outOfRange minBound maxBound str
-      else Left $ T.concat ["Invalid constant: '", str, singleQuote]
-
-validSymName :: T.Text -> Bool
-validSymName sym = let validChar x = (C.isLetter x || x == '$' || x == '_' || x == '@')
-                   in  (validChar . T.head) sym
-                       && T.compareLength sym 15 /= GT
-                       && T.all (\x -> validChar x || C.isDigit x || x == '?') (T.tail sym)
-
-outOfRange :: forall b a. (Show a) => Int -> Int -> a -> Either T.Text b
-outOfRange minRange maxRange thing = Left $ T.concat ["Value range exceeded ("
-                                                     , T.pack (show minRange)
-                                                     , " <= x <= "
-                                                     , T.pack (show maxRange)
-                                                     , "): "
-                                                     , T.pack (show thing)
-                                                     ]
-
-singleQuote :: T.Text
-singleQuote = T.singleton '\''
-
-rdStartAndLength :: (Z80addr -> Z80disp -> Directive) -> Maybe AT.Value -> Either T.Text Directive
-rdStartAndLength tyCon (Just (Y.Object o)) =
-  let endA    = H.lookup "end" o
-      nBytes  = let nb' = H.lookup "nBytes" o
-                    in case nb' of
-                         (Just _) -> nb'
-                         Nothing  -> H.lookup "nbytes" o
-
-      rdLength :: Maybe AT.Value -> Maybe AT.Value -> Either T.Text Z80addr -> Either T.Text Directive
-      -- Pass errors through... quickly.
-      rdLength _                    _                    (Left err)   = Left err
-      rdLength (Just _)             (Just _)             _            = Left "Only one of 'end' or 'nBytes' can be specified."
-      rdLength (Just (Y.String ea)) Nothing              (Right sa)   =
-        either Left
-               (\ea'  -> Right $ tyCon sa (fromIntegral (ea' - sa)))
-               (convertWord16 ea)
-      rdLength (Just (Y.Number ea)) Nothing              (Right sa)   =
-        maybe (outOfRange minZ80addr maxZ80addr ea)
-              (\ea' -> Right (tyCon sa (fromIntegral (ea' - sa))))
-              (S.toBoundedInteger ea)
-      rdLength (Just _)             Nothing              _            =
-        Left "End address is not a number."
-      rdLength Nothing              (Just (Y.String nb)) (Right sa)   = tyCon sa <$> convertWord16 nb
-      rdLength Nothing              (Just (Y.Number nb)) (Right sa)   = maybe (outOfRange minZ80disp maxZ80disp nb)
-                                                                              (Right . tyCon sa)
-                                                                              (S.toBoundedInteger nb)
-      rdLength Nothing              (Just _)             _            =
-        Left "Number of bytes ('nBytes') is an invalid number."
-      rdLength Nothing              Nothing              _            =
-        Left (T.pack "End address or number of btyes ('end'/'nBytes') missing.")
-  in  case H.lookup "addr" o of
-        Just (Y.String startAddr) -> rdLength endA nBytes $ convertWord16 startAddr
-        Just (Y.Number startAddr) -> maybe (outOfRange minZ80addr maxZ80addr startAddr)
-                                           (rdLength endA nBytes . Right)
-                                           (S.toBoundedInteger startAddr)
-        Just _something           -> Left "Invalid start address ('addr')."
-        Nothing                   -> Left "start address ('addr') key required."
-
-rdStartAndLength _tyCon _anything = Left "Expected a dictionary with 'start' and 'end'/'nBytes'"
+convertNum :: Int -> (Char -> Bool) -> T.Text -> T.Text -> Either T.Text Int
+convertNum base digitValid errMsg str = if T.all digitValid str
+  then Right $ str2Num str
+  else Left $ T.concat [errMsg, ": '", str, T.singleton '\'']
+ where
+  str2Num = fst . T.mapAccumR digit2num 0 . T.reverse {-str-}
+   where
+    digit2num v c = (v * base + digitCorrect c, c)
+    -- For base 8 and base 10, no correction needed. For hex, this takes care of 'A'-'F'
+    digitCorrect c = let i = fromEnum c in (i .&. 0xf) + ((i .&. 0x40) `shiftR` 6) * 9
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-getKnownSymbols :: V.Vector Directive
-                -> Maybe (H.HashMap Z80addr T.Text)
-getKnownSymbols dirs = let knownSymbols (KnownSymbols _) = True
-                           knownSymbols _                = False
-                       in  case V.find knownSymbols dirs of
-                             Just (KnownSymbols syms) -> Just syms
-                             _                        -> Nothing
+getKnownSymbols :: V.Vector Directive -> H.HashMap T.Text Z80guidanceAddr
+getKnownSymbols dirs =
+  let knownSymbols (KnownSymbols _)  = True
+      knownSymbols _                 = False
+      getSymbols (KnownSymbols syms) = syms
+      getSymbols _                   = H.empty
+  in  maybe H.empty getSymbols (V.find knownSymbols dirs)
 
-getMatchingSection :: Guidance
-                   -> BCL.ByteString
-                   -> Maybe (V.Vector Directive)
+invertKnownSymbols :: V.Vector Directive -> H.HashMap Z80addr T.Text
+invertKnownSymbols = H.fromList . map flipSymAddr . H.toList . getKnownSymbols {-guidance-}
+ where
+  flipSymAddr (sym, GuidanceAddr addr)   = (addr, sym)
+  flipSymAddr (sym, FromCurPC          ) = error ("'$' used in symbol " ++ show sym)
+
+getMatchingSection :: Guidance -> B.ByteString -> Maybe (V.Vector Directive)
 getMatchingSection g md5sum =
-  let matchesMD5 dirs = isJust $ V.find (\d -> case d of
-                                                 (MD5Sum md5) -> md5sum == md5
-                                                 _            -> False) dirs
-      filteredSects   = H.filter matchesMD5 (sections g)
-      sectKeys        = H.keys filteredSects
-  in  if not (null filteredSects) && length sectKeys == 1
-      then Just (filteredSects H.! head sectKeys)
-      else Nothing
+  let matchesMD5 dirs = isJust $ V.find
+        (\case
+          (MD5Sum sig) -> md5sum == unZ80guidanceMD5Sig sig
+          _            -> False
+        )
+        dirs
+      filteredSects = H.filter matchesMD5 . sections
+      sectKeys      = H.keys $ filteredSects g
+  in  if not (null $ filteredSects g) && length sectKeys == 1 then Just (filteredSects g H.! head sectKeys) else Nothing
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- Diagnostic functions:
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+tryit :: IO (Either Y.ParseException Guidance)
+tryit = Y.decodeFileEither "/tmp/guidance.yaml"
+
+tryit2 :: IO ()
+tryit2 = tryit >>= either print (Y.encodeFile "/tmp/out.yaml")

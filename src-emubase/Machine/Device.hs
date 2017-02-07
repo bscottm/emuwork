@@ -1,106 +1,86 @@
-{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE GADTs #-}
 
-{- | Device emulation.
-
-
--}
 module Machine.Device
-    ( mkDevice
-    -- * High level device functions
-    , deviceRead
-    , deviceWrite
-    , bulkDeviceWrite
-    -- * Constant device
-    , constDevice
-    ) where
+  ( Device(..)
+  , DeviceReset
+  , DeviceReader
+  , DeviceWriter
+  , devReadSeq
+  , devWriteSeq
+  ) where
 
-import           Control.Arrow              (second)
-import           Control.Monad.State.Strict (execState, runState, state)
-import           Data.Vector.Unboxed        (Vector)
-import qualified Data.Vector.Unboxed        as DVU
+import           Prelude                           hiding (words)
+import           Control.Arrow                     ((***))
+import           Control.Monad.Trans.State.Strict  (state, runState, execState)
+import           Control.Monad                     (sequence)
+import qualified Data.Vector.Unboxed               as DVU
 
-import           Machine.Types
+#if defined(TEST_DEBUG)
+import           Debug.Trace
+import           Text.Printf
+#endif
 
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- Higher level device functions:
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+data Device addrType wordType where
+  Device ::
+    { theDevice :: devTag
+    -- ^ Device state
+    , devReset  :: DeviceReset addrType wordType devTag
+    , devRead   :: DeviceReader addrType wordType devTag
+    -- ^ Device reader function. The address is an offset into the device's memory region, which eliminates the device's
+    -- need to keep track of its base address.
+    , devWrite  :: DeviceWriter addrType wordType devTag
+    -- ^ Device writer function. Writes the word into the specified zero-based offset address. See 'devReader'.
+    -- NOTE: The type signature for the function is exactly what 'execState' requires. Yes, it is awkward, but avoids
+    -- additional overhead and wrapper functions just to make the signature pretty.
+    } -> Device addrType wordType
 
--- | Read a word from a device, returning a `(value, updatedDevState)` pair result. This function invokes
--- `runState` to run the state forward. Addresses are calculated relative to the memory region's start, e.g.,
--- if the device's memory region starts at `0x1000` and the read address is `0x10ff`, then the address
--- passed to `deviceRead` is `0x00ff` (`0x10ff - 0x1000`).
-deviceRead :: addrType
-           -- ^ Address to read from, relative to the memory region's start
+instance Eq (Device addrType wordType) where
+  devA == devB = devA == devB
+
+type DeviceReset  addrType wordType devTag = devTag -> devTag
+type DeviceReader addrType wordType devTag = addrType -> devTag -> (wordType, devTag)
+type DeviceWriter addrType wordType devTag = wordType -> addrType -> devTag -> ((), devTag)
+
+-- | The workhorse for reading a data sequence from a device, returning both the resulting list
+devReadSeq :: ( Integral addrType
+              , Integral wordType
+              , DVU.Unbox wordType
+#if defined(TEST_DEBUG)
+              , Show addrType
+#endif
+              )
+           => addrType
+           -> Int
            -> Device addrType wordType
-           -- ^ The memory-mapped device
-           -> (wordType, Device addrType wordType)
-           -- ^ Value/word read and updated device state pair
-deviceRead addr (Device dev) = second Device (runState (readDeviceWord addr) dev)
+           -> (DVU.Vector wordType, Device addrType wordType)
+devReadSeq sOffs mLen (Device dev' reset reader writer) =
+  DVU.fromList *** (\dev -> Device dev reset reader writer) $ runState devReadState dev'
+  where
+      devReadState = sequence [state (reader a) | a <- [sOffs..sOffs + fromIntegral mLen - 1]]
 
--- | Write a word to a device, returning the new device state as its result. This function invokes `execState`
--- to run the device's state forward, since only the state is important.
-deviceWrite :: addrType
-            -- ^ Address being written to
-            -> wordType
-            -- ^ Value being written
+
+-- | The workhorse for writing a data sequence from a device, returning updated memory region
+devWriteSeq :: ( Integral addrType
+               , Integral wordType
+               , DVU.Unbox wordType
+#if defined(TEST_DEBUG)
+               , PrintfArg addrType
+               , PrintfArg wordType
+#endif
+               )
+            => addrType
+            -> DVU.Vector wordType
             -> Device addrType wordType
-            -- ^ Current device state
             -> Device addrType wordType
-            -- ^ Result device state
-deviceWrite addr word (Device dev) = Device (execState (writeDeviceWord addr word) dev)
-
--- | Bulk device write: write a vecot of values to the device starting at offset `soffs` and incrementing the address
--- for each successive value.
---
--- NOTE: This function cannot (and does not) do any bounds checking! The underlying device implementing `deviceWrite`
--- needs to ensure that the offsets are valid.
-bulkDeviceWrite :: (Num addrType
-                   , DVU.Unbox wordType
-                   ) =>
-                   addrType
-                -- ^ Starting offset
-                -> Vector wordType
-                -- ^ Values to write
-                -> Device addrType wordType
-                -- ^ Current device state
-                -> Device addrType wordType
-                -- ^ Result device state
-bulkDeviceWrite soffs vals (Device dev) =
-  let valPairs              = zip (take (DVU.length vals) (iterate (+ 1) soffs)) (DVU.toList vals)
-      writeFunc (addr, val) = runState (writeDeviceWord addr val)
-  in  Device (execState (traverse (state . writeFunc) valPairs) dev)
-
--- | Make a new device (wrapper around the `Device` constructor)
-mkDevice :: ( DeviceIO dev addrType wordType ) =>
-            dev
-         -> Device addrType wordType
-mkDevice = Device
-
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- Constant device:
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
--- | A very simple constant device: Always returns the same value when read, stores a new value when
--- written
-newtype ConstDevice wordType = ConstDevice wordType
-  deriving (Show)
-
-instance (Num wordType) => Monoid (ConstDevice wordType) where
-  mempty                                    = ConstDevice 0
-  (ConstDevice a) `mappend` (ConstDevice b) = ConstDevice (a + b)
-
--- Instantiate the DeviceFuncs type class:
-instance (Num wordType) => DeviceFuncs (ConstDevice wordType)
-
--- Instantiate the DeviceIO class
-instance ( Integral wordType
-         , Show wordType) =>
-         DeviceIO (ConstDevice wordType) addrType wordType where
-  readDeviceWord _addr       = state constDeviceReader
-  writeDeviceWord _addr word  = state (const ((), ConstDevice word))
-
-constDeviceReader :: (Integral wordType) => ConstDevice wordType -> (wordType, ConstDevice wordType)
-constDeviceReader dev@(ConstDevice x) = (fromIntegral x, dev)
-
-constDevice :: (Num wordType) => ConstDevice wordType
-constDevice = mempty
+devWriteSeq sOffs words (Device dev' reset reader writer) =
+  Device (execState devWriteState dev') reset reader writer
+  where
+    wordLen        = DVU.length words
+    wordsAsList    = DVU.toList words
+    addrsAsList    = [sOffs..sOffs + fromIntegral wordLen - 1]
+    devWriteState  = sequence [state (writeTrace w a $ writer w a) | (w, a) <- zip wordsAsList addrsAsList]
+#if defined(TEST_DEBUG)
+    writeTrace w a = trace (printf "devWriteSeq: %08x = %04x" a w)
+#else
+    writeTrace _w _a = id
+#endif

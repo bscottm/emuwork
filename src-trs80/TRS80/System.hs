@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 
 {- |
 The venerable TRS-80 (aka "the Trash 80") system.
@@ -10,6 +9,7 @@ module TRS80.System
   , TRS80ModelISystem
   ) where
 
+import           Lens.Micro          ((&), (%~))
 import           Data.Vector.Unboxed (Vector)
 
 import           Machine
@@ -26,7 +26,7 @@ installMem :: TRS80ModelISystem
            -> Int
            -> Vector Z80word
            -> TRS80ModelISystem
-installMem sys memSize newROM = mkROMRegion 0 newROM $ mkRAMRegion ramStart (memSize * 1024) sys
+installMem sys memSize newROM = sys & memory %~ (mkROMRegion 0 newROM . mkRAMRegion ramStart (memSize * 1024))
 
 {- The TRS-80 has a very simple memory layout:
 
@@ -43,12 +43,16 @@ Address (hex) 	Description
 C000-FFFF 	Still more in a 48K machine
 -}
 
+{-
 mmapIOStart, mmapIOEnd, ramStart :: Z80addr
 -- | Start of memory mapped I/O adress space.
 mmapIOStart = 0x3000
 -- | End of memory mapped I/O address space.
 mmapIOEnd   = mmapIOStart + 0x1000
+-}
+
 -- | Start of usable RAM
+ramStart :: Z80addr
 ramStart    = 16 * 1024
 
 -- | TRS-80 Model I constructor: install a ROM image and configure the system's RAM.
@@ -62,5 +66,4 @@ trs80System :: FilePath
             -- ^ Initial Model I system (should be 'trs80generic')
             -> IO TRS80ModelISystem
             -- ^ Fully constructed TRS-80 Model I
-trs80System romPath reader memSize trs80 =
-    installMem trs80 memSize <$> reader romPath
+trs80System romPath reader memSize trs80 = installMem trs80 memSize <$> reader romPath

@@ -1,0 +1,4 @@
+packages: .
+          src-emubase/
+          src-trs80/
+          src-z80/

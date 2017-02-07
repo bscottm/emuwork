@@ -6,15 +6,13 @@ module Main (main) where
 import           Control.Monad
 import           Data.ByteString (ByteString)
 import qualified Data.Foldable as Foldable
-import           Data.Maybe
 import qualified Data.Text as T
 import           Data.Text.Encoding (decodeUtf8)
-import qualified Data.Text.IO as TIO
 import qualified Data.Yaml as Y
 import           System.Console.GetOpt
 import           System.Environment
 import           System.Exit
-import           System.IO (stdout, stderr, hPutStrLn)
+import           System.IO (stderr, hPutStrLn)
 import           Test.HUnit
 import           Text.RawString.QQ
 
@@ -26,12 +24,9 @@ import           TRS80.Disasm.Guidance
 
 main :: IO ()
 main =
-  getArgs
-  >>= return . getOpt RequireOrder testOptions
+  getOpt RequireOrder testOptions <$> getArgs
   >>= (\(optsActions, rest, errs) ->
-         (unless (null errs) $ mapM_ (hPutStrLn stderr) errs
-           >> showUsage
-           >> exitFailure)
+         unless (null errs) (mapM_ (hPutStrLn stderr) errs >> showUsage >> exitFailure)
          >> Foldable.foldl (>>=) (return mkTestArgs) optsActions
          >>= (\options ->
                 if null rest
@@ -42,32 +37,34 @@ main =
                             ; putStrLn ""
                             ; putStrLn "Summary:"
                             ; putStrLn (showCounts counts')
-                            ; if (errors counts') == 0 || (failures counts') == 0
+                            ; if errors counts' == 0 || failures counts' == 0
                               then exitSuccess
                               else exitFailure
                             })
                 else
                   showUsage))
   where
-    reportStart ss _us = TIO.putStrLn $ (showPath (path ss))
+    reportStart ss _us = putStrLn (showPath (path ss))
     reportError   = reportProblem "Error:"   "Error in:   "
     reportFailure = reportProblem "Failure:" "Failure in: "
-    reportProblem p0 p1 _loc msg ss _us = TIO.putStrLn line
-     where line  = T.concat [ "### "
-                            , kind
-                            , path'
-                            , "\n"
-                            , T.pack msg
-                            ]
-           kind  = T.pack (if T.null path' then p0 else p1)
-           path' = showPath (path ss)
+    reportProblem p0 p1 _loc msg ss _us = putStrLn line
+      where
+        line  = concat [ "### "
+                       , if null path' then p0 else p1
+                       , path'
+                       , "\n"
+                       , msg
+                       ]
+        path' = showPath (path ss)
+{-
     showPath [] = T.empty
     showPath nodes = T.concat ["++ ", T.intercalate ":" (map showNode (reverse (filter onlyLabels nodes)))]
-     where onlyLabels (Label _) = True
-           onlyLabels _         = False
-           showNode (ListItem n) = T.empty
+     where onlyLabels (Label _)   = True
+           onlyLabels _           = False
+           showNode (ListItem _n) = T.empty
            showNode (Label label) = T.justifyLeft 15 ' ' (T.pack $ safe label (show label))
            safe s ss = if ':' `elem` s || "\"" ++ s ++ "\"" /= ss then ss else s
+-}
 
 data TestArgs =
   TestArgs
@@ -93,7 +90,7 @@ testOptions =
    setShowContent arg = return $ arg { showContent = True }
    setShowResult  arg = return $ arg { showResult  = True }
    setShowFail    arg = return $ arg { showFail    = True }
-   
+
 showUsage :: IO ()
 showUsage = do
   prog <- getProgName
@@ -111,53 +108,48 @@ infix 1 @!?
          t
       -> String
       -> Assertion
-pred @!? msg = assertionPredicate pred >>= (\b -> when b (assertFailure msg))
+assrt @!? msg = assertionPredicate assrt >>= (\b -> when b (assertFailure msg))
 
 mkYAMLTests :: TestArgs -> IO Test
 mkYAMLTests opts =
-  let sc = showContent opts
-      sr = showResult  opts
-  in return $ test [ "origin"   ~: test [ "bad origin (1)"    ~: (badOrigin00 opts)     @!? "bad origin (1) succeeded."
-                                        , "bad origin (2)"    ~: (badOrigin01 opts)     @!? "bad origin (2) succeeded."
-                                        , "origin+end"        ~: (goodGuidance opts)    @?  "origin+end failed."
-                                        , "one section"       ~: (oneSection opts)      @?  "one section failed."
-                                        ]
-                   , "equates"  ~: test [ "valid equate"       ~: (validEquate opts)    @?  "valid equate failed."
-                                        , "invalid equate"     ~: (invalidEquate opts)  @!? "invalid equate succeeded."
-                                        , "invalid hex value"  ~: (invalidHex opts)     @!? "invalid hex succeeded."
-                                        , "out of range value" ~: (invalidValue opts)   @!? "invalid value succeeded."
-                                        , "missing equ name"   ~: (missingEquName opts) @!? "missing equate name succeeded."
-                                        ]
-                   , "disasm"   ~: test [ "valid disasm"       ~: (validDisasm opts)    @?  "disasm failed."
-                                        ]
-                   , "bytes"    ~: test [ "valid bytes"        ~: (validBytes opts)     @?  "bytes directive failed."
-                                        ]
-                   , "ascii"    ~: test [ "valid ascii"        ~: (validAscii opts)     @? "ascii directive failed."
-                                        ]
-                   , "highbits" ~: test [ "valid highbits"     ~: (validHighBits opts)  @? "highbits directive failed."
-                                        ]
-                   , "symbols"  ~: test [ "known symbols"      ~: (knownSymbols opts)   @? "known symbols failed."
-                                        ]
-                   ]
+  return $ test [ "origin"   ~: test [ "bad origin (1)"    ~: badOrigin00 opts     @!? "bad origin (1) succeeded."
+                                     , "bad origin (2)"    ~: badOrigin01 opts     @!? "bad origin (2) succeeded."
+                                     , "origin+end"        ~: goodGuidance opts    @?  "origin+end failed."
+                                     , "one section"       ~: oneSection opts      @?  "one section failed."
+                                     ]
+                , "equates"  ~: test [ "valid equate"       ~: validEquate opts    @?  "valid equate failed."
+                                     , "invalid equate"     ~: invalidEquate opts  @!? "invalid equate succeeded."
+                                     , "invalid hex value"  ~: invalidHex opts     @!? "invalid hex succeeded."
+                                     , "out of range value" ~: invalidValue opts   @!? "invalid value succeeded."
+                                     , "missing equ name"   ~: missingEquName opts @!? "missing equate name succeeded."
+                                     ]
+                , "disasm"   ~: test [ "valid disasm"       ~: validDisasm opts    @?  "disasm failed."
+                                     ]
+                , "bytes"    ~: test [ "valid bytes"        ~: validBytes opts     @?  "bytes directive failed."
+                                     ]
+                , "ascii"    ~: test [ "valid ascii"        ~: validAscii opts     @? "ascii directive failed."
+                                     ]
+                , "highbits" ~: test [ "valid highbits"     ~: validHighBits opts  @? "highbits directive failed."
+                                     ]
+                , "symbols"  ~: test [ "known symbols"      ~: knownSymbols opts   @? "known symbols failed."
+                                     ]
+                ]
 
 doYAMLTest :: TestArgs -> ByteString -> IO Bool
 doYAMLTest opts testString =
-  (when (showContent opts) $
-   do
-     putStrLn "YAML Test Content:"
-     putStrLn "~~~~"
-     putStrLn $ (T.unpack . decodeUtf8) testString
-     putStrLn "~~~~")
+  when (showContent opts) (do
+    putStrLn "YAML Test Content:"
+    putStrLn "~~~~"
+    putStrLn (T.unpack (decodeUtf8 testString))
+    putStrLn "~~~~")
   >> (case Y.decodeEither' testString :: Either Y.ParseException Guidance of
         Left  err ->
           do
-            when (showFail opts) $
-              do
-                putStrLn (Y.prettyPrintParseException err)
+            when (showFail opts) (putStrLn (Y.prettyPrintParseException err))
             return False
         Right res ->
           do
-            when (showResult opts) $ putStrLn (show res)
+            when (showResult opts) $ print res
             return True)
 
 badOrigin00 :: TestArgs -> IO Bool
@@ -280,7 +272,7 @@ section:
     addr: 0x0105
     nBytes: 0x000b
 |]
-    
+
 -- | Valid highbits directive
 validHighBits :: TestArgs -> IO Bool
 validHighBits opts = doYAMLTest opts [r|

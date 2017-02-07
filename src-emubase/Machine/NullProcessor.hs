@@ -1,9 +1,7 @@
 -- | An minimal definition for an emulator, the 'null' processor
 module Machine.NullProcessor where
 
-import           Data.Word
-
-import           Machine.Types
+import           Machine.System
 
 nullProcCmdDispatch :: EmulatedSystem NullCPU NullInsnSet addrType wordType
                     -> [String]
