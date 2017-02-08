@@ -21,9 +21,9 @@ import           Machine.ProgramCounter
 import           Machine.Utils
 
 -- | 'EmulatedSystem' encapsulates the various parts required to emulate a system (processor, memory, ...)
-data EmulatedSystem cpuType instructionSet addrType wordType where
+data EmulatedSystem cpuType insnSet addrType wordType where
   EmulatedSystem ::
-    { _processor  :: EmulatedProcessor cpuType addrType instructionSet
+    { _processor  :: EmulatedProcessor cpuType insnSet addrType
                   -- ^ System processor
     , _memory     :: MemorySystem addrType wordType
                      -- ^ System memory
@@ -35,12 +35,12 @@ data EmulatedSystem cpuType instructionSet addrType wordType where
                   -- ^ The system's name, e.g. "Null/dummy processor"
     , _sysAliases :: [String]
                   -- ^ Names the system is known by.
-    } -> EmulatedSystem cpuType instructionSet addrType wordType
+    } -> EmulatedSystem cpuType insnSet addrType wordType
     deriving (Show)
 
 -- Need to manually generate the lenses due to the constraint on EmulatedSystem
 
-processor :: Lens' (EmulatedSystem cpuType insnSet addrType wordType) (EmulatedProcessor cpuType addrType insnSet)
+processor :: Lens' (EmulatedSystem cpuType insnSet addrType wordType) (EmulatedProcessor cpuType insnSet addrType)
 processor f sys = (\proc -> sys { _processor = proc }) <$> f (_processor sys)
 
 memory :: Lens' (EmulatedSystem cpuType insnSet addrType wordType) (MemorySystem addrType wordType)
@@ -61,13 +61,13 @@ sysAliases :: Lens' (EmulatedSystem cpuType addrType wordType insnSet) [String]
 sysAliases f sys = (\aliases -> sys { _sysAliases = aliases }) <$> f (_sysAliases sys)
 
 -- | Emulated system constructor.
-mkEmulatedSystem :: EmulatedProcessor cpuType addrType instructionSet
+mkEmulatedSystem :: EmulatedProcessor cpuType insnSet addrType
                  -- ^ Processor (CPU)
                  -> String
                  -- ^ System name
                  -> [String]
                  -- ^ System aliases
-                 -> EmulatedSystem cpuType instructionSet addrType wordType
+                 -> EmulatedSystem cpuType insnSet addrType wordType
 mkEmulatedSystem sysCpu name aliases = EmulatedSystem { _processor = sysCpu
                                                       , _memory = initialMemorySystem
                                                       , _devices  = H.empty
@@ -78,13 +78,13 @@ mkEmulatedSystem sysCpu name aliases = EmulatedSystem { _processor = sysCpu
 
 -- | 'EmulatedProcessor' boxes the emulated machine's processor. All interesting operations on an @EmulatedProcessor@
 -- are in the `ProcessorOps` type class.
-data EmulatedProcessor cpuType addrType instructionSet where
+data EmulatedProcessor cpuType insnSet addrType where
   EmulatedProcessor ::
     { _procPrettyName :: String
     -- ^ Pretty name for the emulated processor
     , _cpu            :: cpuType
     -- ^ Processor-specific internal data.
-    } -> EmulatedProcessor  cpuType addrType instructionSet
+    } -> EmulatedProcessor  cpuType insnSet addrType
     deriving (Show)
 
 -- | Lens for the processor's pretty name
@@ -92,7 +92,7 @@ procPrettyName :: Lens' (EmulatedProcessor cpuType insnSet addrType) String
 procPrettyName f proc = (\name' -> proc { _procPrettyName = name' }) <$> f (_procPrettyName proc)
 
 -- | Lens for the processor's internals (the CPU).
-cpu :: Lens' (EmulatedProcessor cpuType addrType insnSet) cpuType
+cpu :: Lens' (EmulatedProcessor cpuType insnSet addrType) cpuType
 cpu f proc = (\cpu' -> proc { _cpu = cpu' }) <$> f (_cpu proc)
 
 -- | Generic representation of instruction decoder outputs
@@ -242,7 +242,7 @@ initialLRU = LRUWriteCache 0 OrdPSQ.empty
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 
 -- | The emulated device type. This is a box around an existential type. Each `Device` must implement the `Device`,
--- `DeviceIO` type class.
+-- `DeviceIO` type classes.
 data Device addrType wordType where
   Device :: ( DeviceIO dev addrType wordType ) =>
             dev
@@ -344,7 +344,7 @@ nullSystem = mkEmulatedSystem nullProcessor name aliases
     aliases  = ["null", "dummy"]
 
 -- | The null processor
-nullProcessor :: EmulatedProcessor NullCPU addrType NullInsnSet
+nullProcessor :: EmulatedProcessor NullCPU NullInsnSet addrType
 nullProcessor = EmulatedProcessor { _procPrettyName = "Null (dummy) processor"
                                   , _cpu            = NullCPU
                                   }
