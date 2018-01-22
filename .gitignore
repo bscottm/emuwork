@@ -1,8 +1,10 @@
 *.swp
 *~
-\#*
 .#*
 .cabal-sandbox
+.ghc.environment.*
+.stack-work
+\#*
 cabal.sandbox.config
 dist
-.stack-work
+dist-newstyle
