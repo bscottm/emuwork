@@ -1,3 +1,0 @@
-:set -XGADTs -XFlexibleInstances -XMultiParamTypeClasses -XRankNTypes -XTypeSynonymInstances
-:set -i.:../src
-:l Main

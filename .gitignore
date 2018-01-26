@@ -8,3 +8,5 @@
 cabal.sandbox.config
 dist
 dist-newstyle
+emuwork.sublime-workspace
+src-emubase/cabal.project.local
