@@ -13,31 +13,30 @@ library
 
   build-depends:
     base,
-    comonad,
-    time,
-    primitive,
-    filepath,
-    directory,
-    deepseq,
-    containers,
-    unordered-containers,
-    bytestring,
-    text,
-    vector,
-    mtl >= 2,
-    psqueues,
-    hashable,
-    old-locale,
-    comonad,
     IntervalMap,
+    bytestring,
+    comonad,
+    containers,
+    deepseq,
+    directory,
+    filepath,
+    hashable,
     lens,
     mtl,
+    old-locale,
+    parsec,
+    primitive,
+    psqueues,
     syb,
-    parsec
+    text,
+    time,
+    unordered-containers,
+    vector
 
   ghc-options: -Wall -O2
 
   default-extensions:
+    CPP,
     GADTs,
     MultiParamTypeClasses,
     TypeSynonymInstances,
@@ -56,7 +55,7 @@ library
     Machine.MemorySystem,
     Machine.ProgramCounter
     Machine.NullProcessor,
-    Machine.Types,
+    Machine.System,
     Machine.Utils,
 
     Reader.RawFormat,
@@ -95,6 +94,7 @@ test-suite msystest
       psqueues,
       random
     default-extensions:
+      CPP,
       GADTs,
       MultiParamTypeClasses,
       OverloadedStrings,
@@ -104,6 +104,6 @@ test-suite msystest
       Machine.Device,
       Machine.MemorySystem,
       Machine.ProgramCounter,
-      Machine.Types,
+      Machine.System,
       Machine.Utils,
       Machine.Tests.TestDevice

@@ -7,5 +7,15 @@
 	],
 	"SublimeHaskell": {
 		"haskell_build_tool": "stack"
+	},
+	"settings": {
+	    "LSP": {
+			"clients": {
+				"haskell-ide-engine":
+				{
+				    "command": ["~/.local/bin/hie", "--lsp", "-r", "~/play/emuwork"]
+			  	}
+		  	}
+		}
 	}
 }

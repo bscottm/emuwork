@@ -117,12 +117,13 @@ disasm :: Z80disassembly
        -> (Z80disassembly, Z80system sysType)           -- ^ Resulting disassmbly sequence and state
 disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate theSystem
   where
-    addrInDisasmF = dstate    ^. addrInDisasmRange
+    addrInDisasmF = dstate ^. addrInDisasmRange
 
     disasm' pc curDState sys
       --   | trace ("disasm " ++ (show pc)) False = undefined
       | pc <= lastpc =
-        let (DecodedInsn newpc insn, sys') = idecode pc sys
+        let decoder = sys ^. processor . processorOps . idecode
+            (DecodedInsn newpc insn, sys') = decoder pc sys
             -- Identify symbols where absolute addresses are found and build up a symbol table for a later
             -- symbol translation pass:
             curDState'             =
@@ -153,7 +154,7 @@ disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate theSystem
                     -> Z80instruction
                     -> (Z80DisasmElt, Z80system sysType)
     mkZ80DisasmInsn oldpc newpc sys ins =
-      let (opcodes, sys') = mReadN (unPC oldpc) (fromIntegral (newpc - oldpc)) sys
+      let (opcodes, sys') = sysMReadN (unPC oldpc) (fromIntegral (newpc - oldpc)) sys
           cmnt
             | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- ins
             , addrInDisasmF addr
@@ -186,9 +187,10 @@ z80disbytes :: Z80disassembly
             -- ^ Number of bytes to extract
             -> (Z80disassembly, Z80system sysType)
             -- ^ Resulting diassembly state
-z80disbytes dstate sys sAddr nBytes =
-  let (memvec, sys') = mReadN (unPC sAddr) (fromIntegral nBytes) sys
-  in  (over disasmSeq (|> mkByteRange (unPC sAddr) memvec) dstate, sys')
+z80disbytes dstate sys curPC nBytes =
+  let sAddr = unPC curPC
+      (memvec, sys') = sysMReadN sAddr (fromIntegral nBytes) sys
+  in  (over disasmSeq (|> mkByteRange sAddr memvec) dstate, sys')
 
 -- | Grab (what is presumably) an ASCII string sequence, terminating at the first 0 encountered. This is somewhat inefficient
 -- because multiple 'Vector' slices get created.
@@ -203,7 +205,7 @@ z80disasciiz :: Z80disassembly
 z80disasciiz dstate sys (PC sAddr) =
   -- FIXME: Don't search the entire contents of memory...
   let sRange           = maxBound - sAddr
-      (toSearch, sys') = mReadN sAddr (fromIntegral sRange) sys
+      (toSearch, sys') = sysMReadN sAddr (fromIntegral sRange) sys
       foundStr idx     = mkAsciiZ sAddr (DVU.slice 0 (idx + 1) toSearch)
   in  case DVU.elemIndex 0 toSearch of
         Nothing  -> (dstate, sys')              -- Not found?
@@ -220,9 +222,10 @@ z80disascii :: Z80disassembly
             -- ^ Number of bytes to extract
             -> (Z80disassembly, Z80system sysType)
             -- ^ Resulting diassembly state
-z80disascii dstate sys sAddr nBytes =
-  let (sysvec, sys') = mReadN (unPC sAddr) (fromIntegral nBytes) sys
-  in  (over disasmSeq (|> mkAscii (unPC sAddr) sysvec) dstate, sys')
+z80disascii dstate sys curPC nBytes =
+  let sAddr = unPC curPC
+      (sysvec, sys') = sysMReadN sAddr (fromIntegral nBytes) sys
+  in  (over disasmSeq (|> mkAscii sAddr sysvec) dstate, sys')
 
 -- | Z80 default instruction post processor. This merely appends the decoded instruction onto the disassembly sequence.
 z80DefaultPostProcessor :: Z80DisasmElt

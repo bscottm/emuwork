@@ -22,7 +22,6 @@ executable edas
                         vector,
                         deepseq,
                         trs80,
-                        zilog-emu,
                         emubase
   ghc-options:          -Wall -O2
   default-extensions:   GADTs,
@@ -56,7 +55,6 @@ executable edas-tests
                         transformers,
                         parsec,
                         HUnit,
-                        zilog-emu,
                         emubase
   ghc-options:          -Wall -O2
   default-extensions:   GADTs,
@@ -80,7 +78,6 @@ executable edas-pptest
                         deepseq,
                         transformers,
                         parsec,
-                        zilog-emu,
                         emubase
   ghc-options:          -Wall -O2
   default-extensions:   GADTs,

@@ -26,6 +26,10 @@ z80processor :: Z80emulation
 z80processor = EmulatedProcessor
                { _procPrettyName = "Zilog Z80"
                , _cpu            = z80initialState
+               , _ops            = ProcessorOps
+                                   {
+                                     _idecode = z80InsDecode
+                                   }
                }
 
 -- | Type discriminant for the *z80generic* system. Other Z80-based systems

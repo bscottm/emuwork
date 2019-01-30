@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleInstances    #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 
 {- |
 The venerable TRS-80 (aka "the Trash 80") system.
@@ -10,6 +9,7 @@ module TRS80.System
   , TRS80ModelISystem
   ) where
 
+import           Control.Lens        ((&), (%~))
 import           Data.Vector.Unboxed (Vector)
 
 import           Machine
@@ -26,7 +26,7 @@ installMem :: TRS80ModelISystem
            -> Int
            -> Vector Z80word
            -> TRS80ModelISystem
-installMem sys memSize newROM = mkROMRegion 0 newROM $ mkRAMRegion ramStart (memSize * 1024) sys
+installMem sys memSize newROM = sys & memory %~ (mkROMRegion 0 newROM . mkRAMRegion ramStart (memSize * 1024))
 
 {- The TRS-80 has a very simple memory layout:
 

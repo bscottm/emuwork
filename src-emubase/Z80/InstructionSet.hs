@@ -48,13 +48,25 @@ data Z80instruction where
                                            -> Z80instruction
 
   -- Increment/decrement registers
-  INC, DEC                                 :: Z80reg8
+  INC                                      :: Z80reg8
                                            -> Z80instruction
-  INC16, DEC16                             :: RegPairSP
+  DEC                                      :: Z80reg8
+                                           -> Z80instruction
+  INC16                                    :: RegPairSP
+                                           -> Z80instruction
+  DEC16                                    :: RegPairSP
                                            -> Z80instruction
   --- ALU group: ADD, ADC, SUB, SBC, AND, XOR, OR and CP
   -- ADD HL, rp and ADC/SBC HL, rp
-  SUB, AND, XOR, OR, CP                    :: OperALU
+  SUB                                      :: OperALU
+                                           -> Z80instruction
+  AND                                      :: OperALU
+                                           -> Z80instruction
+  XOR                                      :: OperALU
+                                           -> Z80instruction
+  OR                                       :: OperALU
+                                           -> Z80instruction
+  CP                                       :: OperALU
                                            -> Z80instruction
 
   ADD                                      :: OperExtendedALU
@@ -65,7 +77,12 @@ data Z80instruction where
                                            -> Z80instruction
 
   -- HALT; NOP; Exchanges; DI; EI; JP HL; LD SP, HL
-  HALT, NOP, DI, EI, JPHL, LDSPHL          :: Z80instruction
+  HALT                                     :: Z80instruction
+  NOP                                      :: Z80instruction
+  DI                                       :: Z80instruction
+  EI                                       :: Z80instruction
+  JPHL                                     :: Z80instruction
+  LDSPHL                                   :: Z80instruction
   -- Exchanges:
   EXC                                      :: Z80ExchangeOper
                                            -> Z80instruction

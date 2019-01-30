@@ -4,7 +4,9 @@
 module Machine.ProgramCounter where
 
 import           Data.Bits
+import qualified Data.Vector.Unboxed           as DVU
 import           Machine.Utils
+import           Machine.MemorySystem
 
 -- | Generic program counter
 newtype ProgramCounter addrType = PC { unPC :: addrType }
@@ -30,3 +32,23 @@ pcDisplace disp (PC pc) = PC (pc + signExtend disp)
 instance (ShowHex addrType) => ShowHex (ProgramCounter addrType) where
   as0xHex pc = as0xHex (unPC pc)
   asHex pc   = asHex (unPC pc)
+
+mReadAndIncPC :: ( Integral addrType
+                 , Integral wordType
+                 , DVU.Unbox wordType
+                 )
+              => ProgramCounter addrType
+              -> MemorySystem addrType wordType
+              -> (ProgramCounter addrType, (wordType, MemorySystem addrType wordType))
+mReadAndIncPC pc msys = (pc + 1, mRead (unPC pc) msys)
+
+-- | Fetch an entity from memory, pre-incrementing the program counter, returning the (incremented pc, contents)
+mIncPCAndRead :: ( Integral addrType
+                 , Integral wordType
+                 , DVU.Unbox wordType
+                 )
+              => ProgramCounter addrType
+              -> MemorySystem addrType wordType
+              -> (ProgramCounter addrType, (wordType, MemorySystem addrType wordType))
+mIncPCAndRead pc sys = let pc' = pc + 1
+                       in  (pc', mRead (unPC pc') sys)

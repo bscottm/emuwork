@@ -118,7 +118,7 @@ trs80disassemble :: Z80system z80sys
                  -> IO ()
 trs80disassemble sys imgReader imgName msize guidance =
   trs80System imgName imgReader (fromIntegral msize) sys
-  >>= (\trs80 -> let (img, _sys') = mReadN theOrigin (fromIntegral (theEndAddr - theOrigin) + 1) trs80
+  >>= (\trs80 -> let (img, _sys') = sysMReadN theOrigin (fromIntegral (theEndAddr - theOrigin) + 1) trs80
                  in  case G.getMatchingSection guidance (romMD5 img) of
                        Just dirs ->
                          let (dis, _msys) = collectRom trs80 (initialDisassembly img dirs) dirs
@@ -230,7 +230,7 @@ highbitCharTable sys sAddr nBytes z80dstate =
   let sAddr'              = fromIntegral sAddr
       nBytes'             = fromIntegral nBytes
       -- Fetch the block from memory as a 'Vector'
-      (memBlock, sys') = mReadN sAddr nBytes' sys
+      (memBlock, sys') = sysMReadN sAddr nBytes' sys
       -- Look for the high bit characters within the address range, then convert back to addresses
       byteidxs            = DVU.findIndices (>= 0x80) memBlock
       -- Set up a secondary index vector to make a working zipper
@@ -267,21 +267,21 @@ jumpTable :: Z80system sysType
           -- ^ Current disassembly state
           -> (Z80disassembly, Z80system sysType)
           -- ^ Resulting diassembly state
-jumpTable mem sAddr nBytes dstate =
+jumpTable trs80 sAddr nBytes dstate =
   let ea = sAddr + fromIntegral nBytes
-      generateAddr mem' addr z80dstate
-        | addr < ea - 2  = let (DecodedAddr newAddr operand, mem'')  = z80getAddr mem' (PC addr)
+      generateAddr trs80' addr z80dstate
+        | addr < ea - 2  = let (DecodedAddr newAddr operand, mem'')  = z80getAddr trs80' (PC addr)
                                (dstate'', mem''') = operAddrPseudo operand mem''
                            in  generateAddr mem''' (unPC newAddr) dstate''
-        | addr == ea - 2 = let (DecodedAddr _newAddr operand, mem'') = z80getAddr mem' (PC addr)
+        | addr == ea - 2 = let (DecodedAddr _newAddr operand, mem'') = z80getAddr trs80' (PC addr)
                            in  operAddrPseudo operand mem''
-        | otherwise      = z80disbytes z80dstate mem' (PC addr) (fromIntegral (ea - addr))
+        | otherwise      = z80disbytes z80dstate trs80' (PC addr) (fromIntegral (ea - addr))
         where
-          operAddrPseudo theAddr msys = let (addrPseudo, msys') = operAddr theAddr msys
-                                        in  (over disasmSeq (|> addrPseudo) z80dstate, msys')
-          operAddr       theAddr msys = let (addrVec, msys') = mReadN addr 2 msys
-                                        in  (mkAddr addr (AbsAddr theAddr) addrVec, msys')
-  in  generateAddr mem sAddr dstate
+          operAddrPseudo theAddr sys = let (addrPseudo, sys') = operAddr theAddr sys
+                                       in  (over disasmSeq (|> addrPseudo) z80dstate, sys')
+          operAddr       theAddr sys = let (addrVec, sys') = sysMReadN addr 2 sys
+                                       in  (mkAddr addr (AbsAddr theAddr) addrVec, sys')
+  in  generateAddr trs80 sAddr dstate
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Post-processing for RST 8 "macros" in the TRS-80 ROM. RST 08 is always followed
@@ -291,14 +291,14 @@ trs80RomPostProcessor :: Z80DisasmElt
                       -> Z80PC
                       -> Z80disassembly
                       -> (Z80PC, Z80disassembly, Z80system sysType)
-trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) memSys pc dstate =
-  let (byte, memSys') = mRead (unPC pc) memSys
+trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) trs80 pc dstate =
+  let (byte, trs80') = sysMRead (unPC pc) trs80
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
       pseudo = if byte >= 0x20 && byte <= 0x7f then
                  mkAscii
                else
                  mkByteRange
-  in  (pc + 1, disasmSeq %~ (\s -> s |> ins |> pseudo (unPC pc) (DVU.singleton byte)) $ dstate, memSys')
+  in  (pc + 1, disasmSeq %~ (\s -> s |> ins |> pseudo (unPC pc) (DVU.singleton byte)) $ dstate, trs80')
 -- Otherwise, just append the instruction onto the disassembly sequence.
 trs80RomPostProcessor elt mem pc dstate = z80DefaultPostProcessor elt mem pc dstate
 

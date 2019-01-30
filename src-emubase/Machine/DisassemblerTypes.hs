@@ -34,7 +34,7 @@ import           Data.Vector.Unboxed    (Unbox, Vector)
 import qualified Data.Vector.Unboxed    as DVU
 import           Data.Word
 
-import           Machine.Types
+import           Machine.System
 import           Machine.ProgramCounter
 
 -- | 'DisasmElement' is a dissassembly element: a disassembled instruction (with corresponding address and instruction

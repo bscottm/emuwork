@@ -22,7 +22,9 @@ executable emuwork
     vector,
     trs80,
     emubase
+
   ghc-options:          -Wall -O2
+
   default-extensions:
     GADTs,
     MultiParamTypeClasses,
