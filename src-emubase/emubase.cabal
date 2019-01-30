@@ -97,6 +97,8 @@ test-suite msystest
       CPP,
       GADTs,
       MultiParamTypeClasses,
+      TypeSynonymInstances,
+      RankNTypes,
       OverloadedStrings,
       BangPatterns,
       TemplateHaskell

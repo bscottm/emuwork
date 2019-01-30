@@ -28,7 +28,7 @@ import           Text.Printf
 
 import qualified Machine.MemorySystem                 as M
 import           Machine.Utils
-import           TestDevice
+import           Machine.Tests.TestDevice
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Driver...

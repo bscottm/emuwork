@@ -1,10 +1,6 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GADTs #-}
-
 {- | Test devices for memory system testing.
 -}
-module TestDevice
+module Machine.Tests.TestDevice
         ( mkTestDevice
         , mkVideoDevice
         , vidRows
@@ -21,8 +17,8 @@ import qualified Data.Vector.Unboxed         as DVU
 import           Data.Word
 import           Data.Semigroup()
 
-import qualified MemorySystem                as M
-import qualified Device                      as D
+import qualified Machine.MemorySystem        as M
+import qualified Machine.Device              as D
 
 #if defined(TEST_DEBUG)
 import           Debug.Trace
