@@ -9,14 +9,15 @@ module Machine.Device
   , devWriteSeq
   ) where
 
-import           Prelude                       hiding (words)
-import           Control.Monad.State.Strict    (state, runState, execState)
-import           Control.Monad                 (sequence)
-import qualified Data.Vector.Unboxed           as DVU
+import           Prelude                           hiding (words)
+import           Control.Arrow                     ((***))
+import           Control.Monad.Trans.State.Strict  (state, runState, execState)
+import           Control.Monad                     (sequence)
+import qualified Data.Vector.Unboxed               as DVU
 
 #if defined(TEST_DEBUG)
-import Debug.Trace
-import Text.Printf
+import           Debug.Trace
+import           Text.Printf
 #endif
 
 data Device addrType wordType where
@@ -37,7 +38,6 @@ type DeviceReset  addrType wordType devTag = devTag -> devTag
 type DeviceReader addrType wordType devTag = addrType -> devTag -> (wordType, devTag)
 type DeviceWriter addrType wordType devTag = wordType -> addrType -> devTag -> ((), devTag)
 
-
 -- | The workhorse for reading a data sequence from a device, returning both the resulting list
 devReadSeq :: ( Integral addrType
               , Integral wordType
@@ -51,9 +51,9 @@ devReadSeq :: ( Integral addrType
            -> Device addrType wordType
            -> (DVU.Vector wordType, Device addrType wordType)
 devReadSeq sOffs mLen (Device dev' reset reader writer) =
-  let (result, dev'') = runState devReadState dev'
-      devReadState     = sequence [state (reader a) | a <- [sOffs..sOffs + fromIntegral mLen - 1]]
-  in  (DVU.fromList result, Device dev'' reset reader writer)
+  DVU.fromList *** (\dev -> Device dev reset reader writer) $ runState devReadState dev'
+  where
+      devReadState = sequence [state (reader a) | a <- [sOffs..sOffs + fromIntegral mLen - 1]]
 
 
 -- | The workhorse for writing a data sequence from a device, returning updated memory region
@@ -73,7 +73,6 @@ devWriteSeq sOffs words (Device dev' reset reader writer) =
   Device (execState devWriteState dev') reset reader writer
   where
     wordLen        = DVU.length words
-    -- Need to reverse the lists because sequence evaluates from right to left, even though
     wordsAsList    = DVU.toList words
     addrsAsList    = [sOffs..sOffs + fromIntegral wordLen - 1]
     devWriteState  = sequence [state (writeTrace w a $ writer w a) | (w, a) <- zip wordsAsList addrsAsList]

@@ -6,7 +6,7 @@ module Reader.RawFormat
 
 import           Control.Exception
 import           Control.Monad               (zipWithM_)
-import qualified Data.ByteString.Lazy        as BL
+import qualified Data.ByteString.Lazy        as B
 import           System.IO
 
 import qualified Data.Vector.Unboxed         as DVU
@@ -26,16 +26,16 @@ readRawWord8Vector :: FilePath                  -- ^ File to read
                    -> IO (DVU.Vector Word8)     -- ^ The resulting vector.
 readRawWord8Vector path =
   if (not . null) path then
-    (BL.readFile path >>= fillVector) `catches` [ Handler (genericIOErrors "readRawWord8Vector")
-                                                -- Add more handlers here, as needed
-                                                ]
+    (B.readFile path >>= fillVector) `catches` [ Handler (genericIOErrors "readRawWord8Vector")
+                                               -- Add more handlers here, as needed
+                                               ]
   else
     hPutStrLn stderr "readRawWord8Vector: Empty file name"
     >> invalidVector
   where
-    vecLen contents               = fromIntegral (BL.length contents)
+    vecLen contents               = fromIntegral (B.length contents)
     fillVector contents           = return $ DVU.create (M.new (vecLen contents) >>= unpackAndFillVec contents)
     unpackAndFillVec contents vec = zipWithM_ (M.write vec)
                                               [(0 :: Int)..(vecLen contents)]
-                                              (BL.unpack contents)
+                                              (B.unpack contents)
                                     >> (vec `seq` return vec)

@@ -13,7 +13,7 @@ import           Control.Lens (over, (^.), (%~), (.~), (&))
 import           Control.Monad (unless, mapM_)
 import           Data.Binary
 import           Data.Bits
-import qualified Data.ByteString.Lazy as BCL
+import qualified Data.ByteString.Lazy as B
 import           Data.Char
 import           Data.Digest.Pure.MD5
 import qualified Data.Foldable as Foldable
@@ -134,38 +134,39 @@ trs80disassemble sys imgReader imgName msize guidance =
                           ]
       )
   where
-    theOrigin              = G.origin guidance
-    theEndAddr             = G.endAddr guidance
+    (G.Z80guidanceAddr theOrigin)  = G.origin guidance
+    (G.Z80guidanceAddr theEndAddr) = G.endAddr guidance
     -- Initial disassembly state: known symbols and disassembly address range predicate
     initialDisassembly img dirs =
-      disasmSeq %~ (\s -> s |> mkLineComment commentBreak
-                            |> mkLineComment (T.append "ROM MD5 checksum: " (romMD5Hex img))
-                            |> mkLineComment ((identifyROM . romMD5) img)
-                            |> mkLineComment commentBreak
-                            |> mkLineComment T.empty) $
-                   symbolTab .~ fromMaybe H.empty (G.getKnownSymbols dirs) $
-                   addrInDisasmRange .~ (\addr -> addr >= theOrigin && addr <= theEndAddr) $
-                   mkInitialDisassembly
+      mkInitialDisassembly
+        & disasmSeq %~ (\s -> s |> mkLineComment commentBreak
+                                |> mkLineComment (T.append "ROM MD5 checksum: " (romMD5Hex img))
+                                |> mkLineComment ((identifyROM . romMD5) img)
+                                |> mkLineComment commentBreak
+                                |> mkLineComment T.empty)
+        & symbolTab .~ G.invertKnownSymbols dirs
+        & addrInDisasmRange .~ (\addr -> addr >= theOrigin && addr <= theEndAddr)
+
     commentBreak           = "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
-    romMD5                 = encode . md5 . BCL.pack . DVU.toList
-    romMD5Hex img          = BCL.foldl (\a x -> T.append a (asHex x)) T.empty (romMD5 img)
+    romMD5                 = encode . md5 . B.pack . DVU.toList
+    romMD5Hex img          = B.foldl (\a x -> T.append a (asHex x)) T.empty (romMD5 img)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Identify a ROM from its MD5 signature.
-identifyROM :: BCL.ByteString
+identifyROM :: B.ByteString
             -> T.Text
 identifyROM md5sig = fromMaybe "Unknown ROM signature" (md5sig `H.lookup` romSigs)
 
-romSigs :: H.HashMap BCL.ByteString T.Text
-romSigs = H.fromList [ ( BCL.pack [ 0xca, 0x74, 0x82, 0x2e, 0xbc, 0x28, 0x03, 0xc6, 0x63, 0x5a, 0x55, 0x11
-                                  , 0x6e, 0xcd, 0x95, 0x39 ]
+romSigs :: H.HashMap B.ByteString T.Text
+romSigs = H.fromList [ ( B.pack [ 0xca, 0x74, 0x82, 0x2e, 0xbc, 0x28, 0x03, 0xc6, 0x63, 0x5a, 0x55, 0x11
+                                , 0x6e, 0xcd, 0x95, 0x39 ]
                        , "Model I v1.2-3a" )
                      -- This one is pretty elusive in the wild...
-                     , ( BCL.pack [ 0x6f, 0x0a, 0xc8, 0x17, 0x9f, 0xa0, 0x1c, 0xc4, 0x47, 0x20, 0xda, 0x31
-                                 , 0x9c, 0xe1, 0x2a, 0x92 ]
+                     , ( B.pack [ 0x6f, 0x0a, 0xc8, 0x17, 0x9f, 0xa0, 0x1c, 0xc4, 0x47, 0x20, 0xda, 0x31
+                                , 0x9c, 0xe1, 0x2a, 0x92 ]
                        , "Model I v1.3-1" )
-                     , ( BCL.pack [ 0x6c, 0x73, 0x4a, 0x96, 0x36, 0x5b, 0xae, 0x81, 0xc7, 0x29, 0xc2, 0xe4
-                                  , 0xf0, 0xf7, 0x02, 0x0e ]
+                     , ( B.pack [ 0x6c, 0x73, 0x4a, 0x96, 0x36, 0x5b, 0xae, 0x81, 0xc7, 0x29, 0xc2, 0xe4
+                                , 0xf0, 0xf7, 0x02, 0x0e ]
                        , "System-80 blue label" )
                      ]
 
@@ -192,24 +193,32 @@ doAction :: (Z80disassembly, Z80system z80sys)
 
 doAction (dstate, sys) guide
   --  | trace ("disasm: guide = " ++ (show guide)) False = undefined
-  | (G.SymEquate label addr)     <- guide
+  | (G.SymEquate label (G.Z80guidanceAddr addr)) <- guide
   = ((symbolTab %~ H.insert addr label) . (disasmSeq %~ (|> mkEquate label addr)) $ dstate, sys)
   | (G.Comment comment)          <- guide
   = (disasmSeq %~ (|> mkLineComment comment) $ dstate, sys)
-  | (G.DoDisasm sAddr nBytes)    <- guide
-  = disassemble dstate sys (PC sAddr) (PC sAddr + fromIntegral nBytes) trs80RomPostProcessor
-  | (G.GrabBytes sAddr nBytes)   <- guide
+  | (G.DoDisasm addrRange) <- guide
+  , (sAddr, eAddr) <- sAddrEAddr addrRange
+  = disassemble dstate sys (PC sAddr) (PC eAddr) trs80RomPostProcessor
+  | (G.GrabBytes addrRange)   <- guide
+  , (sAddr, nBytes) <- sAddrNBytes addrRange
   = z80disbytes dstate sys (PC sAddr) nBytes
-  | (G.GrabAsciiZ sAddr)         <- guide
+  | (G.GrabAsciiZ (G.Z80guidanceAddr sAddr)) <- guide
   = z80disasciiz dstate sys (PC sAddr)
-  | (G.GrabAscii sAddr nBytes)   <- guide
+  | (G.GrabAscii addrRange)   <- guide
+  , (sAddr, nBytes) <- sAddrNBytes addrRange
   = z80disascii dstate sys (PC sAddr) nBytes
-  | (G.HighBitTable addr nBytes) <- guide
-  = highbitCharTable sys addr nBytes dstate
-  | (G.JumpTable addr nBytes)    <- guide
-  = jumpTable sys addr nBytes dstate
+  | (G.HighBitTable addrRange) <- guide
+  , (sAddr, nBytes) <- sAddrNBytes addrRange
+  = highbitCharTable sys sAddr nBytes dstate
+  | (G.JumpTable addrRange)    <- guide
+  , (sAddr, nBytes) <- sAddrNBytes addrRange
+  = jumpTable sys sAddr nBytes dstate
   | otherwise
   = (dstate, sys)
+  where
+    sAddrNBytes (G.Z80guidanceAddrRange sAddr eAddr) = (sAddr, fromIntegral (eAddr - sAddr))
+    sAddrEAddr (G.Z80guidanceAddrRange sAddr eAddr) = (sAddr, eAddr)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 

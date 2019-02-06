@@ -13,10 +13,11 @@ module Z80.InsnDecode
   ) where
 
 import           Control.Lens
-import           Control.Arrow      (second)
+import           Control.Arrow       (second)
 import           Data.Bits
-import           Data.IntMap        (IntMap, (!))
-import qualified Data.IntMap        as IntMap
+import           Data.IntMap         (IntMap, (!))
+import qualified Data.IntMap         as IntMap
+import qualified Data.Vector.Unboxed as DVU
 
 -- import Debug.Trace
 
@@ -492,10 +493,9 @@ z80getAddr :: Z80system sysType
            -> Z80PC
            -- ^ The program counter
            -> Z80decodedInsn sysType
-z80getAddr sys pc = let lo, hi     :: Z80word
-                        (pc',  (lo, sys'))  = sysReadAndIncPC pc sys
-                        (pc'', (hi, sys'')) = sysReadAndIncPC pc' sys'
-                    in  (DecodedAddr pc'' (shiftL (fromIntegral hi) 8 .|. fromIntegral lo), sys'')
+z80getAddr sys pc = let (awords, sys') = sysMReadN (unPC pc) 2 sys
+                        addr           = shiftL (fromIntegral (awords DVU.! 1)) 8 .|. fromIntegral (awords DVU.! 0)
+                    in  (DecodedAddr (pc + 2) addr, sys')
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Index register transform functions:

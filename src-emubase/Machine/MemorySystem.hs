@@ -1,7 +1,3 @@
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE GADTs #-}
 {-| General-purpose system memory, for both traditional memory and for port-based I/O systems.
 
 Memory is a collection of address regions ('addrType') stored in an 'IntervalMap'. The 'IntervalMap' stores the start
@@ -55,26 +51,26 @@ module Machine.MemorySystem
   , sanityCheck
   ) where
 
-import           Prelude                       hiding (words)
-import           Control.Arrow                 (first)
-import           Control.Lens                  (Lens', over, to, view, views, (%~), (&), (+~), (-~), (.~), (^.), (|>), _2)
-import           Control.Monad.State.Strict    (state, execState)
-import           Control.Monad                 (sequence)
-import           Data.Semigroup                (Semigroup)
-import qualified Data.Foldable                 as Fold (foldl')
-import qualified Data.IntervalMap.Strict       as IM
-import qualified Data.IntervalMap.Interval     as I
-import           Data.Maybe                    (fromMaybe)
-import           Data.Vector.Unboxed           (Vector, (!), (//))
-import qualified Data.Vector.Unboxed           as DVU
-import qualified Data.OrdPSQ                   as OrdPSQ
+import           Prelude                          hiding (words)
+import           Control.Arrow                    (first, (***))
+import           Control.Lens                     (Lens', over, to, view, views, (%~), (&), (+~), (-~), (.~), (^.), (|>), _2)
+import           Control.Monad.Trans.State.Strict (state, execState)
+import           Control.Monad                    (sequence)
+import           Data.Semigroup                   (Semigroup)
+import qualified Data.Foldable                    as Fold (foldl')
+import qualified Data.IntervalMap.Strict          as IM
+import qualified Data.IntervalMap.Interval        as I
+import           Data.Maybe                      (fromMaybe)
+import           Data.Vector.Unboxed             (Vector, (!), (//))
+import qualified Data.Vector.Unboxed             as DVU
+import qualified Data.OrdPSQ                     as OrdPSQ
 
 #if defined(TEST_DEBUG)
 import Debug.Trace
 import Text.Printf
 #endif
 
-import qualified Machine.Device                as D
+import qualified Machine.Device                  as D
 import           Machine.Utils
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -299,7 +295,6 @@ mRead :: ( Integral addrType
       -- ^ Value read and updated system state
 mRead addr msys =
   let mregions                 = msys ^. regions
-      (vals, mrs')             = IM.mapAccumWithKey getContent [] (IM.splitAt mregions addr ^. _2)
       ensureValue []           = 0
       ensureValue (v:_)        = v
       getContent memvals iv mr =
@@ -309,14 +304,13 @@ mRead addr msys =
               -- to append the value read from the device to the accumulated list of values, and the LH data
               -- constructor to re-wrap the new device state.
               DevRegion{ _rgnDevice = (D.Device dev' reset reader writer) } ->
-                let (val, updDev) = reader addrOffset dev'
-                in  (memvals |> val, DevRegion (D.Device updDev reset reader writer))
+                (memvals |>) *** (\dev -> DevRegion (D.Device dev reset reader writer)) $ reader addrOffset dev'
               _ ->
-                let memval = fromMaybe (view contents mr ! fromIntegral addrOffset)
-                                       (views writesPending (lookupPendingWrite $ fromIntegral addrOffset) mr)
-                in  (memvals |> memval, mr)
-  in  (ensureValue vals, msys & regions %~ updDevRegions mrs')
-      -- Note: There's probably a neat arrow trick, but this is more readable.
+                let val = fromMaybe (view contents mr ! fromIntegral addrOffset)
+                                    (views writesPending (lookupPendingWrite $ fromIntegral addrOffset) mr)
+                in  (memvals |> val, mr)
+  in  ensureValue *** (\updMRs -> msys & regions %~ updDevRegions updMRs) $
+          IM.mapAccumWithKey getContent [] (IM.splitAt mregions addr ^. _2)
 
 
 -- | Fetch a sequence of words from memory. The start and end addresses do not have reside in the same memory region;

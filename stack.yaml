@@ -4,15 +4,18 @@
 # http://docs.haskellstack.org/en/stable/yaml_configuration/
 
 resolver: lts-13.5
-#resolver: lts-12.24
-#resolver: lts-11.5
+
 packages:
-- '.'
-- src-emubase/
-- src-trs80/
+  - '.'
+  - src-emubase/
+  - src-trs80/
 # - src-edas/
 
-extra-deps: []
+extra-deps:
+  - yaml-combinators-1.1.1.1@sha256:5c95354b5c34971f1d206708ce565b98b1d13f871cd0c64bba957711d587f27e
+  - json-sop-0.2.0.3@sha256:f70dacc2292d21f5a17ba741899778c2671c849b3d382b760199c5edd8de94d1
+  - lens-sop-0.2.0.2@sha256:550232d6360517cc80e49fdbc269c792cb9c4ee512be03e534a54d62246ffd4c
+
 flags: {}
 extra-package-dbs: []
 system-ghc: false

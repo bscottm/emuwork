@@ -26,6 +26,7 @@ module Z80.Disassembler
   ) where
 
 import           Control.Lens        hiding ((|>))
+import           Control.Arrow       (arr, first, (>>>))
 import           Data.Data
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
@@ -75,17 +76,17 @@ z80InsLength elt                          = disEltGetLength elt
 -- | Disassembler state, which indexes the 'Disassembly' type family.
 data Z80disassembly =
   Z80disassembly
-  { -- | A general-purpose label counter, useful for local labels, e.g., "L1", "L2", etc., that are inserted
+  { _labelNum :: Int
+    -- ^ A general-purpose label counter, useful for local labels, e.g., "L1", "L2", etc., that are inserted
     -- into the symbol table.
-    _labelNum :: Int
-    -- | Predicate: Is the address in the disassembler's range? Note that the default function always returns 'True'.
   , _addrInDisasmRange :: Z80addr               -- The address to test
                        -> Bool                  -- 'True' if in disassembler's range, 'False' otherwise.
-    -- | The symbol table mapping between addresses and symbol names in 'disasmSeq'
-  , _symbolTab :: HashMap Z80addr  T.Text
-    -- | The sequence of tuples, each of which is an address, words corresponding to the disassembled instruction, and the
-    -- disassembled instruction.
+    -- ^ Predicate: Is the address in the disassembler's range? Note that the default function always returns 'True'.
+  , _symbolTab :: HashMap Z80addr T.Text
+    -- ^ The symbol table mapping between addresses and symbol names in 'disasmSeq'
   , _disasmSeq :: Seq Z80DisasmElt
+    -- ^ The sequence of tuples, each of which is an address, words corresponding to the disassembled instruction, and the
+    -- disassembled instruction.
   }
 
 -- Emit the Template Haskell hair for lenses:
@@ -108,73 +109,70 @@ disasm :: Z80disassembly
                                                 -- ^ The emulated Z80 system
        -> Z80PC                                 -- ^ Current program counter
        -> Z80PC                                 -- ^ The disassembly's address limit
-       -> ( Z80DisasmElt
-            -> Z80system sysType
-            -> Z80PC
-            -> Z80disassembly
-            -> (Z80PC, Z80disassembly, Z80system sysType)
-          )                                     -- ^ Post-processing function
-       -> (Z80disassembly, Z80system sysType)           -- ^ Resulting disassmbly sequence and state
+       -> DisElementPostProc Z80disassembly Z80state Z80instruction Z80addr Z80word Z80PseudoOps
+          -- ^ Post-processing function
+       -> (Z80disassembly, Z80system sysType)
+          -- ^ Resulting disassmbly sequence and state
 disasm dstate theSystem thePC lastpc postProc = disasm' thePC dstate theSystem
   where
     addrInDisasmF = dstate ^. addrInDisasmRange
-
     disasm' pc curDState sys
       --   | trace ("disasm " ++ (show pc)) False = undefined
-      | pc <= lastpc =
-        let decoder = sys ^. processor . processorOps . idecode
-            (DecodedInsn newpc insn, sys') = decoder pc sys
+      | pc <= lastpc
+      = let decoder = sys ^. processor . processorOps . idecode
             -- Identify symbols where absolute addresses are found and build up a symbol table for a later
             -- symbol translation pass:
-            curDState'             =
-              case insn of
-                -- Somewhat dubious:
-                -- LD (RPair16ImmLoad _rp (AbsAddr addr))  -> doCollectSymtab "M"
-                LD (HLIndirectStore (AbsAddr addr))     -> doCollectSymtab addr "M"
-                LD (HLIndirectLoad  (AbsAddr addr))     -> doCollectSymtab addr "M"
-                LD (RPIndirectLoad _rp (AbsAddr addr))  -> doCollectSymtab addr "M"
-                LD (RPIndirectStore _rp (AbsAddr addr)) -> doCollectSymtab addr "M"
-                DJNZ (AbsAddr addr)                     -> doCollectSymtab addr "L"
-                JR (AbsAddr addr)                       -> doCollectSymtab addr "L"
-                JRCC _cc (AbsAddr addr)                 -> doCollectSymtab addr "L"
-                JP (AbsAddr addr)                       -> doCollectSymtab addr "L"
-                JPCC _cc (AbsAddr addr)                 -> doCollectSymtab addr "L"
-                CALL (AbsAddr addr)                     -> doCollectSymtab addr "SUB"
-                CALLCC _cc (AbsAddr addr)               -> doCollectSymtab addr "SUB"
-                _otherwise                              -> curDState
-            doCollectSymtab                = collectSymtab curDState
-            (disAsmInst, sys'')            = mkZ80DisasmInsn pc newpc sys' insn
-            (newpc', curDState'', sys''')  = postProc disAsmInst sys'' newpc curDState'
+            (newpc', curDState'', sys''') = arr dupInput >>> first (mkZ80DisasmInsn pc) >>> invokePostProc curDState $ decoder pc sys
+            -- (disAsmInst, sys'')            = arr dupInput >>> first (mkZ80DisasmInsn pc) >>> invokePostProc curDState $ decoder pc sys
+            -- (newpc', curDState'', sys''')  = postProc disAsmInst sys'' newpc (labelAddresses insn curDState)
         in  disasm' newpc' curDState'' sys'''
-      | otherwise = (curDState, sys)
+      | otherwise
+      = (curDState, sys)
 
+    dupInput x = (x, x)
+    invokePostProc disState ((disAsmInst, sys'), (DecodedInsn newpc insn, _sys)) =
+        postProc disAsmInst sys' newpc (labelAddresses insn disState)
     mkZ80DisasmInsn :: Z80PC
-                    -> Z80PC
-                    -> Z80system sysType
-                    -> Z80instruction
+                    -> (DecodedInsn Z80instruction Z80addr, Z80system sysType)
                     -> (Z80DisasmElt, Z80system sysType)
-    mkZ80DisasmInsn oldpc newpc sys ins =
+    mkZ80DisasmInsn oldpc (DecodedInsn newpc insn, sys) =
       let (opcodes, sys') = sysMReadN (unPC oldpc) (fromIntegral (newpc - oldpc)) sys
           cmnt
-            | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- ins
+            | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- insn
             , addrInDisasmF addr
             = "INTREF"
             | otherwise
             = T.empty
-      in  (mkDisasmInsn (unPC oldpc) opcodes ins cmnt, sys')
+      in  (mkDisasmInsn (unPC oldpc) opcodes insn cmnt, sys')
+
+    labelAddresses insn disState
+      | Just (prefix, destAddr) <- hasAddress
+      , addrInRangeF destAddr && not (views symbolTab (destAddr `H.member`) disState)
+      = disState & (symbolTab %~ H.insert destAddr (mkLabel prefix)) . (labelNum +~ 1)
+      | otherwise
+      = disState
+      where
+        hasAddress =
+          case insn of
+            -- Somewhat dubious:
+            -- LD (RPair16ImmLoad _rp (AbsAddr addr))  -> doCollectSymtab "M"
+            LD (HLIndirectStore (AbsAddr addr))     -> Just ("M", addr)
+            LD (HLIndirectLoad  (AbsAddr addr))     -> Just ("M", addr)
+            LD (RPIndirectLoad _rp (AbsAddr addr))  -> Just ("M", addr)
+            LD (RPIndirectStore _rp (AbsAddr addr)) -> Just ("M", addr)
+            DJNZ (AbsAddr addr)                     -> Just ("L", addr)
+            JR (AbsAddr addr)                       -> Just ("L", addr)
+            JRCC _cc (AbsAddr addr)                 -> Just ("L", addr)
+            JP (AbsAddr addr)                       -> Just ("L", addr)
+            JPCC _cc (AbsAddr addr)                 -> Just ("L", addr)
+            CALL (AbsAddr addr)                     -> Just ("SUB", addr)
+            CALLCC _cc (AbsAddr addr)               -> Just ("SUB", addr)
+            _otherwise                              -> Nothing
+        addrInRangeF   = disState ^. addrInDisasmRange
+        mkLabel prefix = T.append prefix (views labelNum (T.pack . show) disState)
 
     -- Probe the symbol table for 'destAddr', add a new symbol for this address, if in the range of the disassembled
     -- memory
-    collectSymtab curDState destAddr prefix
-      | addrInRangeF destAddr && not isInSymtab
-      = curDState & (symbolTab %~ H.insert destAddr label) . (labelNum +~ 1)
-      | otherwise
-      = curDState
-      where
-        symTab       = curDState ^. symbolTab
-        addrInRangeF = curDState ^. addrInDisasmRange
-        isInSymtab   = destAddr `H.member` symTab
-        label        = T.append prefix (curDState ^. labelNum & (T.pack . show))
 
 -- | Grab a sequence of bytes from the memory image, add to the disassembly sequence as a 'ByteRange' pseudo instruction
 z80disbytes :: Z80disassembly

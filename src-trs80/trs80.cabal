@@ -10,42 +10,48 @@ license:        GPL-3
 
 library
   default-language:
-                   Haskell2010
+    Haskell2010
 
   build-depends:
-      aeson,
-      array,
-      base,
-      binary,
-      bytestring,
-      containers,
-      emubase,
-      hashable,
-      lens,
-      pureMD5,
-      scientific,
-      text,
-      unordered-containers,
-      vector,
-      yaml
+    aeson,
+    array,
+    base,
+    binary,
+    bytestring,
+    containers,
+    emubase,
+    generics-sop,
+    hashable,
+    json-sop,
+    lens,
+    transformers,
+    parsec,
+    pureMD5,
+    scientific,
+    text,
+    unordered-containers,
+    vector,
+    yaml,
+    yaml-combinators
 
   ghc-options:
-              -Wall -O2
+    -Wall -O2
 
   default-extensions:
-      GADTs,
-      MultiParamTypeClasses,
-      OverloadedStrings,
-      TemplateHaskell
+    CPP,
+    GADTs,
+    MultiParamTypeClasses,
+    OverloadedStrings,
+    TemplateHaskell
 
   exposed-modules:
-      TRS80
+    TRS80
 
   other-modules:
-      TRS80.System
-      TRS80.Disasm
-      TRS80.CommonOptions
-      TRS80.Disasm.Guidance
+    TRS80.System
+    TRS80.Disasm
+    TRS80.CommonOptions
+    TRS80.Disasm.Guidance
 
 test-suite yamltest
     default-language:   Haskell2010

@@ -171,17 +171,17 @@ mkLabeledAddress = Labeled
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | 'DisElement' post-processing function synonym
 type DisElementPostProc disasmState cpuType insnType addrType wordType extPseudoType =
-  ( DisElement insnType addrType wordType extPseudoType
-    -- Decoded instruction or pseudo-operation
-    -> EmulatedSystem cpuType insnType addrType wordType
-    -- Memory system
-    -> ProgramCounter addrType
-    -- Current program counter
-    -> disasmState
-    -- Incoming disassembly state
-    -> (ProgramCounter addrType, disasmState, EmulatedSystem cpuType insnType addrType wordType)
-    -- Resulting disassembly state
-  )
+  DisElement insnType addrType wordType extPseudoType
+  -- Decoded instruction or pseudo-operation
+  -> EmulatedSystem cpuType insnType addrType wordType
+  -- Memory system
+  -> ProgramCounter addrType
+  -- Current program counter
+  -> disasmState
+  -- Incoming disassembly state
+  -> (ProgramCounter addrType, disasmState, EmulatedSystem cpuType insnType addrType wordType)
+  -- Resulting disassembly state
+
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | The 'Disassembler' type class and generic interface to disassemblers.
 class Disassembler disasmState cpuType insnType addrType wordType extPseudoType where
@@ -197,11 +197,9 @@ class Disassembler disasmState cpuType insnType addrType wordType extPseudoType 
               -> ProgramCounter addrType
               -- ^ Last address to disassemble
               -> DisElementPostProc disasmState cpuType insnType addrType wordType extPseudoType
-              -- ^ Post-processing function that is be applied after disasembling
-              -- an instruction. This is useful for situations such as the TRS-80
-              -- BASIC ROM, where the \'RST 08\' instruction is always followed by
-              -- a byte and two should be emitted together.
-              -- in the actual disassembler.
+              -- ^ Post-processing function applied after disasembling an instruction. This is
+              -- useful for situations such as the TRS-80 BASIC ROM, where the \'RST 08\' instruction
+              -- is always followed by a byte and two should be emitted together in the actual disassembly output.
               -> (disasmState,  EmulatedSystem cpuType insnType addrType wordType)
               -- ^ The resulting disassembly sequence
 
