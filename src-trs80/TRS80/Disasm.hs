@@ -134,8 +134,8 @@ trs80disassemble sys imgReader imgName msize guidance =
                           ]
       )
   where
-    (G.Z80guidanceAddr theOrigin)  = G.origin guidance
-    (G.Z80guidanceAddr theEndAddr) = G.endAddr guidance
+    theOrigin                   = (G.unZ80guidanceAddr . G.origin) guidance
+    theEndAddr                  = (G.unZ80guidanceAddr . G.endAddr) guidance
     -- Initial disassembly state: known symbols and disassembly address range predicate
     initialDisassembly img dirs =
       mkInitialDisassembly
@@ -194,7 +194,10 @@ doAction :: (Z80disassembly, Z80system z80sys)
 doAction (dstate, sys) guide
   --  | trace ("disasm: guide = " ++ (show guide)) False = undefined
   | (G.SymEquate label (G.Z80guidanceAddr addr)) <- guide
-  = ((symbolTab %~ H.insert addr label) . (disasmSeq %~ (|> mkEquate label addr)) $ dstate, sys)
+  = (dstate & symbolTab %~ H.insert addr label
+            & disasmSeq %~ (|> mkEquate label addr)
+    , sys
+    )
   | (G.Comment comment)          <- guide
   = (disasmSeq %~ (|> mkLineComment comment) $ dstate, sys)
   | (G.DoDisasm addrRange) <- guide
@@ -203,8 +206,8 @@ doAction (dstate, sys) guide
   | (G.GrabBytes addrRange)   <- guide
   , (sAddr, nBytes) <- sAddrNBytes addrRange
   = z80disbytes dstate sys (PC sAddr) nBytes
-  | (G.GrabAsciiZ (G.Z80guidanceAddr sAddr)) <- guide
-  = z80disasciiz dstate sys (PC sAddr)
+  | (G.GrabAsciiZ sAddr) <- guide
+  = z80disasciiz dstate sys ((PC . G.unZ80guidanceAddr) sAddr)
   | (G.GrabAscii addrRange)   <- guide
   , (sAddr, nBytes) <- sAddrNBytes addrRange
   = z80disascii dstate sys (PC sAddr) nBytes
@@ -262,7 +265,9 @@ highbitCharTable sys sAddr nBytes z80dstate =
               Seq.singleton firstBytePseudo
       -- Zip the two index vectors to a sequence
       disasmElts   = Foldable.foldl (><) Seq.empty (zipWith grabString (DVU.toList byteidxs) (DVU.toList byteidx2))
-  in  (disasmSeq %~ (>< disasmElts) $ z80dstate, sys')
+  in  ( z80dstate & disasmSeq %~ (>< disasmElts)
+      , sys'
+      )
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -307,7 +312,7 @@ trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) trs80 pc dstate =
                  mkAscii
                else
                  mkByteRange
-  in  (pc + 1, disasmSeq %~ (\s -> s |> ins |> pseudo (unPC pc) (DVU.singleton byte)) $ dstate, trs80')
+  in  (pc + 1, dstate & disasmSeq %~ (\s -> s |> ins |> pseudo (unPC pc) (DVU.singleton byte)), trs80')
 -- Otherwise, just append the instruction onto the disassembly sequence.
 trs80RomPostProcessor elt mem pc dstate = z80DefaultPostProcessor elt mem pc dstate
 
