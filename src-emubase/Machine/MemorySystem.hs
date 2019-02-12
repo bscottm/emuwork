@@ -360,7 +360,7 @@ updDevRegions :: ( Ord addrType
 updDevRegions updRegions {-origRegions-} =
   execState $ sequence [state (\m -> ((), onlyDevRegions v k m)) | (k, v) <- IM.assocs updRegions]
   where
-    onlyDevRegions dev@DevRegion{}  k mreg = IM.update (const (Just dev)) k mreg
+    onlyDevRegions dev@DevRegion{}  k mreg = (IM.update (const (Just dev)) k mreg)
     onlyDevRegions _mr             _k mreg = mreg
 
 

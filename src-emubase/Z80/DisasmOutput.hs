@@ -11,6 +11,7 @@
 module Z80.DisasmOutput
 ( z80AnalyticDisassembly
 , z80AnalyticDisassemblyOutput
+, z80FormatSymbolTable
 , formatOperand
 ) where
 
@@ -43,43 +44,51 @@ import           Z80.Processor
 -- sequence. This outputs the address, opcode bytes, the opcodes as ASCII,
 -- followed by the standard \'label: instruction ; comment\' output.
 z80AnalyticDisassembly :: Z80disassembly
+                       -> Seq Z80DisasmElt
                        -> Seq T.Text
-z80AnalyticDisassembly dstate =
+z80AnalyticDisassembly dstate disasmSeq =
   -- Append the symbol table to the formatted instruction sequence
   -- Unfortunately (maybe not...?) the foldl results in the concatenation of many singletons.
-  dstate ^. symbolTab & formatSymTab $ formattedDisSeq dstate
+  formattedDisSeq dstate
   where
-    formattedDisSeq z80dstate = fixupSymbols z80dstate ^. disasmSeq & Foldable.foldl formatElem Seq.empty
+    formattedDisSeq z80dstate = Foldable.foldl formatElem Seq.empty $ fixupSymbols z80dstate disasmSeq
     formatElem accSeq (DisasmInsn addr bytes ins cmnt) = accSeq >< formatLinePrefix bytes addr (formatIns ins cmnt)
     formatElem accSeq pseudo                           = accSeq >< formatPseudo pseudo
 
 -- | Generate the "analytic" version of the output (opcodes, ASCII representation) and output to an 'IO' handle.
 z80AnalyticDisassemblyOutput :: Handle
                              -> Z80disassembly
+                             -> Seq Z80DisasmElt
                              -> IO ()
-z80AnalyticDisassemblyOutput hOut dstate = Foldable.traverse_ (TIO.hPutStrLn hOut) $ z80AnalyticDisassembly dstate
+z80AnalyticDisassemblyOutput hOut dstate disasmSeq =
+  Foldable.traverse_ (TIO.hPutStrLn hOut) $ z80AnalyticDisassembly dstate disasmSeq
+
+-- | Format the disassembler's symbol table.
+z80FormatSymbolTable :: Z80disassembly
+                     -> Seq T.Text
+z80FormatSymbolTable = views disasmSymbolTable formatSymTab
 
 -- | Pass over the disassembly sequence, translating absolute addresses into symbolic addresses.
 fixupSymbols :: Z80disassembly
-             -> Z80disassembly
-fixupSymbols z80dstate =
-  let symtab = z80dstate ^. symbolTab
+             -> Seq Z80DisasmElt
+             -> Seq Z80DisasmElt
+fixupSymbols z80dstate disasmSeq =
+  let symtab = z80dstate ^. disasmSymbolTable
       -- Translate an absolute address, generally hidden inside an instruction operand, into a symbolic address
       -- if present in the symbol table.
       fixupSymbol addr@(AbsAddr absAddr) = maybe addr SymAddr (absAddr `H.lookup` symtab)
-      fixupSymbol symAddr                = symAddr
+      fixupSymbol other                  = other
 
       -- Lookup address labels in the symbol table
       fixupEltAddress plain@(Plain absAddr) = maybe plain (Labeled absAddr) (absAddr `H.lookup` symtab)
       fixupEltAddress labeled               = labeled
   in  -- Note the cool use of composed functions in a SYB transformation!
-      disasmSeq %~ everywhere (mkT fixupSymbol . mkT fixupEltAddress) $ z80dstate
+      everywhere (mkT fixupSymbol . mkT fixupEltAddress) disasmSeq
 
 -- | Format the accumulated symbol table as a sequence of 'T.Text's, in columnar format
 formatSymTab :: HashMap Z80addr T.Text
              -> Seq T.Text
-             -> Seq T.Text
-formatSymTab symTab outSeq =
+formatSymTab symTab =
   let !maxsym     = H.foldl' (\len str -> max len (T.length str)) 0 symTab
       !totalCols  = fromIntegral(((lenOutputLine - maxsym) `div` (maxsym + extraSymPad)) + 1) :: Int
       !symsAsList = H.toList symTab
@@ -114,7 +123,7 @@ formatSymTab symTab outSeq =
       compareByName (_, n1) (_, n2) = compare n1 n2
       compareByAddr (a1, _) (a2, _) = compare a1 a2
 
-    in  outSeq >< byNameSeq >< byAddrSeq
+    in  byNameSeq >< byAddrSeq
 
 -- | Format a Z80 instruction
 formatIns :: Z80instruction             -- ^ Instruction to format

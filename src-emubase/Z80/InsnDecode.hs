@@ -476,7 +476,7 @@ displacementInstruction :: Z80system sysType
 displacementInstruction sys pc ins =
   let (_, (disp, sys'))  = sysIncPCAndRead pc sys
       destAddr           = fromIntegral (pc + signExtend disp + 2)
-  in  (DecodedInsn (pc + 1) (ins . AbsAddr $ destAddr), sys')
+  in  (DecodedInsn (pc + 2) (ins . AbsAddr $ destAddr), sys')
 
 -- | Fetch address, insert into an instruction
 mkAbsAddrIns :: (SymAbsAddr Z80addr -> Z80instruction)

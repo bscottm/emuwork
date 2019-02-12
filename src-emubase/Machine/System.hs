@@ -61,7 +61,7 @@ mkEmulatedSystem sysCpu name aliases = EmulatedSystem { _processor = sysCpu
                                                       }
 
 -- | 'EmulatedProcessor' boxes the emulated machine's processor. All interesting operations on an @EmulatedProcessor@
--- are in the `ProcessorOps` type class.
+-- are in the `ProcessorOps` data type.
 data EmulatedProcessor cpuType insnSet addrType wordType where
   EmulatedProcessor ::
     { _procPrettyName :: String
@@ -84,16 +84,30 @@ cpu f proc = proc <$ f (_cpu proc)
 processorOps :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) (ProcessorOps cpuType insnSet addrType wordType)
 processorOps f ops =  ops <$ f (_ops ops)
 
+
 -- | Generic representation of instruction decoder outputs
 data DecodedInsn instructionSet addrType where
   -- A decoded instruction
-  DecodedInsn :: ProgramCounter addrType
-              -> instructionSet
-              -> DecodedInsn instructionSet addrType
+  DecodedInsn ::
+    { _newPC :: ProgramCounter addrType
+    , _insn :: instructionSet
+    } -> DecodedInsn instructionSet addrType
   -- An address fetched from memory, independent of endian-ness
-  DecodedAddr :: ProgramCounter addrType
-              -> addrType
-              -> DecodedInsn instructionSet addrType
+  DecodedAddr ::
+    { _newPC :: ProgramCounter addrType
+    , _disAddr :: addrType
+    } -> DecodedInsn instructionSet addrType
+    deriving (Data, Typeable)
+
+decodedInsnPC :: Lens' (DecodedInsn insnSet addrType) (ProgramCounter addrType)
+decodedInsnPC f insn = (\pc' -> insn { _newPC = pc' }) <$> f (_newPC insn)
+
+decodedInsn :: Lens' (DecodedInsn insnSet addrType) insnSet
+decodedInsn f insn = (\insn' -> insn { _insn = insn' }) <$> f (_insn insn)
+
+decodedAddr :: Lens' (DecodedInsn insnSet addrType) addrType
+decodedAddr f insn = (\addr' -> insn { _disAddr = addr' }) <$> f (_disAddr insn)
+
 
 -- | Processor operations type class
 data ProcessorOps cpuType insnSet addrType wordType where

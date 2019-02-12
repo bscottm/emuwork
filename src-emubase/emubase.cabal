@@ -89,7 +89,6 @@ test-suite msystest
       unordered-containers,
       bytestring,
       text,
-      mtl >= 2,
       vector,
       psqueues,
       random

@@ -9,8 +9,10 @@ module TRS80.Disasm
   , disasmUsage
   ) where
 
-import           Control.Lens (over, (^.), (%~), (.~), (&))
+import           Control.Arrow (first)
+import           Control.Lens (views, (%~), (.~), (&))
 import           Control.Monad (unless, mapM_)
+import           Control.Monad.Trans.State.Strict (state, runState)
 import           Data.Binary
 import           Data.Bits
 import qualified Data.ByteString.Lazy as B
@@ -27,7 +29,6 @@ import qualified Data.Vector as V
 import           Data.Vector.Unboxed (Vector, (!))
 import qualified Data.Vector.Unboxed as DVU
 import qualified Data.Yaml as Y
--- import           Debug.Trace
 import           System.Console.GetOpt
 import           System.Exit
 import           System.IO
@@ -37,6 +38,8 @@ import           TRS80.CommonOptions
 import qualified TRS80.Disasm.Guidance as G
 import           TRS80.System
 import           Z80
+
+-- import           Debug.Trace
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -80,12 +83,12 @@ disasmCmd sys opts =
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-data DisasmOptions where
-  -- | Disassembler-specific options
-  DisasmOptions ::
+data DisasmOptions =
+    -- | Disassembler-specific options
+  DisasmOptions
     { guidanceFile :: FilePath
-    } -> DisasmOptions
-  InvalidDisasm :: DisasmOptions
+    }
+  | InvalidDisasm
 
 getDisasmOptions :: [String]
                  -> IO (DisasmOptions, [String])
@@ -117,36 +120,43 @@ trs80disassemble :: Z80system z80sys
                  -> G.Guidance
                  -> IO ()
 trs80disassemble sys imgReader imgName msize guidance =
-  trs80System imgName imgReader (fromIntegral msize) sys
-  >>= (\trs80 -> let (img, _sys') = sysMReadN theOrigin (fromIntegral (theEndAddr - theOrigin) + 1) trs80
-                 in  case G.getMatchingSection guidance (romMD5 img) of
-                       Just dirs ->
-                         let (dis, _msys) = collectRom trs80 (initialDisassembly img dirs) dirs
-                         in  unless (DVU.null img) $
-                               checkAddrContinuity dis
-                                >> z80AnalyticDisassemblyOutput stdout dis
-                       Nothing ->
-                        mapM_ (hPutStrLn stderr)
-                          [ "Could not find guidance section for " ++ T.unpack (romMD5Hex img)
-                          , "Origin = " ++ as0xHexS theOrigin
-                          , "End addr = " ++ as0xHexS theEndAddr
-                          , "img length = " ++ show (DVU.length img)
-                          ]
-      )
+  do
+    trs80 <- trs80System imgName imgReader (fromIntegral msize) sys
+    let (img, _sys') = sysMReadN theOrigin (fromIntegral (theEndAddr - theOrigin) + 1) trs80
+    unless (DVU.null img) $
+      case G.getMatchingSection guidance (romMD5 img) of
+        Just guidance' ->
+          do
+            let dstate = initialDisassembly trs80 guidance'
+                (disSeq, finalDState) = iterateGuidance guidance' dstate
+            banner img dstate
+            mapM_ (z80AnalyticDisassemblyOutput stdout finalDState) disSeq
+            mapM_ TIO.putStrLn (z80FormatSymbolTable finalDState)
+        Nothing ->
+          mapM_ (TIO.hPutStrLn stderr) $
+            [ T.append "Could not find guidance section for " (romMD5Hex img)
+            , T.append "Origin = " (as0xHex theOrigin)
+            , T.append "End addr = " (as0xHex theEndAddr)
+            , T.append "img length = " $ (T.pack . show) (DVU.length img)
+            ]
   where
     theOrigin                   = (G.unZ80guidanceAddr . G.origin) guidance
     theEndAddr                  = (G.unZ80guidanceAddr . G.endAddr) guidance
     -- Initial disassembly state: known symbols and disassembly address range predicate
-    initialDisassembly img dirs =
-      mkInitialDisassembly
-        & disasmSeq %~ (\s -> s |> mkLineComment commentBreak
-                                |> mkLineComment (T.append "ROM MD5 checksum: " (romMD5Hex img))
-                                |> mkLineComment ((identifyROM . romMD5) img)
-                                |> mkLineComment commentBreak
-                                |> mkLineComment T.empty)
-        & symbolTab .~ G.invertKnownSymbols dirs
-        & addrInDisasmRange .~ (\addr -> addr >= theOrigin && addr <= theEndAddr)
-
+    initialDisassembly sys' guide' =
+      mkDisassemblyState sys' theOrigin theEndAddr
+        & disasmSymbolTable .~ G.invertKnownSymbols guide'
+        & disasmPostProc    .~ trs80RomPostProcessor
+    -- Self explanitory
+    iterateGuidance guidance' {-dstate-} = runState (sequence [state (doDirective g) | g <- V.toList guidance'])
+    -- Self explanitory
+    banner img dstate'=
+      z80AnalyticDisassemblyOutput stdout dstate' $
+        Seq.empty |> mkLineComment commentBreak
+                  |> mkLineComment (T.append "ROM MD5 checksum: " (romMD5Hex img))
+                  |> mkLineComment ((identifyROM . romMD5) img)
+                  |> mkLineComment commentBreak
+                  |> mkLineComment T.empty
     commentBreak           = "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
     romMD5                 = encode . md5 . B.pack . DVU.toList
     romMD5Hex img          = B.foldl (\a x -> T.append a (asHex x)) T.empty (romMD5 img)
@@ -170,83 +180,62 @@ romSigs = H.fromList [ ( B.pack [ 0xca, 0x74, 0x82, 0x2e, 0xbc, 0x28, 0x03, 0xc6
                        , "System-80 blue label" )
                      ]
 
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- | Collect the TRS-80 ROM (oh, this could sooo be generalized!) by left folding the disassembler guidance
--- and collecing the disassembler state, symbol table and disassembled instruction sequence.
-collectRom :: Z80system TRS80ModelISystem
-              -- ^ The TRS-80 system
-           -> Z80disassembly
-              -- ^ Initial disassembler state. This is pre-populated with known
-              -- symbols in the symbol table.
-           -> V.Vector G.Directive
-              -- ^ Disassembler guidance
-           -> (Z80disassembly, Z80system TRS80ModelISystem)
-              -- ^ Resulting disassembler state, symbol table and disassembly
-              -- sequence.
-collectRom sys dstate = Foldable.foldl doAction (dstate, sys)
-
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
-doAction :: (Z80disassembly, Z80system z80sys)
-         -> G.Directive
-         -> (Z80disassembly, Z80system z80sys)
-
-doAction (dstate, sys) guide
-  --  | trace ("disasm: guide = " ++ (show guide)) False = undefined
-  | (G.SymEquate label (G.Z80guidanceAddr addr)) <- guide
-  = (dstate & symbolTab %~ H.insert addr label
-            & disasmSeq %~ (|> mkEquate label addr)
-    , sys
-    )
-  | (G.Comment comment)          <- guide
-  = (disasmSeq %~ (|> mkLineComment comment) $ dstate, sys)
-  | (G.DoDisasm addrRange) <- guide
-  , (sAddr, eAddr) <- sAddrEAddr addrRange
-  = disassemble dstate sys (PC sAddr) (PC eAddr) trs80RomPostProcessor
-  | (G.GrabBytes addrRange)   <- guide
-  , (sAddr, nBytes) <- sAddrNBytes addrRange
-  = z80disbytes dstate sys (PC sAddr) nBytes
-  | (G.GrabAsciiZ sAddr) <- guide
-  = z80disasciiz dstate sys ((PC . G.unZ80guidanceAddr) sAddr)
-  | (G.GrabAscii addrRange)   <- guide
-  , (sAddr, nBytes) <- sAddrNBytes addrRange
-  = z80disascii dstate sys (PC sAddr) nBytes
-  | (G.HighBitTable addrRange) <- guide
-  , (sAddr, nBytes) <- sAddrNBytes addrRange
-  = highbitCharTable sys sAddr nBytes dstate
-  | (G.JumpTable addrRange)    <- guide
-  , (sAddr, nBytes) <- sAddrNBytes addrRange
-  = jumpTable sys sAddr nBytes dstate
-  | otherwise
-  = (dstate, sys)
+-- | Interpret and execute a Z80 disassembly guidance directive
+doDirective :: G.Directive
+            -> Z80disassembly
+            -> (Seq.Seq Z80DisasmElt, Z80disassembly)
+doDirective directive dstate =
+  case directive of
+    G.SymEquate label (G.Z80guidanceAddr addr) ->
+      (Seq.singleton $ mkEquate label addr
+      , dstate & disasmSymbolTable %~ H.insert addr label
+      )
+    G.Comment comment ->
+      (Seq.singleton $ mkLineComment comment, dstate)
+    G.DoDisasm addrRange ->
+      let (sAddr, eAddr) = sAddrEAddr addrRange
+      in  disassembler (dstate & disasmCurAddr .~ sAddr
+                               & disasmFinishAddr .~ eAddr)
+    G.GrabBytes addrRange ->
+      let (sAddr, nBytes) = sAddrNBytes addrRange
+      in  first Seq.singleton $ z80disbytes nBytes (dstate & disasmCurAddr .~ sAddr)
+    G.GrabAsciiZ sAddr ->
+      first Seq.singleton $ z80disasciiz (dstate & disasmCurAddr .~ (PC . G.unZ80guidanceAddr) sAddr)
+    G.GrabAscii addrRange ->
+      let (sAddr, nBytes) = sAddrNBytes addrRange
+      in  first Seq.singleton $ z80disascii nBytes (dstate & disasmCurAddr .~ sAddr)
+    G.HighBitTable addrRange ->
+      let (sAddr, nBytes) = sAddrNBytes addrRange
+      in  highbitCharTable nBytes (dstate & disasmCurAddr .~ sAddr)
+    G.JumpTable addrRange ->
+      let (sAddr, nBytes) = sAddrNBytes addrRange
+      in  jumpTable nBytes (dstate & disasmCurAddr .~ sAddr)
+    G.MD5Sum _ ->
+      (Seq.empty, dstate)
+    G.KnownSymbols _ ->
+      (Seq.empty, dstate)
   where
-    sAddrNBytes (G.Z80guidanceAddrRange sAddr eAddr) = (sAddr, fromIntegral (eAddr - sAddr))
-    sAddrEAddr (G.Z80guidanceAddrRange sAddr eAddr) = (sAddr, eAddr)
+    sAddrNBytes (G.Z80guidanceAddrRange sAddr eAddr) = (PC sAddr, fromIntegral (eAddr - sAddr))
+    sAddrEAddr (G.Z80guidanceAddrRange sAddr eAddr) = (PC sAddr, PC eAddr)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
 -- | The TRS-80's BASIC has a table of keywords, where the first letter of the keyword has the
 -- high bit on. Scan through and generate all of the pseudo-operations for this table, within
 -- the specified memory range.
-highbitCharTable :: Z80system sysType
-                 -- ^ Vector of bytes from which to extract some data
-                 -> Z80addr
-                 -- ^ Start address, relative to the origin, to start extracting bytes
-                 -> Z80disp
+highbitCharTable :: Z80disp
                  -- ^ Number of bytes to extract
                  -> Z80disassembly
                  -- ^ Current disassembly state
-                 -> (Z80disassembly, Z80system sysType)
+                 -> (Seq.Seq Z80DisasmElt, Z80disassembly)
                  -- ^ Resulting diassembly state
-highbitCharTable sys sAddr nBytes z80dstate =
-  let sAddr'              = fromIntegral sAddr
-      nBytes'             = fromIntegral nBytes
+highbitCharTable nBytes z80dstate =
+  let sAddr               = views disasmCurAddr fromIntegral z80dstate
       -- Fetch the block from memory as a 'Vector'
-      (memBlock, sys') = sysMReadN sAddr nBytes' sys
+      (memBlock, z80dstate') = disasmMReadN (fromIntegral nBytes) z80dstate
       -- Look for the high bit characters within the address range, then convert back to addresses
       byteidxs            = DVU.findIndices (>= 0x80) memBlock
       -- Set up a secondary index vector to make a working zipper
-      byteidx2            = DVU.drop 1 byteidxs `DVU.snoc` nBytes'
+      byteidx2            = DVU.drop 1 byteidxs `DVU.snoc` (fromIntegral nBytes)
       -- Grab an individual string from a memory range
       -- grabString :: Int -> Int -> Seq Z80DisasmElt
       grabString memidx memidx' =
@@ -256,8 +245,8 @@ highbitCharTable sys sAddr nBytes z80dstate =
                                  , T.singleton (chr (theChar' .&. 0x7f))
                                  , "' .|. 80H"
                                  ]
-            firstBytePseudo = ExtPseudo (ByteExpression (fromIntegral (sAddr' + memidx)) firstByte theChar)
-            theString = mkAscii (fromIntegral $ sAddr' + memidx + 1)
+            firstBytePseudo = ExtPseudo (ByteExpression (fromIntegral (sAddr + memidx)) firstByte theChar)
+            theString = mkAscii (fromIntegral $ sAddr + memidx + 1)
                                 (DVU.slice (memidx + 1) (memidx' - memidx - 1) memBlock)
         in  if (memidx + 1) /= memidx' then
               Seq.singleton firstBytePseudo |> theString
@@ -265,57 +254,38 @@ highbitCharTable sys sAddr nBytes z80dstate =
               Seq.singleton firstBytePseudo
       -- Zip the two index vectors to a sequence
       disasmElts   = Foldable.foldl (><) Seq.empty (zipWith grabString (DVU.toList byteidxs) (DVU.toList byteidx2))
-  in  ( z80dstate & disasmSeq %~ (>< disasmElts)
-      , sys'
+  in  ( disasmElts
+      , z80dstate'
       )
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-jumpTable :: Z80system sysType
-          -- ^ Vector of bytes from which to extract some data
-          -> Z80addr
-          -- ^ Start address, relative to the origin, to start extracting bytes
-          -> Z80disp
+jumpTable :: Z80disp
           -- ^ Number of bytes to extract
           -> Z80disassembly
           -- ^ Current disassembly state
-          -> (Z80disassembly, Z80system sysType)
+          -> (Seq.Seq Z80DisasmElt, Z80disassembly)
           -- ^ Resulting diassembly state
-jumpTable trs80 sAddr nBytes dstate =
-  let ea = sAddr + fromIntegral nBytes
-      generateAddr trs80' addr z80dstate
-        | addr < ea - 2  = let (DecodedAddr newAddr operand, mem'')  = z80getAddr trs80' (PC addr)
-                               (dstate'', mem''') = operAddrPseudo operand mem''
-                           in  generateAddr mem''' (unPC newAddr) dstate''
-        | addr == ea - 2 = let (DecodedAddr _newAddr operand, mem'') = z80getAddr trs80' (PC addr)
-                           in  operAddrPseudo operand mem''
-        | otherwise      = z80disbytes z80dstate trs80' (PC addr) (fromIntegral (ea - addr))
-        where
-          operAddrPseudo theAddr sys = let (addrPseudo, sys') = operAddr theAddr sys
-                                       in  (over disasmSeq (|> addrPseudo) z80dstate, sys')
-          operAddr       theAddr sys = let (addrVec, sys') = sysMReadN addr 2 sys
-                                       in  (mkAddr addr (AbsAddr theAddr) addrVec, sys')
-  in  generateAddr trs80 sAddr dstate
+jumpTable nBytes dstate = first Seq.fromList $ runState (sequence [state genAddr | _elt <- [0..nBytes `div` 2]]) dstate
+  where
+    genAddr dstate'        = first (genPseudo dstate') $ disasmMReadN 2 dstate'
+    genPseudo dstate' addr = mkAddr (views disasmCurAddr unPC dstate') ((AbsAddr . flipWords) addr) addr
+    flipWords addr         = shiftL (fromIntegral (addr DVU.! 1)) 8 .|. fromIntegral (addr DVU.! 0)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Post-processing for RST 8 "macros" in the TRS-80 ROM. RST 08 is always followed
 -- by a character; (HL) is compared to this following character and flags set.
-trs80RomPostProcessor :: Z80DisasmElt
-                      -> Z80system sysType
-                      -> Z80PC
-                      -> Z80disassembly
-                      -> (Z80PC, Z80disassembly, Z80system sysType)
-trs80RomPostProcessor ins@(DisasmInsn _ _ (RST 8) _) trs80 pc dstate =
-  let (byte, trs80') = sysMRead (unPC pc) trs80
+trs80RomPostProcessor :: DisElementPostProc Z80state Z80instruction Z80addr Z80word Z80PseudoOps
+trs80RomPostProcessor (DisasmInsn _ _ (RST 8) _) dstate =
+  let curPC = views disasmCurAddr unPC dstate
+      (byte, dstate') = disasmMRead dstate
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
-      pseudo = if byte >= 0x20 && byte <= 0x7f then
-                 mkAscii
-               else
-                 mkByteRange
-  in  (pc + 1, dstate & disasmSeq %~ (\s -> s |> ins |> pseudo (unPC pc) (DVU.singleton byte)), trs80')
+      pseudo = if byte >= 0x20 && byte <= 0x7f then mkAscii else mkByteRange
+  in  (Seq.singleton $ pseudo curPC (DVU.singleton byte), dstate')
 -- Otherwise, just append the instruction onto the disassembly sequence.
-trs80RomPostProcessor elt mem pc dstate = z80DefaultPostProcessor elt mem pc dstate
+trs80RomPostProcessor elt dstate = z80DefaultPostProcessor elt dstate
 
+{-
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Check the disassembled sequence for address continuity to ensure that the addresses
 -- increase monotonically, without gaps.
@@ -338,3 +308,4 @@ checkAddrContinuity dis =
   in  unless (Foldable.and checkSeq) $
         hPutStrLn stderr "Discontinuities = "
         >> Foldable.traverse_ formatDiscontinuity (Seq.filter (uncurry (/=)) (Seq.zip nextAddrs' nextAddrs))
+-}
