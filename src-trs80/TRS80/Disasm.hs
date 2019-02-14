@@ -10,7 +10,7 @@ module TRS80.Disasm
   ) where
 
 import           Control.Arrow (first)
-import           Control.Lens (views, (%~), (.~), (&))
+import           Control.Lens (views, (^.), (%~), (.~), (&))
 import           Control.Monad (unless, mapM_)
 import           Control.Monad.Trans.State.Strict (state, runState)
 import           Data.Binary
@@ -140,8 +140,8 @@ trs80disassemble sys imgReader imgName msize guidance =
             , T.append "img length = " $ (T.pack . show) (DVU.length img)
             ]
   where
-    theOrigin                   = (G.unZ80guidanceAddr . G.origin) guidance
-    theEndAddr                  = (G.unZ80guidanceAddr . G.endAddr) guidance
+    theOrigin                   = getGuidanceAddrDefault (G.origin guidance)
+    theEndAddr                  = getGuidanceAddrDefault (G.endAddr guidance)
     -- Initial disassembly state: known symbols and disassembly address range predicate
     initialDisassembly sys' guide' =
       mkDisassemblyState sys' theOrigin theEndAddr
@@ -160,6 +160,45 @@ trs80disassemble sys imgReader imgName msize guidance =
     commentBreak           = "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
     romMD5                 = encode . md5 . B.pack . DVU.toList
     romMD5Hex img          = B.foldl (\a x -> T.append a (asHex x)) T.empty (romMD5 img)
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+getGuidanceAddr :: DisasmState cpuType insnType Z80addr wordType extPseudoType
+                -> G.Z80guidanceAddr
+                -> ProgramCounter Z80addr
+getGuidanceAddr dstate addr =
+  case addr of
+    G.FromCurPC -> dstate ^. disasmCurAddr
+    G.GuidanceAddr addr' -> PC addr'
+
+getGuidanceAddrDefault :: G.Z80guidanceAddr
+                       -> Z80addr
+getGuidanceAddrDefault addr =
+  case addr of
+    G.FromCurPC -> error "getGuidanceAddrDefault: No default for FromCurPC."
+    G.GuidanceAddr addr' -> addr'
+
+getGuidanceRange :: DisasmState cpuType insnType Z80addr wordType extPseudoType
+                 -> G.Z80guidanceAddrRange
+                 -> (ProgramCounter Z80addr, ProgramCounter Z80addr)
+getGuidanceRange dstate range =
+  case range of
+    G.AbsRange sAddr eAddr -> (getGuidanceAddr dstate sAddr, getGuidanceAddr dstate eAddr)
+    G.RelRange sAddr disp  ->
+      let sAddr' = getGuidanceAddr dstate sAddr
+          eAddr' = sAddr' + (fromIntegral . G.unZ80guidanceDisp) disp
+      in  (sAddr', eAddr')
+
+getGuidanceRangeDisp :: DisasmState cpuType insnType Z80addr wordType extPseudoType
+                     -> G.Z80guidanceAddrRange
+                     -> (ProgramCounter Z80addr, Z80disp)
+getGuidanceRangeDisp dstate range =
+  case range of
+    G.AbsRange sAddr eAddr ->
+      let sAddr' = getGuidanceAddr dstate sAddr
+          eAddr' = getGuidanceAddr dstate eAddr
+      in  (sAddr', fromIntegral (eAddr' - sAddr'))
+    G.RelRange sAddr disp  -> (getGuidanceAddr dstate sAddr, G.unZ80guidanceDisp disp)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Identify a ROM from its MD5 signature.
@@ -186,37 +225,35 @@ doDirective :: G.Directive
             -> (Seq.Seq Z80DisasmElt, Z80disassembly)
 doDirective directive dstate =
   case directive of
-    G.SymEquate label (G.Z80guidanceAddr addr) ->
-      (Seq.singleton $ mkEquate label addr
-      , dstate & disasmSymbolTable %~ H.insert addr label
-      )
+    G.SymEquate label addr ->
+      let addr' = unPC $ getGuidanceAddr dstate addr
+      in  (Seq.singleton $ mkEquate label addr'
+          , dstate & disasmSymbolTable %~ H.insert addr' label
+          )
     G.Comment comment ->
       (Seq.singleton $ mkLineComment comment, dstate)
     G.DoDisasm addrRange ->
-      let (sAddr, eAddr) = sAddrEAddr addrRange
+      let (sAddr, eAddr) = getGuidanceRange dstate addrRange
       in  disassembler (dstate & disasmCurAddr .~ sAddr
                                & disasmFinishAddr .~ eAddr)
     G.GrabBytes addrRange ->
-      let (sAddr, nBytes) = sAddrNBytes addrRange
+      let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
       in  first Seq.singleton $ z80disbytes nBytes (dstate & disasmCurAddr .~ sAddr)
     G.GrabAsciiZ sAddr ->
-      first Seq.singleton $ z80disasciiz (dstate & disasmCurAddr .~ (PC . G.unZ80guidanceAddr) sAddr)
+      first Seq.singleton $ z80disasciiz (dstate & disasmCurAddr .~ getGuidanceAddr dstate sAddr)
     G.GrabAscii addrRange ->
-      let (sAddr, nBytes) = sAddrNBytes addrRange
+      let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
       in  first Seq.singleton $ z80disascii nBytes (dstate & disasmCurAddr .~ sAddr)
     G.HighBitTable addrRange ->
-      let (sAddr, nBytes) = sAddrNBytes addrRange
+      let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
       in  highbitCharTable nBytes (dstate & disasmCurAddr .~ sAddr)
     G.JumpTable addrRange ->
-      let (sAddr, nBytes) = sAddrNBytes addrRange
+      let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
       in  jumpTable nBytes (dstate & disasmCurAddr .~ sAddr)
     G.MD5Sum _ ->
       (Seq.empty, dstate)
     G.KnownSymbols _ ->
       (Seq.empty, dstate)
-  where
-    sAddrNBytes (G.Z80guidanceAddrRange sAddr eAddr) = (PC sAddr, fromIntegral (eAddr - sAddr))
-    sAddrEAddr (G.Z80guidanceAddrRange sAddr eAddr) = (PC sAddr, PC eAddr)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | The TRS-80's BASIC has a table of keywords, where the first letter of the keyword has the

@@ -65,7 +65,7 @@ section:
     - equate: [INPBUFPTR, 0x40a7]
     - comment: RND seed
     - equate: [RNDSEED, 0x40aa]
-    - comment: |
+    - comment: |+
         NTF: Numeric Type Flag
         2: Integer
         3: String
@@ -73,7 +73,7 @@ section:
         8: Double precision floating point
         (see CPDE2HL)
     - equate: [NTF, 0x40af]
-    - comment: |
+    - comment: |+
         Top of memory/highest memory address available for string
         storage. Memory above this address pointer is 'reserved'.
     - equate: [MEMTOP, 0x40b1]
@@ -95,10 +95,20 @@ section:
     - equate: [HEXACC, 0x4127]
     - comment: TRSDOS command vector redirections. These are also 'JP' instructions
     - equate: [DOSVECCMD, 0x4173]
+    - comment: |+
+        Input vector address. KIBUFF and GETINPUT pass control via this
+        vector when complete.
+    - equate: [INPUTVECTOR, 0x41af]
     - comment: |
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
         Memory mapped I/O addresses
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - equate: [DISKSEL0, 0x37e1]
+    - equate: [CAS_DRIVE, 0x37e2]
+    - equate: [DISKSEL1, 0x37e3]
+    - equate: [CASS_SEL, 0x37e4]
+    - equate: [DISKSEL2, 0x37e5]
+    - equate: [DISKSEL3, 0x37e7]
     - equate: [LPPORT, 0x37e8]
     - equate: [DSKCMDSTATUS, 0x37ec]
     - equate: [DSKTRKSEL, 0x37ed]
@@ -116,35 +126,88 @@ section:
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
     - disasm:
-        nbytes: 0x004f
         addr: 0x0000
+        end: 0x000b
+    - comment: |
+        Vector used to resolve relocation address of calling routine.
+        On exit, HL points to address following CALL instruction.
+    - disasm:
+        addr: $
+        end: 0x0010
+    - comment: |+
+        RST l0H jumps to DEFRST10 through RST10VEC. This routine INCrements HL
+        and tests the characters pointed to by the HL register pair. It
+        will bypass any spaces and CHAR'S 9 and 10 (shifted left and down
+        arrows respectively). Upon return from this routine HL will point
+        to the next non-blank character.
+
+        C flag will be SET if HL is pointing to a numeric ASCII character and
+        the Z flag will be SET if the character pointed to happens to be zero
+        (ASCII 30H) or 3AH (":").
+
+        BC and DE registers are unaffected. This routine can be used by
+        CALLing 1D78H or RST 10H.
+    - disasm:
+        addr: $
+        end: 0x0050
     - bytes:
+        addr: $
         nbytes: 0x0010
-        addr: 0x0050
     - disasm:
-        nbytes: 0x00a4
-        addr: 0x0060
+        addr: $
+        end: 0x0105
     - ascii:
+        addr: $
         nbytes: 0x000b
-        addr: 0x0105
     - bytes:
+        addr: $
         nbytes: 0x0001
-        addr: 0x0110
     - ascii:
+        addr: $
         nbytes: 0x001a
-        addr: 0x0111
     - bytes:
+        addr: $
         nbytes: 0x0002
-        addr: 0x012b
     - disasm:
-        nbytes: 0x020c
-        addr: 0x012d
+        addr: $
+        end: 0x0132
+    - comment: POINT command jumps here.
+    - disasm:
+        addr: $
+        nbytes: 1
+    - bytes:
+        addr: $
+        end: 0x0135
+    - comment: SET command jumps here.
+    - disasm:
+        addr: $
+        end: 0x0150
+    - disasm:
+        addr: $
+        end: 0x033a
     - comment: |
         This is an alternate entry point into CHARPRINT, which preserves
         DE. Note that CHARPRINT will load DE with the DO DCB.
     - disasm:
-        nbytes: 0x0087
-        addr: 0x033a
+        addr: $
+        end: 0x0361
+    - comment: |+
+        This is one of the general purpose input routines (see 5D9 and 1BB3 also).
+
+        This routine inputs a string from the keyboard, up to a maximum of
+        240 characters (F0H), and echoes them to the screen. It puts this
+        data into a buffer located at the address pointed to by the buffer
+        pointer at 40A7H. (e.g. If 40A7H contains 5000H the data will be
+        stored from 5000H onwards). The string is terminated with a zero
+        byte. The program returns from this routine as soon as the ENTER
+        key has been pressed. When it does so, HL contains the start address
+        of the input string and B contains the length of the string.
+
+        RST 10H can be used to make HL point to the first character of the string,
+        if required.
+    - disasm:
+        addr: $
+        end: 0x03c2
     - comment: |+
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
         Output character to a device, device control block is pointed to
@@ -395,36 +458,81 @@ section:
     - comment: End of the restart vector initialization table.
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x0279
         addr: 0x0708
+        end: 0x0955
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        Z flag set if ACC == 0.
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - disasm:
+        addr: $
+        end: 0x0982
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - comment: Negate a SP or DP floating point number in ACC/DACC
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x003f
-        addr: 0x0982
+        addr: $
+        end: 0x09d2
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - comment: Copy bytes from (HL) into BC and DE. Used to load ACC into BC/DE
     - comment: for SP floating point routines.
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x000f
-        addr: 0x09c2
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-    - comment: Copy bytes pointed to by HL to the buffer pointed to by DE
-    - comment: This just exchanges DE and HL, falls through to CPDE2HL
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        addr: $
+        end: 0x09d2
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        Copy the bytes pointed to by DE to the buffer pointed to by HL
+        A, B, DE and HL are not preserved. NTF (numeric type flag)
+        indicates the number of bytes to copy.
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x0000
-        addr: 0x09d2
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-    - comment: Copy the bytes pointed to by DE to the buffer pointed to by HL
-    - comment: A, B, DE and HL are not preserved. NTF (numeric type flag)
-    - comment: indicates the number of bytes to copy.
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        addr: $
+        end: 0x0a0c
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        Single-precision compare. Compares the ACC with the contents of
+        BCDE registers. After execution of this routine, the A register
+        will contain:
+
+        A=0   if ACC=BCDE
+        A=1   if ACC>BCDE or
+        A=FFH if ACC<BCDE.
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x09a8
-        addr: 0x09d3
+        addr: $
+        end: 0x0a9d
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        Set NTF to Integer (2). (A=used)
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - disasm:
+        addr: $
+        end: 0x0ab1
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        CSNG routine. Takes value from ACC and converts it to single-precision.
+        The result is put in ACC and NTF contains 4.
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - disasm:
+        addr: $
+        end: 0x0adb
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        BASIC CDBL routine. Takes a value from ACC and converts it to
+        double-precision. The result will be in ACC and NTF will be 8.
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - disasm:
+        addr: $
+        end: 0x0af4
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        This routine calls 20H (RST 20H) and returns if NTF=3 (string) else
+        if NTF is not 3 then it generates a TM ERROR. BC, DE, and HL are saved.
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - disasm:
+        addr: $
+        end: 0x137c
     - comment: 0.0 floating point constant
     - bytes:
         nbytes: 0x0004
@@ -433,7 +541,7 @@ section:
     - bytes:
         nbytes: 0x0004
         addr: 0x1380
-    - comment: ?? floating point constant
+    - comment: ! ?? floating point constant
     - bytes:
         nbytes: 0x0004
         addr: 0x1384
@@ -444,7 +552,7 @@ section:
     - bytes:
         nbytes: 0x0004
         addr: 0x158b
-    - comment: ??Floating point constant?
+    - comment: ! ??Floating point constant?
     - bytes:
         nbytes: 0x0004
         addr: 0x158f
@@ -567,8 +675,19 @@ section:
         nbytes: 0x0001
         addr: 0x1935
     - disasm:
-        nbytes: 0x035f
-        addr: 0x1936
+        addr: $
+        end: 0x1bb3
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        This is the last of the general purpose input routines.
+
+        This routine functions identically to the 0x0361 routine with the
+        exception that it prints a "?" on the screen (like INPUT does with
+        BASIC) before allowing input from the keyboard.
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - disasm:
+        addr: $
+        end: 0x1c96
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - comment: Compare (HL) against character following the RST 08 instruction.
     - comment: ''
@@ -582,27 +701,58 @@ section:
     - disasm:
         nbytes: 0x04e1
         addr: 0x1c96
-    - asciiz: 8568
+    - asciiz: $
     - disasm:
         nbytes: 0x0106
         addr: 0x217f
-    - asciiz: 8838
+    - asciiz: $
     - disasm:
         nbytes: 0x0342
         addr: 0x2296
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-    - comment: Test the numeric type flag (NTF)
-    - comment: ! 'Z: String'
-    - comment: ! 'M: Integer'
-    - comment: ! 'P, C: Single precision'
-    - comment: P, NC, Double precision
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        Test the numeric type flag (NTF)
+        Z: String
+        M: Integer
+        P, C: Single precision
+        P, NC, Double precision
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x0a26
         addr: 0x25d9
+        end: 0x28a7
+    - comment: |+
+        ... and fall through to ...
+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        This is a general purpose output routine. It will output data to
+        the display, printer or cassette, depending on the contents of
+        409CH: 0=video, -1=tape, 1=printer.
+
+        The address of the first character in the string to be output must
+        be in the HL register pair, and the string must end with a zero
+        byte or a quote (22H).
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - disasm:
+        addr: $
+        end: 0x29d7
+    - comment: Set the HL register pair to point to the data in the ACC.
+    - disasm:
+        addr: $
+        end: 0x2b05
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        This routine takes the value from the ACC, converts it to an integer
+        value and places the result in the DE register pair. The Z flag will
+        be set if the result in DE is smaller than or equal to 255 (FFH).
+        (DE = INT (ACC))
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - disasm:
+        addr: $
+        end: 0x2fff
     - symbols:
         RST00: 0x0000
         RST08: 0x0008
+        WHERE: 0x000b
         RST10: 0x0010
         WANTDCBGET: 0x0013
         RST18: 0x0018
@@ -640,6 +790,8 @@ section:
         CASSDLY3: 0x01f3
         CASSOFF: 0x01f8
         COUT: 0x033a
+        KBDSCN2: 0x035b
+        KIBUFF: 0x0361
         OUTDCB: 0x03c2
         OUTDCBFINISH: 0x03dd
         KBDREAD: 0x03e3
@@ -659,10 +811,16 @@ section:
         SPADD_BCDE: 0x0716
         SPMUL_BCDE: 0x0847
         SPDIV_BCDE: 0x08a2
+        ACCISZERO: 0x0955
         NEG_MANTISSA: 0x0982
         BCDE_VIA_HL: 0x09c2
         CPHL2DE: 0x09d2
         CPDE2HL: 0x09d3
+        CMPSNG: 0x0a0c
+        SETNTFINT: 0x0a9d
+        CSNG: 0x0ab1
+        CDBL: 0x0adb
+        ISNTFSTR: 0x0af4
         # Integer math functions
         INTADD: 0x0bd2
         INTSUB: 0x0bc7
@@ -704,9 +862,12 @@ section:
         ERRFILEDATA: 0x18f3
         ERRL3DOS: 0x18f5
         BASRSVINIT: 0x18f7
+        MSGERR: 0x191e
+        MSGIN: 0x1924
         READYPMT: 0x1929
         BREAKMSG: 0x1930
         ERORORIN: 0x191d
+        GETINPUT: 0x1bb3
         CMPDEHL: 0x1c90
         DEFRST08: 0x1c96
         BASFOR: 0x1ca1
@@ -730,4 +891,6 @@ section:
         INTDIV: 0x2490
         NUMTYPE: 0x25d9
         BASDIM: 0x2608
+        GENOUTPUT: 0x28a7
+        CVTACC2INT: 0x2b05
 ...

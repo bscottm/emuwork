@@ -21,40 +21,70 @@ module TRS80.Disasm.Guidance
   , getMatchingSection
   , ToJSON(..)
   , FromJSON(..)
-  ) where
+  )
+where
 
-import           Control.Applicative  ((<|>))
-import           Data.Aeson.Types     (FromJSONKey (..), (.=))
+import           Control.Applicative            ( (<|>) )
+import           Data.Aeson.Types               ( (.=) )
 import           Data.Bits
-import qualified Data.ByteString.Lazy as B
-import qualified Data.Char            as C
-import           Data.Either          (either, lefts, rights)
-import qualified Data.Hashable        as Hashable
-import qualified Data.HashMap.Strict  as H
-import           Data.Maybe           (fromMaybe, isJust)
-import qualified Data.Scientific      as S
-import qualified Data.Text            as T
-import           Data.Vector          ((!))
-import qualified Data.Vector          as V
-import           Data.Yaml            (FromJSON (..), Parser, ToJSON (..), object)
-import qualified Data.Yaml            as Y
-import           Generics.SOP         (ConstructorName, DatatypeName, FieldName)
-import           Generics.SOP.JSON    (JsonFieldName, JsonOptions (..), JsonTagName, defaultJsonOptions, gparseJSON, gtoJSON)
-import           Generics.SOP.TH      (deriveGeneric)
+import qualified Data.ByteString.Lazy          as B
+import qualified Data.Char                     as C
+import           Data.Either                    ( either
+                                                , lefts
+                                                , rights
+                                                )
+import qualified Data.HashMap.Strict           as H
+import           Data.Maybe                     ( fromMaybe
+                                                , isJust
+                                                , fromJust
+                                                )
+import qualified Data.Scientific               as S
+import qualified Data.Text                     as T
+import           Data.Vector                    ( (!) )
+import qualified Data.Vector                   as V
+import           Data.Yaml                      ( FromJSON(..)
+                                                , Parser
+                                                , ToJSON(..)
+                                                , object
+                                                )
+import qualified Data.Yaml                     as Y
+import           Generics.SOP                   ( ConstructorName
+                                                , DatatypeName
+                                                , FieldName
+                                                )
+import           Generics.SOP.JSON              ( JsonFieldName
+                                                , JsonOptions(..)
+                                                , JsonTagName
+                                                , defaultJsonOptions
+                                                , gparseJSON
+                                                , gtoJSON
+                                                )
+import           Generics.SOP.TH                ( deriveGeneric )
 -- import           Debug.Trace
 
-import           Machine.Utils        (as0xHex, as0xHexS, asHex)
-import           Z80                  (Z80addr, Z80disp)
+import           Machine.Utils                  ( ShowHex(..)
+                                                , as0xHex
+                                                , as0xHexS
+                                                , asHex
+                                                )
+import           Z80                            ( Z80addr
+                                                , Z80disp
+                                                )
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Wrapper type for 'Z80addr' so that we can write our own 'Value' parser
-newtype Z80guidanceAddr =
-  Z80guidanceAddr {
-    unZ80guidanceAddr :: Z80addr
-  } deriving (Eq, Ord)
+data Z80guidanceAddr =
+    FromCurPC
+  |  GuidanceAddr Z80addr
+  deriving (Eq)
 
 instance Show Z80guidanceAddr where
-  show = as0xHexS . unZ80guidanceAddr
+  show FromCurPC           = "$"
+  show (GuidanceAddr addr) = as0xHexS addr
+
+instance ShowHex Z80guidanceAddr where
+  asHex FromCurPC           = "$"
+  asHex (GuidanceAddr addr) = as0xHex addr
 
 -- | Wrapper type for 'Z80disp' so that we can write our own 'Value' parser
 newtype Z80guidanceDisp =
@@ -68,11 +98,16 @@ instance Show Z80guidanceDisp where
 
 -- | Wrapper type for address ranges pairs. This accepts "[start address, end address]" or "start", "end"/"nbytes", "nBytes"
 -- attribute/value pairs.
-data Z80guidanceAddrRange = Z80guidanceAddrRange Z80addr Z80addr
-  deriving (Eq, Ord)
+data Z80guidanceAddrRange =
+    AbsRange Z80guidanceAddr Z80guidanceAddr
+  -- ^ Absolute range, where the end address is absolute
+  | RelRange Z80guidanceAddr Z80guidanceDisp
+  -- ^ Relative range, wher ethe end address is a displacement (i.e., relative)
+  deriving (Eq)
 
 instance Show Z80guidanceAddrRange where
-  show (Z80guidanceAddrRange sAddr eAddr) = "[" ++ as0xHexS sAddr ++ ", " ++ as0xHexS eAddr ++ "]"
+  show (AbsRange sAddr eAddr) = "AbsRange(" ++ as0xHexS sAddr ++ ", " ++ as0xHexS eAddr ++ ")"
+  show (RelRange sAddr disp ) = "RelRange(" ++ as0xHexS sAddr ++ ", " ++ (as0xHexS . unZ80guidanceDisp) disp ++ ")"
 
 -- | Wrapper type for MD5 signatures
 newtype Z80guidanceMD5Sig =
@@ -113,14 +148,22 @@ data Directive =
   | JumpTable Z80guidanceAddrRange
     -- Jump table start, table length
   | KnownSymbols (H.HashMap T.Text Z80guidanceAddr)
-    -- Mapping between addresses and symbols, more user friendly output
+    -- Mapping between symbols and addresses for a more user friendly output
   deriving (Eq, Show)
 
 deriveGeneric ''Directive
 deriveGeneric ''Guidance
 
 instance FromJSON Guidance where
-  parseJSON = gparseJSON guidanceFields
+  parseJSON json = gparseJSON guidanceFields json >>= check
+    where
+      check guidance
+        | origin guidance == FromCurPC
+        = fail "Disassembly origin cannot be '$'."
+        | endAddr guidance == FromCurPC
+        = fail "Disassembly end cannot be '$'."
+        | otherwise
+        = pure guidance
 
 instance ToJSON Guidance where
   toJSON = gtoJSON guidanceFields
@@ -132,10 +175,11 @@ instance ToJSON Directive where
   toJSON = gtoJSON guidanceFields
 
 instance FromJSON Z80guidanceAddr where
-  parseJSON = repackResult . parseZ80Addr
+  parseJSON = repackResult . parseZ80guidanceAddr
 
 instance ToJSON Z80guidanceAddr where
-  toJSON = Y.String . as0xHex . unZ80guidanceAddr
+  toJSON FromCurPC           = Y.String "$"
+  toJSON (GuidanceAddr addr) = (Y.String . as0xHex) addr
 
 instance FromJSON Z80guidanceDisp where
   parseJSON = repackResult . parseZ80Disp
@@ -143,166 +187,115 @@ instance FromJSON Z80guidanceDisp where
 instance ToJSON Z80guidanceDisp where
   toJSON = Y.String . as0xHex . unZ80guidanceDisp
 
--- | Use the default fromJSONKey implementation.
-instance FromJSONKey Z80guidanceAddr
--- | And make Z80guidanceAddr hashable (required by 'gparseJSON')
-instance Hashable.Hashable Z80guidanceAddr where
-  hashWithSalt salt = Hashable.hashWithSalt salt . unZ80guidanceAddr
-
--- | Use the default fromJSONKey implementation.
-instance FromJSONKey Z80guidanceDisp
--- | Make Z80guidanceDisp hashable (required by 'gparseJSON')
-instance Hashable.Hashable Z80guidanceDisp where
-  hashWithSalt salt = Hashable.hashWithSalt salt . unZ80guidanceDisp
-
 instance FromJSON Z80guidanceAddrRange where
   parseJSON (Y.Array vals)
-    | V.length vals /= 2
-    = fail "Address range must have 2 elements, [start, end]"
-    | otherwise
-    = yamlZ80addr (\sAddr -> yamlZ80addr (pure . Z80guidanceAddrRange sAddr) (vals ! 1)) (vals ! 0)
-  parseJSON (Y.Object attrs) = repackResult (parseStartAddr attrs)
-    where
-      parseStartAddr attrs' =
-        maybe (fail "Missing 'addr' attribute")
-              (mkStartEnd attrs')
-              (H.lookup "addr" attrs')
-      mkStartEnd attrs' {-yamlSAddr-} = yamlZ80addr (parseEndRange attrs')
-      parseEndRange attrs' sAddr = maybe (mkStartNBytes attrs' sAddr)
-                                         (yamlZ80addr (Right . Z80guidanceAddrRange sAddr))
-                                         (H.lookup "end" attrs')
-      mkStartNBytes attrs' sAddr =
-        maybe (fail "Address range needs 'end' or 'nbytes'/'nBytes'")
-              (yamlZ80disp (\nbytes -> Right $ Z80guidanceAddrRange sAddr (sAddr + fromIntegral nbytes)))
-              (H.lookup "nbytes" attrs' <|> H.lookup "nBytes" attrs')
-  parseJSON _ = fail "Address range requires 'start' and 'end' or 'nbytes'/'nBytes'"
+    | V.length vals /= 2 = fail "Address range must have 2 elements, [start, end]"
+    | otherwise          = repackResult $ AbsRange <$> parseZ80guidanceAddr (vals ! 1) <*> parseZ80guidanceAddr (vals ! 0)
+  parseJSON (Y.Object attrs) = repackResult $ parseAddrRange attrs
+  parseJSON _                = fail "Address range should have 'start' and 'end' or 'nbytes'/'nBytes' attributes"
 
 instance ToJSON Z80guidanceAddrRange where
-  toJSON (Z80guidanceAddrRange sAddr eAddr) = object ["addr" .= as0xHex sAddr, "nbytes" .= as0xHex (eAddr - sAddr)]
+  toJSON (AbsRange sAddr eAddr) = object ["addr" .= as0xHex sAddr, "end" .= as0xHex eAddr]
+  toJSON (RelRange sAddr disp ) = object ["addr" .= as0xHex sAddr, "nbytes" .= (as0xHex . unZ80guidanceDisp) disp]
 
 instance FromJSON Z80guidanceMD5Sig where
-  parseJSON (Y.String s) =
-    if all (\x -> T.compareLength x 2 == EQ) strChunks && length bytes == 16 && null errs
-      then pure $ (Z80guidanceMD5Sig . B.pack . rights) bytes
-      else (fail . T.unpack . T.unlines) errs
-    where
-        strChunks      = T.chunksOf 2 s
-        bytes          = map convertBytes strChunks
-        convertBytes x = fromIntegral <$> convertHex x
-        errs           = lefts bytes
-  parseJSON _            = fail "md5 signature expects a 16 byte hex string, no '0x'."
+  parseJSON (Y.String s) = if all (\x -> T.compareLength x 2 == EQ) strChunks && length bytes == 16 && null errs
+    then pure $ (Z80guidanceMD5Sig . B.pack . rights) bytes
+    else (fail . T.unpack . T.unlines) errs
+   where
+    strChunks = T.chunksOf 2 s
+    bytes     = map convertBytes strChunks
+    convertBytes x = fromIntegral <$> convertHex x
+    errs = lefts bytes
+  parseJSON _ = fail "md5 signature expects a 16 byte hex string, no '0x'."
 
 instance ToJSON Z80guidanceMD5Sig where
   toJSON = Y.String . T.concat . map asHex . B.unpack . unZ80guidanceMD5Sig
 
-yamlZ80addr :: Monad m
-            => (Z80addr -> m a)
-            -> Y.Value
-            -> m a
-yamlZ80addr f y = either (fail . T.unpack) (f . unZ80guidanceAddr) (parseZ80Addr y)
+parseZ80guidanceAddr :: Y.Value -> Either T.Text Z80guidanceAddr
+parseZ80guidanceAddr (Y.String strval) | strval == "$" = pure FromCurPC
+                                       | otherwise     = GuidanceAddr <$> convertZ80addr strval
+parseZ80guidanceAddr (Y.Number numval) =
+  maybe (fail "address exceeds 16-bit unsigned integer range") (pure <$> GuidanceAddr) (S.toBoundedInteger numval)
+parseZ80guidanceAddr invalid = fail $ "Invalid Z80 address: " ++ show invalid
 
-yamlZ80disp :: Monad m
-            => (Z80disp -> m a)
-            -> Y.Value
-            -> m a
-yamlZ80disp f y = either (fail . T.unpack) (f . unZ80guidanceDisp) (parseZ80Disp y)
+parseAddrRange :: H.HashMap T.Text Y.Value -> Either T.Text Z80guidanceAddrRange
+parseAddrRange attrs = maybe (fail "Missing 'addr' attribute")
+                             parseRange
+                             (H.lookup "addr" attrs)
+ where
+  endAddrAttr = H.lookup "end" attrs
+  nBytesAttr  = H.lookup "nbytes" attrs <|> H.lookup "nBytes" attrs
+  parseRange sAddrAttr
+    | isJust endAddrAttr
+    = AbsRange <$> parseZ80guidanceAddr sAddrAttr <*> parseZ80guidanceAddr (fromJust endAddrAttr)
+    | isJust nBytesAttr
+    = RelRange <$> parseZ80guidanceAddr sAddrAttr <*>  parseZ80Disp (fromJust nBytesAttr)
+    | otherwise
+    = fail "Incomplete address range: Missing 'end' or 'nbytes'/'nBytes' attributes."
 
-repackResult :: Either T.Text a
-             -> Parser a
-repackResult = either (fail . T.unpack) pure
+parseZ80Disp :: Y.Value -> Either T.Text Z80guidanceDisp
+parseZ80Disp (Y.String strval) = Z80guidanceDisp <$> convertZ80disp strval
+parseZ80Disp (Y.Number numval) =
+  maybe (fail "displacement exceeds 16-bit signed integer range") (pure <$> Z80guidanceDisp) (S.toBoundedInteger numval)
+parseZ80Disp invalid = fail $ "Invalid Z80 displacement: " ++ show invalid
+
+repackResult :: Either T.Text a -> Parser a
+repackResult = either (fail <$> T.unpack) pure
 
 guidanceFields :: JsonOptions
-guidanceFields =
-  defaultJsonOptions
-  { jsonFieldName  = renameFields
-  , jsonTagName    = renameDirective
-  }
+guidanceFields = defaultJsonOptions { jsonFieldName = renameFields, jsonTagName = renameDirective }
 
-renameFields :: DatatypeName
-               -> FieldName
-               -> JsonFieldName
+renameFields :: DatatypeName -> FieldName -> JsonFieldName
 renameFields "Guidance"  "endAddr"  = "end"
 renameFields "Guidance"  "sections" = "section"
 renameFields "Guidance"  "origin"   = "origin"
 renameFields "Directive" fname      = renameDirective fname
 renameFields dtName      fname      = dtName ++ ":" ++ fname
 
-renameDirective :: ConstructorName
-                -> JsonTagName
-renameDirective tag = fromMaybe ("unknown Directive tag: " ++ tag)  $ H.lookup tag directiveRenameTable
+renameDirective :: ConstructorName -> JsonTagName
+renameDirective tag = fromMaybe ("unknown Directive tag: " ++ tag) $ H.lookup tag directiveRenameTable
 
 -- | Translation table mapping 'Directive' constructor names to tags in the YAML/JSON source
 directiveRenameTable :: H.HashMap String String
-directiveRenameTable =
-  H.fromList [ ("MD5Sum",       "md5")
-             , ("SymEquate",    "equate")
-             , ("Comment",      "comment")
-             , ("DoDisasm",     "disasm")
-             , ("GrabBytes",    "bytes")
-             , ("GrabAsciiZ",   "asciiz")
-             , ("GrabAscii",    "ascii")
-             , ("HighBitTable", "highbits")
-             , ("JumpTable",    "jumptable")
-             , ("KnownSymbols", "symbols")
-             ]
-
-parseZ80Addr :: Y.Value
-             -> Either T.Text Z80guidanceAddr
-parseZ80Addr (Y.String strval) = Z80guidanceAddr <$> convertZ80addr strval
-parseZ80Addr (Y.Number numval) = maybe (fail "address exceeds 16-bit unsigned integer range")
-                                       (pure . Z80guidanceAddr)
-                                       (S.toBoundedInteger numval)
-parseZ80Addr invalid           = fail $ "Invalid Z80 address: " ++ show invalid
-
-parseZ80Disp :: Y.Value
-             -> Either T.Text Z80guidanceDisp
-parseZ80Disp (Y.String strval)  = Z80guidanceDisp <$> convertZ80disp strval
-parseZ80Disp (Y.Number numval)  = maybe (fail "displacement exceeds 16-bit signed integer range")
-                                        (pure . Z80guidanceDisp)
-                                        (S.toBoundedInteger numval)
-parseZ80Disp invalid            = fail $ "Invalid Z80 displacement: " ++ show invalid
+directiveRenameTable = H.fromList
+  [ ("MD5Sum"      , "md5")
+  , ("SymEquate"   , "equate")
+  , ("Comment"     , "comment")
+  , ("DoDisasm"    , "disasm")
+  , ("GrabBytes"   , "bytes")
+  , ("GrabAsciiZ"  , "asciiz")
+  , ("GrabAscii"   , "ascii")
+  , ("HighBitTable", "highbits")
+  , ("JumpTable"   , "jumptable")
+  , ("KnownSymbols", "symbols")
+  ]
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Convert a text string to a Z80 address. The converted value's range is checked to ensure it is
 -- a proper 16-bit quantity.
-convertZ80addr :: T.Text
-               -> Either T.Text Z80addr
+convertZ80addr :: T.Text -> Either T.Text Z80addr
 convertZ80addr str = convertWord16 str >>= checkRange minZ80addr maxZ80addr
 
 -- | Convert a text string to a Z80 displacement. The converted value's range is checked to ensure it is
 -- a proper 16-bit quantity.
-convertZ80disp :: T.Text
-               -> Either T.Text Z80disp
+convertZ80disp :: T.Text -> Either T.Text Z80disp
 convertZ80disp str = convertWord16 str >>= checkRange minZ80disp maxZ80disp
 
 -- | Ensure that a converted value (see 'convertZ80addr' and 'convertZ80disp') is properly bounded.
 checkRange :: (Integral a) => Int -> Int -> Int -> Either T.Text a
 checkRange lower upper val
-  | val >= lower && val <= upper
-  = Right (fromIntegral val)
-  | otherwise
-  = Left $ T.concat ["Value range exceeded ("
-                    , T.pack (show lower)
-                    , " <= x <= "
-                    , T.pack (show upper)
-                    , "): "
-                    , T.pack (show val)
-                    ]
+  | val >= lower && val <= upper = Right (fromIntegral val)
+  | otherwise = Left
+  $ T.concat ["Value range exceeded (", T.pack (show lower), " <= x <= ", T.pack (show upper), "): ", T.pack (show val)]
 
-convertWord16 :: T.Text
-              -> Either T.Text Int
-convertWord16 t
-  | T.isPrefixOf "0x" t
-  = convertHex (T.drop 2 t)
-  | T.isPrefixOf "0o" t
-  = convertOctal (T.drop 2 t)
-  | T.isPrefixOf "0" t
-  = convertOctal (T.tail t)
-  | otherwise
-  = convertNum 10 C.isDigit "Invalid decimal constant" t
-  | otherwise
-  = Left (T.concat ["Invalid 16-bit constant: '", t, T.singleton '\''])
+convertWord16 :: T.Text -> Either T.Text Int
+convertWord16 t | T.isPrefixOf "0x" t = convertHex (T.drop 2 t)
+                | T.isPrefixOf "0o" t = convertOctal (T.drop 2 t)
+                | T.isPrefixOf "0" t  = convertOctal (T.tail t)
+                | otherwise           = convertNum 10 C.isDigit "Invalid decimal constant" t
+                | otherwise           = Left (T.concat ["Invalid 16-bit constant: '", t, T.singleton '\''])
 
 convertHex, convertOctal :: T.Text -> Either T.Text Int
 convertHex = convertNum 16 C.isHexDigit "Invalid hexadecimal constant"
@@ -320,56 +313,45 @@ minZ80disp = fromIntegral (minBound :: Z80disp)
 maxZ80disp :: Int
 maxZ80disp = fromIntegral (maxBound :: Z80disp)
 
-convertNum :: Int
-           -> (Char -> Bool)
-           -> T.Text
-           -> T.Text
-           -> Either T.Text Int
-convertNum base digitValid errMsg str =
-  if T.all digitValid str
-     then Right $ str2Num str
-     else Left $ T.concat [errMsg, ": '", str, T.singleton '\'']
-  where
-    str2Num {-str-} = fst . T.mapAccumR digit2num 0 . T.reverse
-      where
-        digit2num v c  = (v * base + digitCorrect c, c)
-        -- For base 8 and base 10, no correction needed. For hex, this takes care of 'A'-'F'
-        digitCorrect c = let i = fromEnum c
-                         in  (i .&. 0xf) + ((i .&. 0x40) `shiftR` 6) * 9
+convertNum :: Int -> (Char -> Bool) -> T.Text -> T.Text -> Either T.Text Int
+convertNum base digitValid errMsg str = if T.all digitValid str
+  then Right $ str2Num str
+  else Left $ T.concat [errMsg, ": '", str, T.singleton '\'']
+ where
+  str2Num = fst . T.mapAccumR digit2num 0 . T.reverse {-str-}
+   where
+    digit2num v c = (v * base + digitCorrect c, c)
+    -- For base 8 and base 10, no correction needed. For hex, this takes care of 'A'-'F'
+    digitCorrect c = let i = fromEnum c in (i .&. 0xf) + ((i .&. 0x40) `shiftR` 6) * 9
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-getKnownSymbols :: V.Vector Directive
-                -> H.HashMap T.Text Z80guidanceAddr
-getKnownSymbols dirs = let knownSymbols (KnownSymbols _) = True
-                           knownSymbols _                = False
-                       in  maybe H.empty
-                                 (\(KnownSymbols syms) -> syms)
-                                 (V.find knownSymbols dirs)
+getKnownSymbols :: V.Vector Directive -> H.HashMap T.Text Z80guidanceAddr
+getKnownSymbols dirs =
+  let knownSymbols (KnownSymbols _) = True
+      knownSymbols _                = False
+  in  maybe H.empty (\(KnownSymbols syms) -> syms) (V.find knownSymbols dirs)
 
-invertKnownSymbols :: V.Vector Directive
-                   -> H.HashMap Z80addr T.Text
-invertKnownSymbols {-guidance-} = H.fromList . map flipSymAddr . H.toList . getKnownSymbols
-  where
-    flipSymAddr (sym, addr)  = (unZ80guidanceAddr addr, sym)
+invertKnownSymbols :: V.Vector Directive -> H.HashMap Z80addr T.Text
+invertKnownSymbols = H.fromList . map flipSymAddr . H.toList . getKnownSymbols {-guidance-}
+ where
+  flipSymAddr (sym, (GuidanceAddr addr)) = (addr, sym)
+  flipSymAddr (sym, FromCurPC          ) = error ("'$' used in symbol " ++ show sym)
 
-getMatchingSection :: Guidance
-                   -> B.ByteString
-                   -> Maybe (V.Vector Directive)
+getMatchingSection :: Guidance -> B.ByteString -> Maybe (V.Vector Directive)
 getMatchingSection g md5sum =
-  let matchesMD5 dirs  = isJust $ V.find (\case
-                                           (MD5Sum sig) -> md5sum == unZ80guidanceMD5Sig sig
-                                           _            -> False
-                                         )
-                                         dirs
-      filteredSects    = H.filter matchesMD5 . sections
-      sectKeys         = H.keys $ filteredSects g
-  in  if not (null $ filteredSects g) && length sectKeys == 1
-      then Just (filteredSects g H.! head sectKeys)
-      else Nothing
+  let matchesMD5 dirs = isJust $ V.find
+        (\case
+          (MD5Sum sig) -> md5sum == unZ80guidanceMD5Sig sig
+          _            -> False
+        )
+        dirs
+      filteredSects = H.filter matchesMD5 . sections
+      sectKeys      = H.keys $ filteredSects g
+  in  if not (null $ filteredSects g) && length sectKeys == 1 then Just (filteredSects g H.! head sectKeys) else Nothing
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
+{-
 instance Integral Z80guidanceAddr where
   quotRem (Z80guidanceAddr addr) (Z80guidanceAddr divisor)   = (Z80guidanceAddr q, Z80guidanceAddr r)
     where (q, r) = quotRem addr divisor
@@ -393,10 +375,10 @@ instance Real Z80guidanceAddr where
 instance Bounded Z80guidanceAddr where
   minBound = Z80guidanceAddr (minBound :: Z80addr)
   maxBound = Z80guidanceAddr (maxBound :: Z80addr)
-
+-}
 -- And its instances:
 instance Integral Z80guidanceDisp where
-  quotRem (Z80guidanceDisp addr) (Z80guidanceDisp divisor)   = (Z80guidanceDisp q, Z80guidanceDisp r)
+  quotRem (Z80guidanceDisp addr) (Z80guidanceDisp divisor) = (Z80guidanceDisp q, Z80guidanceDisp r)
     where (q, r) = quotRem addr divisor
   toInteger (Z80guidanceDisp addr) = toInteger addr
 

@@ -26,13 +26,16 @@ module Z80.InstructionSet
   , idxRegNameMap
   , idxRegNameToReg
   , specialRegNames
-  ) where
+  )
+where
 
 import           Data.Data
 import           Data.Int
-import           Data.Map (Map, (!))
-import qualified Data.Map as Map
-import qualified Data.Text as T
+import           Data.Map                       ( Map
+                                                , (!)
+                                                )
+import qualified Data.Map                      as Map
+import qualified Data.Text                     as T
 
 import           Machine
 import           Z80.Processor
@@ -40,120 +43,129 @@ import           Z80.Processor
 -- | The Z80 instruction set
 data Z80instruction where
   -- Undefined/invalid instruction
-  Z80undef                                 :: [Z80word]
+  Z80undef                                 ::[Z80word]
                                            -> Z80instruction
 
   -- Unified load/store (reg8/reg8, 16-bit imm, accumulator, 16-bit indirect)
-  LD                                       :: OperLD
+  LD                                       ::OperLD
                                            -> Z80instruction
 
   -- Increment/decrement registers
-  INC                                      :: Z80reg8
+  INC                                      ::Z80reg8
                                            -> Z80instruction
-  DEC                                      :: Z80reg8
+  DEC                                      ::Z80reg8
                                            -> Z80instruction
-  INC16                                    :: RegPairSP
+  INC16                                    ::RegPairSP
                                            -> Z80instruction
-  DEC16                                    :: RegPairSP
+  DEC16                                    ::RegPairSP
                                            -> Z80instruction
   --- ALU group: ADD, ADC, SUB, SBC, AND, XOR, OR and CP
   -- ADD HL, rp and ADC/SBC HL, rp
-  SUB                                      :: OperALU
+  SUB                                      ::OperALU
                                            -> Z80instruction
-  AND                                      :: OperALU
+  AND                                      ::OperALU
                                            -> Z80instruction
-  XOR                                      :: OperALU
+  XOR                                      ::OperALU
                                            -> Z80instruction
-  OR                                       :: OperALU
+  OR                                       ::OperALU
                                            -> Z80instruction
-  CP                                       :: OperALU
+  CP                                       ::OperALU
                                            -> Z80instruction
 
-  ADD                                      :: OperExtendedALU
+  ADD                                      ::OperExtendedALU
                                            -> Z80instruction
-  ADC                                      :: OperExtendedALU
+  ADC                                      ::OperExtendedALU
                                            -> Z80instruction
-  SBC                                      :: OperExtendedALU
+  SBC                                      ::OperExtendedALU
                                            -> Z80instruction
 
   -- HALT; NOP; Exchanges; DI; EI; JP HL; LD SP, HL
-  HALT                                     :: Z80instruction
-  NOP                                      :: Z80instruction
-  DI                                       :: Z80instruction
-  EI                                       :: Z80instruction
-  JPHL                                     :: Z80instruction
-  LDSPHL                                   :: Z80instruction
+  HALT                                     ::Z80instruction
+  NOP                                      ::Z80instruction
+  DI                                       ::Z80instruction
+  EI                                       ::Z80instruction
+  JPHL                                     ::Z80instruction
+  LDSPHL                                   ::Z80instruction
   -- Exchanges:
-  EXC                                      :: Z80ExchangeOper
+  EXC                                      ::Z80ExchangeOper
                                            -> Z80instruction
   -- Accumulator ops: RLCA, RRCA, RLA, RRA, DAA, CPL, SCF, CCF
-  RLCA, RRCA, RLA, RRA, DAA, CPL, SCF, CCF :: Z80instruction
+  RLCA                                     ::Z80instruction
+  RRCA                                     ::Z80instruction
+  RLA                                      ::Z80instruction
+  RRA                                      ::Z80instruction
+  DAA                                      ::Z80instruction
+  CPL                                      ::Z80instruction
+  SCF                                      ::Z80instruction
+  CCF                                      ::Z80instruction
   -- Relative jumps: DJNZ and JR. Note: Even though these are relative jumps, the address is stored
   -- since it's easy to recompute the displacement.
-  DJNZ                                     :: SymAbsAddr Z80addr
+  DJNZ                                     ::SymAbsAddr Z80addr
                                            -> Z80instruction
-  JR                                       :: SymAbsAddr Z80addr
+  JR                                       ::SymAbsAddr Z80addr
                                            -> Z80instruction
-  JRCC                                     :: Z80condC
+  JRCC                                     ::Z80condC
                                            -> SymAbsAddr Z80addr
                                            -> Z80instruction
   -- Jumps
-  JP                                       :: SymAbsAddr Z80addr
+  JP                                       ::SymAbsAddr Z80addr
                                            -> Z80instruction
-  JPCC                                     :: Z80condC
+  JPCC                                     ::Z80condC
                                            -> SymAbsAddr Z80addr
                                            -> Z80instruction
   -- I/O instructions
-  IN, OUT                                  :: OperIO
+  IN                                       ::OperIO
+                                           -> Z80instruction
+  OUT                                      ::OperIO
                                            -> Z80instruction
   -- Subroutine call
-  CALL                                     :: SymAbsAddr Z80addr
+  CALL                                     ::SymAbsAddr Z80addr
                                            -> Z80instruction
-  CALLCC                                   :: Z80condC
+  CALLCC                                   ::Z80condC
                                            -> SymAbsAddr Z80addr
                                            -> Z80instruction
   -- Return
-  RET                                      :: Z80instruction
-  RETCC                                    :: Z80condC
+  RET                                      ::Z80instruction
+  RETCC                                    ::Z80condC
                                            -> Z80instruction
   -- Push, pop
-  PUSH, POP                                :: RegPairAF
+  PUSH, POP                                ::RegPairAF
                                            -> Z80instruction
   -- Restart
-  RST                                      :: Z80word
+  RST                                      ::Z80word
                                            -> Z80instruction
 
   -- 0xcb prefix instructions:
   -- RLC, RRC, RL, RR, SLA, SRA, SLL, SRL, BIT, RES, SET
-  RLC, RRC, RL, RR, SLA, SRA, SLL, SRL     :: Z80reg8
+  RLC, RRC, RL, RR, SLA, SRA, SLL, SRL     ::Z80reg8
                                            -> Z80instruction
-  BIT, RES, SET                            :: Z80word                      -- Bit within byte to set/reset/test
+  BIT, RES, SET                            ::Z80word                      -- Bit within byte to set/reset/test
                                            -> Z80reg8
                                            -> Z80instruction
   -- 0xcb prefix, undocumented IX- and IY-indexed, with result copied into an 8-bit register
-  RLCidx, RRCidx, RLidx, RRidx, SLAidx, SRAidx, SLLidx, SRLidx :: Z80reg8
+  RLCidx, RRCidx, RLidx, RRidx, SLAidx, SRAidx, SLLidx, SRLidx ::Z80reg8
                                                                -> Z80reg8
                                                                -> Z80instruction
-  BITidx, RESidx, SETidx                   :: Z80word
+  BITidx, RESidx, SETidx                   ::Z80word
                                            -> Z80reg8
                                            -> Z80reg8
                                            -> Z80instruction
   -- 0xed prefix instructions:
   -- Negate accumulator
-  NEG                                      :: Z80instruction
+  NEG                                      ::Z80instruction
 
   -- RETI, RETN: Return from interrupt, non-maskable interrupt
-  RETI, RETN                               :: Z80instruction
+  RETI, RETN                               ::Z80instruction
 
   -- Interrupt mode
-  IM                                       :: Z80word
+  IM                                       ::Z80word
                                            -> Z80instruction
 
   -- Rotate right/left, decimal
-  RRD, RLD                                 :: Z80instruction
+  RRD, RLD                                 ::Z80instruction
 
   -- Increment, Increment-Repeat instructions
-  LDI, CPI, INI, OUTI, LDD, CPD, IND, OUTD, LDIR, CPIR, INIR, OTIR, LDDR, CPDR, INDR, OTDR :: Z80instruction
+  LDI, CPI, INI, OUTI, LDD, CPD, IND, OUTD, LDIR, CPIR, INIR, OTIR, LDDR, CPDR, INDR, OTDR ::Z80instruction
 
   deriving (Show, Typeable, Data)
 
@@ -161,40 +173,40 @@ data Z80instruction where
 
 -- | Unified load/store operands:
 data OperLD where
-  Reg8Reg8           :: Z80reg8
+  Reg8Reg8           ::Z80reg8
                      -> Z80reg8
                      -> OperLD
-  Reg8Imm            :: Z80reg8
+  Reg8Imm            ::Z80reg8
                      -> Z80word
                      -> OperLD
   -- Load accumulator
-  AccBCIndirect      :: OperLD
-  AccDEIndirect      :: OperLD
-  AccImm16Indirect   :: SymAbsAddr Z80addr
+  AccBCIndirect      ::OperLD
+  AccDEIndirect      ::OperLD
+  AccImm16Indirect   ::SymAbsAddr Z80addr
                      -> OperLD
-  AccIReg            :: OperLD
-  AccRReg            :: OperLD
+  AccIReg            ::OperLD
+  AccRReg            ::OperLD
   -- Store accumulator
-  BCIndirectStore    :: OperLD
-  DEIndirectStore    :: OperLD
-  Imm16IndirectStore :: SymAbsAddr Z80addr
+  BCIndirectStore    ::OperLD
+  DEIndirectStore    ::OperLD
+  Imm16IndirectStore ::SymAbsAddr Z80addr
                      -> OperLD
-  IRegAcc            :: OperLD
-  RRegAcc            :: OperLD
+  IRegAcc            ::OperLD
+  RRegAcc            ::OperLD
   -- 16-bit immediate load
-  RPair16ImmLoad     :: RegPairSP
+  RPair16ImmLoad     ::RegPairSP
                      -> SymAbsAddr Z80addr
                      -> OperLD
   -- HL indirect: (nn), HL and HL, (nn)
-  HLIndirectStore    :: SymAbsAddr Z80addr
+  HLIndirectStore    ::SymAbsAddr Z80addr
                      -> OperLD
-  HLIndirectLoad     :: SymAbsAddr Z80addr
+  HLIndirectLoad     ::SymAbsAddr Z80addr
                      -> OperLD
   -- 16-bit indirect loads and stores, e.g. LD BC, (4000H) [load BC from the contents of 0x4000]
-  RPIndirectLoad     :: RegPairSP
+  RPIndirectLoad     ::RegPairSP
                      -> SymAbsAddr Z80addr
                      -> OperLD
-  RPIndirectStore    :: RegPairSP
+  RPIndirectStore    ::RegPairSP
                      -> SymAbsAddr Z80addr
                      -> OperLD
   deriving (Show, Typeable, Data)
@@ -203,102 +215,102 @@ data OperLD where
 
 -- | ALU operands
 data OperALU where
-  ALUimm        :: Z80word
+  ALUimm        ::Z80word
                 -> OperALU
-  ALUreg8       :: Z80reg8
+  ALUreg8       ::Z80reg8
                 -> OperALU
-  ALUHLindirect :: OperALU
+  ALUHLindirect ::OperALU
   deriving (Show, Typeable, Data)
 
 -- | ALU operations that can also extend to use HL and register pair
 data OperExtendedALU where
-  ALU8  :: OperALU
+  ALU8  ::OperALU
         -> OperExtendedALU
-  ALU16 :: RegPairSP
+  ALU16 ::RegPairSP
         -> OperExtendedALU
   deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 data OperIO where
-  PortImm :: Z80word
+  PortImm ::Z80word
           -> OperIO
-  CIndIO  :: Z80reg8
+  CIndIO  ::Z80reg8
           -> OperIO
-  CIndIO0 :: OperIO
+  CIndIO0 ::OperIO
   deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 data Z80condC where
-  NZ  :: Z80condC
-  Z   :: Z80condC
-  NC  :: Z80condC
-  CY  :: Z80condC
-  PO  :: Z80condC
-  PE  :: Z80condC
-  POS :: Z80condC
-  MI  :: Z80condC
+  NZ  ::Z80condC
+  Z   ::Z80condC
+  NC  ::Z80condC
+  CY  ::Z80condC
+  PO  ::Z80condC
+  PE  ::Z80condC
+  POS ::Z80condC
+  MI  ::Z80condC
   deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Z80 8-bit registers, as operands. This also includes '(HL)' and the indexed+displacement for symmetry.
 data Z80reg8 where
-  A          :: Z80reg8                         -- Index 7
-  B          :: Z80reg8                         -- Index 0
-  C          :: Z80reg8                         -- Index 1
-  D          :: Z80reg8                         -- Index 2
-  E          :: Z80reg8                         -- Index 3
-  H          :: Z80reg8                         -- Index 4
-  L          :: Z80reg8                         -- Index 5
-  HLindirect :: Z80reg8                         -- Index 6
-  IXindirect :: Int8                            -- IX + byte displacement
+  A          ::Z80reg8                         -- Index 7
+  B          ::Z80reg8                         -- Index 0
+  C          ::Z80reg8                         -- Index 1
+  D          ::Z80reg8                         -- Index 2
+  E          ::Z80reg8                         -- Index 3
+  H          ::Z80reg8                         -- Index 4
+  L          ::Z80reg8                         -- Index 5
+  HLindirect ::Z80reg8                         -- Index 6
+  IXindirect ::Int8                            -- IX + byte displacement
              -> Z80reg8
-  IYindirect :: Int8                            -- IY + byte displacement
+  IYindirect ::Int8                            -- IY + byte displacement
              -> Z80reg8
   -- Z80 actually implements IX and IY as two 8-bit registers each. Which means
   -- that the instruction decoding transforms can also load constants into these
   -- half-registers and other unworldly tricks involving the H and L registers.
-  IXh        :: Z80reg8
-  IXl        :: Z80reg8
-  IYh        :: Z80reg8
-  IYl        :: Z80reg8
+  IXh        ::Z80reg8
+  IXl        ::Z80reg8
+  IYh        ::Z80reg8
+  IYl        ::Z80reg8
   deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 data Z80reg16 where
-  BC :: Z80reg16
-  DE :: Z80reg16
-  HL :: Z80reg16
-  IX :: Z80reg16
-  IY :: Z80reg16
+  BC ::Z80reg16
+  DE ::Z80reg16
+  HL ::Z80reg16
+  IX ::Z80reg16
+  IY ::Z80reg16
   deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Register pair that includes SP (instead of AF)
 data RegPairSP where
-  RPair16 :: Z80reg16
+  RPair16 ::Z80reg16
           -> RegPairSP
-  SP      :: RegPairSP
+  SP      ::RegPairSP
   deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Register pair that includes AF (instead of SP)
 data RegPairAF where
-  AFPair16 :: Z80reg16
+  AFPair16 ::Z80reg16
            -> RegPairAF
-  AF       :: RegPairAF
+  AF       ::RegPairAF
   deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Exchange instruction arguments
 data Z80ExchangeOper where
-  AFAF'  :: Z80ExchangeOper     -- AF with AF'
-  DEHL   :: Z80ExchangeOper     -- DE with HL
-  SPHL   :: Z80ExchangeOper     -- SP with HL
-  Primes :: Z80ExchangeOper     -- EXX (regular <-> primes)
+  AFAF'  ::Z80ExchangeOper     -- AF with AF'
+  DEHL   ::Z80ExchangeOper     -- DE with HL
+  SPHL   ::Z80ExchangeOper     -- SP with HL
+  Primes ::Z80ExchangeOper     -- EXX (regular <-> primes)
   deriving (Show, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -307,38 +319,23 @@ data Z80ExchangeOper where
 
 -- | Utility mapping from lower case register names to 'Z80reg8' data constructors
 reg8NameMap :: Map T.Text Z80reg8
-reg8NameMap = Map.fromList [ ("a", A)
-                           , ("b", B)
-                           , ("c", C)
-                           , ("d", D)
-                           , ("e", E)
-                           , ("h", H)
-                           , ("l", L)
-                           ]
+reg8NameMap = Map.fromList [("a", A), ("b", B), ("c", C), ("d", D), ("e", E), ("h", H), ("l", L)]
 
 -- | Convert 8-bit register name to 'Z80reg8' data constructor. This will call 'error' if the lookup fails.
-reg8NameToReg :: T.Text
-              -> Z80reg8
+reg8NameToReg :: T.Text -> Z80reg8
 reg8NameToReg reg = reg8NameMap ! reg
 
 reg16NameMap :: Map T.Text Z80reg16
-reg16NameMap = Map.fromList [ ("bc", BC)
-                            , ("de", DE)
-                            , ("hl", HL)
-                            ]
+reg16NameMap = Map.fromList [("bc", BC), ("de", DE), ("hl", HL)]
 -- | Convert regular 16-bit register name to 'Z80reg16' data constructor. This will call 'error' if the lookup fails.
-reg16NameToReg :: T.Text
-               -> Z80reg16
+reg16NameToReg :: T.Text -> Z80reg16
 reg16NameToReg reg = reg16NameMap ! reg
 
 idxRegNameMap :: Map T.Text Z80reg16
-idxRegNameMap = Map.fromList [ ("ix", IX)
-                             , ("iy", IY)
-                             ]
+idxRegNameMap = Map.fromList [("ix", IX), ("iy", IY)]
 -- | Convert index register name to 'Z80reg16' data constructor. This will call 'error' if the lookup fails.
-idxRegNameToReg :: T.Text
-                -> Z80reg16
+idxRegNameToReg :: T.Text -> Z80reg16
 idxRegNameToReg reg = idxRegNameMap ! reg
 
 specialRegNames :: [T.Text]
-specialRegNames = [ "sp", "af", "i", "r" ]
+specialRegNames = ["sp", "af", "i", "r"]

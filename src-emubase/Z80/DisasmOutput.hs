@@ -49,11 +49,11 @@ z80AnalyticDisassembly :: Z80disassembly
 z80AnalyticDisassembly dstate disasmSeq =
   -- Append the symbol table to the formatted instruction sequence
   -- Unfortunately (maybe not...?) the foldl results in the concatenation of many singletons.
-  formattedDisSeq dstate
+  formattedDisSeq dstate Seq.empty
   where
-    formattedDisSeq z80dstate = Foldable.foldl formatElem Seq.empty $ fixupSymbols z80dstate disasmSeq
-    formatElem accSeq (DisasmInsn addr bytes ins cmnt) = accSeq >< formatLinePrefix bytes addr (formatIns ins cmnt)
-    formatElem accSeq pseudo                           = accSeq >< formatPseudo pseudo
+    formattedDisSeq z80dstate = Foldable.foldl formatElem (Seq.empty ><) $ fixupSymbols z80dstate disasmSeq
+    formatElem accSeq (DisasmInsn addr bytes ins cmnt) = ((accSeq $ formatLinePrefix bytes addr (formatIns ins cmnt)) ><)
+    formatElem accSeq pseudo                           = ((accSeq $ formatPseudo pseudo) ><)
 
 -- | Generate the "analytic" version of the output (opcodes, ASCII representation) and output to an 'IO' handle.
 z80AnalyticDisassemblyOutput :: Handle
