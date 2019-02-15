@@ -557,8 +557,14 @@ section:
         nbytes: 0x0004
         addr: 0x1593
     - disasm:
-        nbytes: 0x00b8
-        addr: 0x1597
+        addr: $
+        end: 0x1608
+    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - comment: BASIC function jump table
+    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - jumptable:
+        addr: $
+        end: 0x1650
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - comment: BASIC verb table -- first character has high bit set
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -816,10 +822,13 @@ section:
         SPSUB_IND_HL: 0x0710
         SPSUB_BCDE: 0x0713
         SPADD_BCDE: 0x0716
+        BASLOG: 0x0809
         SPMUL_BCDE: 0x0847
         SPDIV_BCDE: 0x08a2
         ACCISZERO: 0x0955
+        BASABS: 0x0977
         NEG_MANTISSA: 0x0982
+        BASSGN: 0x098a
         BCDE_VIA_HL: 0x09c2
         CPHL2DE: 0x09d2
         CPDE2HL: 0x09d3
@@ -829,6 +838,8 @@ section:
         CDBL: 0x0adb
         ISNTFSTR: 0x0af4
         # Integer math functions
+        BASFIX: 0x0b26
+        BASINT: 0x0b37
         INTADD: 0x0bd2
         INTSUB: 0x0bc7
         INTMPY: 0x0bf2
@@ -900,6 +911,7 @@ section:
         NUMTYPE: 0x25d9
         BASDIM: 0x2608
         GENOUTPUT: 0x28a7
+        BASINP: 0x2aef
         CVTACC2INT: 0x2b05
         CVTHEXVAL: 0x2b1c
 ...

@@ -303,7 +303,7 @@ jumpTable :: Z80disp
           -- ^ Current disassembly state
           -> (Seq.Seq Z80DisasmElt, Z80disassembly)
           -- ^ Resulting diassembly state
-jumpTable nBytes dstate = first Seq.fromList $ runState (sequence [state genAddr | _elt <- [0..nBytes `div` 2]]) dstate
+jumpTable nBytes dstate = first Seq.fromList $ runState (sequence [state genAddr | _elt <- [0..(nBytes - 2) `div` 2]]) dstate
   where
     genAddr dstate'        = first (genPseudo dstate') $ disasmMReadN 2 dstate'
     genPseudo dstate' addr = mkAddr (views disasmCurAddr unPC dstate') ((AbsAddr . flipWords) addr) addr
