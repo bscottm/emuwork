@@ -240,7 +240,7 @@ doDirective directive dstate =
       let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
       in  first Seq.singleton $ z80disbytes nBytes (dstate & disasmCurAddr .~ sAddr)
     G.GrabAsciiZ sAddr ->
-      first Seq.singleton $ z80disasciiz (dstate & disasmCurAddr .~ getGuidanceAddr dstate sAddr)
+      z80disasciiz (dstate & disasmCurAddr .~ getGuidanceAddr dstate sAddr)
     G.GrabAscii addrRange ->
       let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
       in  first Seq.singleton $ z80disascii nBytes (dstate & disasmCurAddr .~ sAddr)
@@ -313,12 +313,12 @@ jumpTable nBytes dstate = first Seq.fromList $ runState (sequence [state genAddr
 -- | Post-processing for RST 8 "macros" in the TRS-80 ROM. RST 08 is always followed
 -- by a character; (HL) is compared to this following character and flags set.
 trs80RomPostProcessor :: DisElementPostProc Z80state Z80instruction Z80addr Z80word Z80PseudoOps
-trs80RomPostProcessor (DisasmInsn _ _ (RST 8) _) dstate =
+trs80RomPostProcessor rst08@(DisasmInsn _ _ (RST 8) _) dstate =
   let curPC = views disasmCurAddr unPC dstate
       (byte, dstate') = disasmMRead dstate
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
       pseudo = if byte >= 0x20 && byte <= 0x7f then mkAscii else mkByteRange
-  in  (Seq.singleton $ pseudo curPC (DVU.singleton byte), dstate')
+  in  (Seq.singleton rst08 |> pseudo curPC (DVU.singleton byte), dstate')
 -- Otherwise, just append the instruction onto the disassembly sequence.
 trs80RomPostProcessor elt dstate = z80DefaultPostProcessor elt dstate
 

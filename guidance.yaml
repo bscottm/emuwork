@@ -135,18 +135,7 @@ section:
         addr: $
         end: 0x0010
     - comment: |+
-        RST l0H jumps to DEFRST10 through RST10VEC. This routine INCrements HL
-        and tests the characters pointed to by the HL register pair. It
-        will bypass any spaces and CHAR'S 9 and 10 (shifted left and down
-        arrows respectively). Upon return from this routine HL will point
-        to the next non-blank character.
-
-        C flag will be SET if HL is pointing to a numeric ASCII character and
-        the Z flag will be SET if the character pointed to happens to be zero
-        (ASCII 30H) or 3AH (":").
-
-        BC and DE registers are unaffected. This routine can be used by
-        CALLing 1D78H or RST 10H.
+        RST 10H jumps to DEFRST10 through RST10VEC.
     - disasm:
         addr: $
         end: 0x0050
@@ -156,18 +145,8 @@ section:
     - disasm:
         addr: $
         end: 0x0105
-    - ascii:
-        addr: $
-        nbytes: 0x000b
-    - bytes:
-        addr: $
-        nbytes: 0x0001
-    - ascii:
-        addr: $
-        nbytes: 0x001a
-    - bytes:
-        addr: $
-        nbytes: 0x0002
+    - asciiz: $
+    - asciiz: $
     - disasm:
         addr: $
         end: 0x0132
@@ -181,7 +160,17 @@ section:
     - comment: SET command jumps here.
     - disasm:
         addr: $
+        end: 0x0137
+    - bytes:
+        addr: $
+        nbytes: 1
+    - disasm:
+        addr: $
         end: 0x0150
+    - disasm:
+        addr: $
+        end: 0x01c9
+    - comment: Clear the screen (BASIC CLS)
     - disasm:
         addr: $
         end: 0x033a
@@ -360,14 +349,21 @@ section:
         do the rest of the character processing.
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x0134
         addr: 0x0458
+        end: 0x0506
+    - comment: == Cursor control table ==
+    - disasm:
+        addr: $
+        end: 0x0540
+    - disasm:
+        addr: $
+        end: 0x058d
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - comment: PR (line printer output) DCB function
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x00e6
-        addr: 0x058d
+        addr: $
+        end: 0x0674
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - comment: Initialize the restart vector table, located at RST08VEC
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -650,30 +646,10 @@ section:
     - bytes:
         nbytes: 0x0027
         addr: 0x18f7
-    - ascii:
-        nbytes: 0x0005
-        addr: 0x191e
-    - bytes:
-        nbytes: 0x0001
-        addr: 0x1923
-    - ascii:
-        nbytes: 0x0004
-        addr: 0x1924
-    - bytes:
-        nbytes: 0x0001
-        addr: 0x1928
-    - ascii:
-        nbytes: 0x0005
-        addr: 0x1929
-    - bytes:
-        nbytes: 0x0002
-        addr: 0x192e
-    - ascii:
-        nbytes: 0x0005
-        addr: 0x1930
-    - bytes:
-        nbytes: 0x0001
-        addr: 0x1935
+    - asciiz: $
+    - asciiz: $
+    - asciiz: $
+    - asciiz: $
     - disasm:
         addr: $
         end: 0x1bb3
@@ -699,16 +675,31 @@ section:
     - comment: register.
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x04e1
-        addr: 0x1c96
-    - asciiz: $
+        addr: $
+        end: 0x1d78
+    - comment: |+
+        This routine INCrements HL and tests the characters pointed to by
+        the HL register pair. It will bypass any spaces and characters 9
+        and 10 (shifted left and down arrows respectively). Upon return from
+        this routine HL will point to the next non-blank character.
+
+        C flag will be SET if HL is pointing to a numeric ASCII character and
+        the Z flag will be SET if the character pointed to happens to be zero
+        (ASCII 30H) or 3AH (":").
+
+        BC and DE registers are unaffected. This routine can be used by
+        CALLing 1D78H or RST 10H.
     - disasm:
-        nbytes: 0x0106
-        addr: 0x217f
+        addr: $
+        end: 0x2178
     - asciiz: $
+    # - disasm:
+    #     addr: $
+    #     end: 0x217f
+    # - asciiz: $
     - disasm:
-        nbytes: 0x0342
-        addr: 0x2296
+        addr: $
+        end: 0x25d9
     - comment: |+
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
         Test the numeric type flag (NTF)
@@ -745,6 +736,19 @@ section:
         value and places the result in the DE register pair. The Z flag will
         be set if the result in DE is smaller than or equal to 255 (FFH).
         (DE = INT (ACC))
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - disasm:
+        addr: $
+        end: 0x2b1c
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        This routine converts a numeric ASCII string pointed to by the HL
+        register pair into a hexadecimal value and places the result in
+        the A register. If the result is larger than 255 (FFH) then an
+        FC ERROR (Illegal function call) will be generated. After execution,
+        the HL register pair will point to the delimiter. If the delimiter
+        is a zero byte or a colon (3AH) then the Z flag will be set. Any
+        other delimiter will cause the Z flag to be reset.
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
         addr: $
@@ -789,9 +793,12 @@ section:
         CASSPULSE3: 0x01ed
         CASSDLY3: 0x01f3
         CASSOFF: 0x01f8
+        CASSLEADER: 0x0296
+        BASSYSTEM: 0x02b2
         COUT: 0x033a
         KBDSCN2: 0x035b
         KIBUFF: 0x0361
+        LPRINT: 0x039c
         OUTDCB: 0x03c2
         OUTDCBFINISH: 0x03dd
         KBDREAD: 0x03e3
@@ -877,6 +884,7 @@ section:
         BASSTOP: 0x1da9
         BASTRON: 0x1df7
         BASTROFF: 0x1df8
+        FCERROR: 0x1e4a
         BASGOSUB: 0x1eb1
         BASRETURN: 0x1ede
         BASGOTO: 0x1ec2
@@ -893,4 +901,5 @@ section:
         BASDIM: 0x2608
         GENOUTPUT: 0x28a7
         CVTACC2INT: 0x2b05
+        CVTHEXVAL: 0x2b1c
 ...

@@ -504,15 +504,15 @@ formatPseudo (Addr sAddr addr bytes) =
   formatLinePrefix bytes sAddr (T.append (padTo lenMnemonic "DA") (formatOperand addr))
 
 formatPseudo (AsciiZ sAddr str) =
-  let initSlice     = DVU.slice 0 (if DVU.length str <= 8; then DVU.length str; else 8) str
-      nonNullSlice  = DVU.slice 0 (DVU.length str - 1) str
+  let initSlice     = DVU.slice 0 (min (DVU.length str) 8) str
+      nonNullSlice  = DVU.slice 0 (DVU.length str) str
       mkString      = T.cons '\'' (T.snoc (T.pack [ (chr . fromIntegral) x | x <- DVU.toList nonNullSlice ]) '\'')
       outF _vec     = T.empty
   in  formatLinePrefix initSlice sAddr (T.append (padTo lenMnemonic "DZ") mkString)
       >< fmtByteGroup str (disEltAddress sAddr + 8) 8 outF
 
 formatPseudo (Ascii sAddr str) =
-  let initSlice     = DVU.slice 0 (if DVU.length str <= 8; then DVU.length str; else 8) str
+  let initSlice     = DVU.slice 0 (min (DVU.length str) 8) str
       mkString      = T.cons '\'' (T.snoc (T.pack [ (chr . fromIntegral) x | x <- DVU.toList str ]) '\'')
       outF _vec     = T.empty
   in  formatLinePrefix initSlice sAddr (T.append (padTo lenMnemonic "DS") mkString)
