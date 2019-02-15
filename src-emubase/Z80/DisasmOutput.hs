@@ -508,7 +508,7 @@ formatPseudo (AsciiZ sAddr str) =
       nonNullSlice  = DVU.slice 0 (DVU.length str) str
       mkString      = T.cons '\'' (T.snoc (T.pack [ (chr . fromIntegral) x | x <- DVU.toList nonNullSlice ]) '\'')
       outF _vec     = T.empty
-  in  formatLinePrefix initSlice sAddr (T.append (padTo lenMnemonic "DZ") mkString)
+  in  formatLinePrefix initSlice sAddr (T.append (padTo lenMnemonic "DS") mkString)
       >< fmtByteGroup str (disEltAddress sAddr + 8) 8 outF
 
 formatPseudo (Ascii sAddr str) =

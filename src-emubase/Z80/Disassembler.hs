@@ -93,10 +93,16 @@ z80disasciiz
   -> (Seq.Seq Z80DisasmElt, Z80disassembly)
              -- ^ Resulting diassembly state
 z80disasciiz dstate =
-  -- FIXME: Don't search the entire contents of memory...
   let sAddr            = views disasmCurAddr unPC dstate
-      sRange           = maxBound - sAddr
-      (toSearch, sys') = sysMReadN sAddr (fromIntegral sRange) (dstate ^. disasmSystem)
+      -- findZero :: Z80addr -> Z80disassembly -> DVU.Vector Z80word -> (Z80disassembly, Maybe (DVU.Vector Z80word))
+      findZero sAddr' dstate' bytes =
+        if sAddr' < unPC (dstate' ^. disasmEndAddr)
+        then  let nToRead = fromIntegral $ min 16 (unPC (dstate' ^. disasmEndAddr) - sAddr)
+                  (seg, sys') = sysMReadN sAddr' nToRead (dstate' ^. disasmSystem)
+              in  maybe (findZero (sAddr' + 16) (dstate' & disasmSystem .~ sys') (bytes DVU.++ seg))
+                        (\idx -> (dstate' & disasmSystem .~ sys', Just $ bytes DVU.++ DVU.slice 0 (idx + 1) seg))
+                        (DVU.elemIndex 0 seg)
+        else (dstate', Nothing)
       makeSeq disSeq bytes offs
         | DVU.null bytes
         = disSeq
@@ -114,11 +120,9 @@ z80disasciiz dstate =
                       (offs + fromIntegral (DVU.length notprintBytes))
         | otherwise
         = undefined
-  in  case DVU.elemIndex 0 toSearch of
-        Nothing  -> (Seq.singleton $ LineComment "BAD/FAULTY Z80 ASCIIZ: no zero terminator found.", dstate & disasmSystem .~ sys')
-        Just idx -> (makeSeq Seq.empty (DVU.slice 0 (idx + 1) toSearch) 0
-                    , dstate & disasmSystem .~ sys' & disasmCurAddr +~ fromIntegral idx + 1
-                    )
+  in  case findZero sAddr dstate DVU.empty of
+        (dstate', Nothing)  -> (Seq.singleton $ LineComment "BAD/FAULTY Z80 ASCIIZ: no zero terminator found.", dstate')
+        (dstate', Just bytes) -> (makeSeq Seq.empty bytes 0 , dstate' & disasmCurAddr +~ fromIntegral (DVU.length bytes))
 
 -- | Grab a sequence of bytes from the memory image, returning an 'Ascii' disassmbly element
 z80disascii
