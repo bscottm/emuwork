@@ -34,6 +34,9 @@ data Device addrType wordType where
     -- additional overhead while executing wrapper functions just to make the signature pretty.
   } -> Device addrType wordType
 
+instance Eq (Device addrType wordType) where
+  devA == devB = devA == devB
+
 type DeviceReset  addrType wordType devTag = devTag -> devTag
 type DeviceReader addrType wordType devTag = addrType -> devTag -> (wordType, devTag)
 type DeviceWriter addrType wordType devTag = wordType -> addrType -> devTag -> ((), devTag)

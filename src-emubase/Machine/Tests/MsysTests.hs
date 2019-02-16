@@ -4,7 +4,7 @@ module Main where
 
 import           Control.Arrow                        (first, second)
 import           Control.Monad                        (mapM_, replicateM, sequence_, unless)
-import           Control.Monad.State.Strict           (evalState, execState, runState, state)
+import           Control.Monad.Trans.State.Strict     (evalState, execState, runState, state)
 import           Data.Char                            (ord)
 import qualified Data.Foldable                        as Fold (foldl)
 import qualified Data.IntervalMap.Interval            as I
@@ -23,8 +23,10 @@ import           Test.Framework.Providers.QuickCheck2 (testProperty)
 import           Test.HUnit                           (Assertion, assertBool)
 import           Test.QuickCheck                      (Large, NonNegative, Property, choose, forAll, getLarge, getNonNegative)
 
--- import           Debug.Trace
+#if defined(TEST_DEBUG)
+import           Debug.Trace
 import           Text.Printf
+#endif
 
 import qualified Machine.MemorySystem                 as M
 import           Machine.Utils
@@ -173,7 +175,6 @@ mRead_ addr = fst . M.mRead addr
 {-# INLINEABLE mRead_ #-}
 
 mReadN_ :: ( Integral addrType
-           , PrintfArg addrType
            , Integral wordType
            , Show wordType
            , DVU.Unbox wordType
@@ -217,10 +218,10 @@ test_mkROMRegion _args =
   let img      = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
       msys     = M.mkROMRegion 0 img testSystem
       rlist    = map fst (M.regionList msys)
-      nRegions = M.countRegions msys == 1
-      mRegions = rlist == [I.IntervalCO 0 4096]
+      nRegions = M.countRegions msys == 2
+      mRegions = rlist == [I.ClosedInterval 0 4095, I.ClosedInterval 4096 65535]
   in  assertBool (if   not nRegions
-                  then "Expected 1 region, got " ++ show (M.countRegions msys)
+                  then "Expected 2 regions, got " ++ show (M.countRegions msys)
                   else "Expected 4096 Word8 region, got " ++ show rlist)
                  (nRegions && mRegions)
 
@@ -229,25 +230,29 @@ test_mkROMRegion2 _args =
   let img      = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
       msys     = M.mkROMRegion 4096 img (M.mkROMRegion 0 img testSystem)
       rlist    = map fst (M.regionList msys)
-      nRegions = M.countRegions msys == 2
-      mRegions = rlist == [I.IntervalCO 0 4096, I.IntervalCO 4096 8192]
+      nRegions = M.countRegions msys == 3
+      mRegions = rlist == [I.ClosedInterval 0 4095, I.ClosedInterval 4096 8191, I.ClosedInterval 8192 65535]
   in  assertBool (if   not nRegions
-                  then "Expected 2 regions, got " ++ show (M.countRegions msys)
-                  else "Expected 2 intervals, got " ++ show rlist)
+                  then "Expected 3 regions, got " ++ show (M.countRegions msys)
+                  else "Expected 3 intervals, got " ++ show rlist)
                  (nRegions && mRegions)
 
 test_mkRAMRegion3 :: TestParams -> Assertion
 test_mkRAMRegion3 _args =
   let msys  = M.mkRAMRegion 0x1400 0x1000 (M.mkRAMRegion 0 0x1000 testSystem)
       rlist = map fst (M.regionList msys)
-  in  assertBool "Expected 2 RAM regions"
-                 (M.countRegions msys == 2 && rlist == [I.IntervalCO 0 0x1000, I.IntervalCO 0x1400 0x2400])
+  in  assertBool "Expected 4 RAM regions"
+                 (M.countRegions msys == 4 && rlist == [ I.ClosedInterval 0x0000 0x0fff
+                                                       , I.ClosedInterval 0x1000 0x13ff
+                                                       , I.ClosedInterval 0x1400 0x23ff
+                                                       , I.ClosedInterval 0x2400 0xffff
+                                                       ])
 
 test_mkMEmpty :: TestParams -> Assertion
 test_mkMEmpty _args =
   let msys = mempty :: M.MemorySystem Word16 Word8
   in  assertBool "Expecitng an empty MemorySystem"
-                 (M.countRegions msys == 0 && null (M.regionList msys))
+                 (M.countRegions msys == 1)
 
 test_mappend :: TestParams -> Assertion
 test_mappend _args =
@@ -256,12 +261,13 @@ test_mappend _args =
       msysB    = M.mkRAMRegion 0x2000 0x1000 (M.mkRAMRegion 0x1000 0x1000 testSystem)
       msys     = msysA `mappend` msysB
       rlist    = map fst (M.regionList msys)
-  in  assertBool (if   M.countRegions msys /= 3
-                  then "Expected 3 regions: " ++ show (M.countRegions msys)
+  in  assertBool (if   M.countRegions msys /= 4
+                  then "Expected 4 regions: " ++ show (M.countRegions msys)
                   else "Interval list doesn't match: " ++ show rlist)
-                 (M.countRegions msys == 3 && rlist == [ I.IntervalCO 0x0000 0x1000
-                                                       , I.IntervalCO 0x1000 0x2000
-                                                       , I.IntervalCO 0x2000 0x3000
+                 (M.countRegions msys == 4 && rlist == [ I.ClosedInterval 0x0000 0x0fff
+                                                       , I.ClosedInterval 0x1000 0x1fff
+                                                       , I.ClosedInterval 0x2000 0x2fff
+                                                       , I.ClosedInterval 0x3000 0xffff
                                                        ])
 
 -- | Simple ROM
@@ -311,12 +317,12 @@ prop_randROMrandom args =
 
 -- | start address for the gapped ROM region tests. this is a prime number instead of a power-of-2.
 gapROM_addr_1, gapROM_addr_2 :: Word16
-gapROM_addr_1 = 2719 {- 0xa9f -}
-gapROM_addr_2 = 3907 {- 0xf43 -}
+gapROM_addr_1 = 0xa9f {- 2719 -}
+gapROM_addr_2 = 0xf43 {- 3907 -}
 
 gapROM_len_1, gapROM_len_2 :: Int
-gapROM_len_1  = 1129 {- 0x469 -}
-gapROM_len_2  = 4027 {- 0xfbb -}
+gapROM_len_1  = 0x469 {- 1129 -}
+gapROM_len_2  = 0xfbb {- 4027 -}
 
 gapROMGap, gapROMTotal :: Int
 gapROMGap     = fromIntegral (gapROM_addr_2 - gapROM_addr_1) - gapROM_len_1
@@ -327,13 +333,14 @@ gapROMImg_1   = DVU.generate gapROM_len_1 (\x -> fromIntegral (x `mod` 256))
 gapROMImg_2   = DVU.generate gapROM_len_2 (\x -> fromIntegral (x `mod` 256))
 
 gapROMMsys :: TestMemSystem
-gapROMMsys    = M.mkROMRegion gapROM_addr_2 gapROMImg_2 (M.mkROMRegion gapROM_addr_1 gapROMImg_1 testSystem)
+gapROMMsys    = M.mkROMRegion gapROM_addr_2 gapROMImg_2 $ M.mkROMRegion gapROM_addr_1 gapROMImg_1 testSystem
 
 test_gapROMTotal :: TestParams -> Assertion
 test_gapROMTotal _args =
   do
     let (memvec, _) = M.mReadN gapROM_addr_1 gapROMTotal gapROMMsys
         cmpvec      = DVU.concat [gapROMImg_1, DVU.replicate gapROMGap 0, gapROMImg_2]
+    -- printf "cmpvec %s\nmemvec %s\n" (show cmpvec) (show memvec)
     assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                (memvec == cmpvec)
 
@@ -381,9 +388,10 @@ test_patchROM01 _args =
       sys    = M.mkROMRegion 0 img testSystem
       pvec   = DVU.fromList [ 0x11, 0x22, 0x33, 0x44, 0x55, 0x66]
       sys'   = M.mPatch 14 pvec sys
-      cmpvec = DVU.concat [ DVU.fromList [0x0c, 0x0d ], pvec, DVU.fromList [ 0x14, 0x15 ]]
+      cmpvec = DVU.concat [ DVU.take 2 (DVU.drop 12 img), pvec, DVU.take 2 (DVU.drop 20 img)]
       memvec = mReadN_ 12 (DVU.length cmpvec) sys'
-  in  assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
+  in  -- printf "cmpvec %s\nmemvec %s\n" (show cmpvec) (show memvec) >>
+      assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
                  (memvec == cmpvec)
 
 patchROMMsys_1 :: TestMemSystem
@@ -498,10 +506,13 @@ test_MemMappedDeviceCreate :: TestParams -> Assertion
 test_MemMappedDeviceCreate _args =
   let msys         = testMemMappedDev
       rlist        = map fst (M.regionList msys)
-      nRegions     = M.countRegions msys == 1
-      mRegions     = rlist == [I.IntervalCO 0x100 0x101]
+      nRegions     = M.countRegions msys == 3
+      mRegions     = rlist == [ I.ClosedInterval 0x0000 0x00ff
+                              , I.ClosedInterval 0x0100 0x0100
+                              , I.ClosedInterval 0x0101 0xffff
+                              ]
       diagnose | not nRegions
-               = "Expected one memory region" ++ show (M.countRegions msys)
+               = "Expected 3 memory regions" ++ show (M.countRegions msys)
                | not mRegions
                = "Region mismatch: " ++ show rlist
                | otherwise
@@ -521,10 +532,13 @@ test_VideoDeviceCreate :: TestParams -> Assertion
 test_VideoDeviceCreate _args =
   let vidsys       = mkVideoDevice 0x3c00 testSystem
       rlist        = map fst (M.regionList vidsys)
-      nRegions     = M.countRegions vidsys == 1
-      mRegions     = rlist == [I.IntervalCO 0x3c00 0x4200]
+      nRegions     = M.countRegions vidsys == 3
+      mRegions     = rlist == [ I.ClosedInterval 0x0000 0x3bff
+                              , I.ClosedInterval 0x3c00 0x41ff
+                              , I.ClosedInterval 0x4200 0xffff
+                              ]
       diagnose | not nRegions
-               = "Expected one memory region" ++ show (M.countRegions vidsys)
+               = "Expected 3 memory regions" ++ show (M.countRegions vidsys)
                | not mRegions
                = "Region mismatch: " ++ show rlist
                | otherwise
@@ -575,11 +589,16 @@ test_MixedDevices :: TestParams -> Assertion
 test_MixedDevices _args =
   let msys            = mkVideoDevice 0x3c00 testMemMappedDev
       rlist           = map fst (M.regionList msys)
-      nRegions        = M.countRegions msys == 2
-      expectedRegions = [I.IntervalCO 0x100 0x101, I.IntervalCO 0x3c00 (0x3c00 + fromIntegral vidLinearSize)]
+      nRegions        = M.countRegions msys == 5
+      expectedRegions = [ I.ClosedInterval 0x0000 0x00ff
+                        , I.ClosedInterval 0x0100 0x0100
+                        , I.ClosedInterval 0x0101 0x3bff
+                        , I.ClosedInterval 0x3c00 (0x3c00 + fromIntegral (vidLinearSize - 1))
+                        , I.ClosedInterval (0x3c00 + fromIntegral vidLinearSize) 0xffff
+                        ]
       mRegions        = rlist == expectedRegions
       diagnose | not nRegions
-               = "Expected one memory region" ++ show (M.countRegions msys)
+               = "Expected 5 memory regions: " ++ show (M.countRegions msys)
                | not mRegions
                = "Region mismatch: " ++ show rlist ++ " expected " ++ show expectedRegions
                | otherwise

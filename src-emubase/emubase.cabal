@@ -33,6 +33,7 @@ library
     unordered-containers,
     vector
 
+  -- cpp-options: -DTEST_DEBUG
   ghc-options: -Wall -O2
 
   default-extensions:
@@ -74,6 +75,7 @@ test-suite msystest
     default-language:   Haskell2010
     type:               exitcode-stdio-1.0
     main-is:            Machine/Tests/MsysTests.hs
+    -- cpp-options:        -DTEST_DEBUG
     ghc-options:        -Wall -threaded -rtsopts -with-rtsopts=-N4
     build-depends:
       base,

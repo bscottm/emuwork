@@ -5,7 +5,7 @@ and end addresses for the region; each region may hold a `RAMRegion` (random acc
 memory) or a device (`DevRegion`). Both RAM and ROM regions store content as vectors of a `wordType`.
 Devices manage content as they see fit, although they may only return or store a `wordType`-sized item.
 
-Memory regions __/may not/__ overlap; they __/must/__ be distinct.
+Non-empty memory regions __/may not/__ overlap; they __/must/__ be distinct.
 
 Writing to a RAM region places the modified word into a priority search queue that acts as a LRU cache.
 This amortizes the penalty from updating the underlying content vector until the queue's size is
@@ -56,6 +56,7 @@ import           Control.Arrow                    (first, (***))
 import           Control.Lens                     (Lens', over, to, view, views, (%~), (&), (+~), (-~), (.~), (^.), (|>), _2)
 import           Control.Monad.Trans.State.Strict (state, execState)
 import           Control.Monad                    (sequence)
+import           Data.List                        (intercalate)
 import           Data.Semigroup                   (Semigroup)
 import qualified Data.Foldable                    as Fold (foldl')
 import qualified Data.IntervalMap.Strict          as IM
@@ -66,8 +67,8 @@ import qualified Data.Vector.Unboxed             as DVU
 import qualified Data.OrdPSQ                     as OrdPSQ
 
 #if defined(TEST_DEBUG)
-import Debug.Trace
-import Text.Printf
+import           Debug.Trace
+import           Text.Printf
 #endif
 
 import qualified Machine.Device                  as D
@@ -86,6 +87,7 @@ data MemorySystem addrType wordType where
     -- ^ Region interval map
     } -> MemorySystem addrType wordType
 
+-- | Show a memory system. Can be awfully verbose.
 instance ( Show addrType
          , Show wordType
          , DVU.Unbox wordType
@@ -94,14 +96,25 @@ instance ( Show addrType
          => Show (MemorySystem addrType wordType) where
   show msys = "MemorySystem(" ++ show (msys ^. regions) ++ ")"
 
--- Admit MemorySystem to the Semigroup class (prerequisite for Monoid)
-instance (Integral addrType) =>
+-- | Admit MemorySystem to the Semigroup class (prerequisite for Monoid)
+instance ( Integral addrType
+         , Integral wordType
+         , DVU.Unbox wordType
+         , Show addrType
+         , ShowHex addrType
+         , Show wordType
+         ) =>
          Semigroup (MemorySystem addrType wordType) where
   (<>) = combineMemorySystems
 
 -- Admit MemorySystem into the Monoid class
 instance ( Integral addrType
+         , Bounded addrType
          , Integral wordType
+         , DVU.Unbox wordType
+         , Show addrType
+         , ShowHex addrType
+         , Show wordType
          )
          => Monoid (MemorySystem addrType wordType) where
   mempty  = initialMemorySystem
@@ -110,21 +123,6 @@ instance ( Integral addrType
 -- | Lens for the memory region map inside a 'MemorySystem'
 regions :: Lens' (MemorySystem addrType wordType) (MemRegionMap addrType wordType)
 regions f msys@MSys{ _regions = rgn } = (\regions' -> msys { _regions = regions' }) <$> f rgn
-
--- | Create an empty memory system (alternately: 'mempty')
-initialMemorySystem :: MemorySystem addrType wordType
-initialMemorySystem = MSys { _regions  = IM.empty }
-
--- | Combine two memory systems, if they don't overlap. If they overlap, an error is raised.
-combineMemorySystems :: (Integral addrType)
-                     => MemorySystem addrType wordType
-                     -> MemorySystem addrType wordType
-                     -> MemorySystem addrType wordType
-combineMemorySystems msysA msysB
-  | IM.null (IM.intersection (msysA ^. regions) (msysB ^. regions))
-  = over regions (mappend (msysB ^. regions )) msysA
-  | otherwise
-  = error "MemorySystem:combineMemorySystems: Overlapping regions between memory systems"
 
 -- | A memory region
 data MemoryRegion addrType wordType where
@@ -162,6 +160,20 @@ instance ( Show addrType
   show (ROMRegion ctnt)             = "ROMRegion(" ++ show ctnt ++ ")"
   show (DevRegion _dev)             = "DevRegion()"
 
+instance ( Eq addrType
+         , Eq wordType
+         , Integral wordType
+         , DVU.Unbox wordType
+         )
+        => Eq (MemoryRegion addrType wordType) where
+  EmptyRegion == EmptyRegion = True
+  (RAMRegion l_ctnt l_wpend l_npend) == (RAMRegion r_ctnt r_wpend r_npend) =
+    l_ctnt == r_ctnt && l_wpend == r_wpend && l_npend == r_npend
+  (ROMRegion l_ctnt) == (ROMRegion r_ctnt) = l_ctnt == r_ctnt
+  (DevRegion l_dev ) == (DevRegion r_dev ) = l_dev == r_dev
+  _ == _ = False
+
+
 -- | Lens for a memory region's contents
 contents :: ( DVU.Unbox wordType
             , Integral wordType
@@ -174,10 +186,8 @@ contents f mregion                      = mregion <$ f DVU.empty
 -- | Lens for the pending write LRU queue.
 writesPending :: Lens' (MemoryRegion addrType wordType) (LRUWriteCache wordType)
 writesPending f mregion@RAMRegion{}    = (\wp -> mregion { _writesPending = wp }) <$> f (_writesPending mregion)
--- For types other than 'RAMRegion', it's just the original memory region.
-writesPending f mregion@EmptyRegion{}  = mregion <$ f (initialLRU 0)
-writesPending f mregion@ROMRegion{}    = mregion <$ f (initialLRU 0)
-writesPending f mregion@DevRegion{}    = mregion <$ f (initialLRU 0)
+-- For types other than 'RAMRegion', it's just the original memory region and no pending writes.
+writesPending f mregion                = mregion <$ f (initialLRU 0)
 
 -- | Lens for number of elements in the LRU queue
 nWritesPending :: Lens' (MemoryRegion addrType wordType) Int
@@ -205,7 +215,7 @@ data LRUWriteCache wordType where
     , _lrucPsq      ::                !(OrdPSQ.OrdPSQ Int Tick wordType)
     , _lrucMaxSize  :: {-# UNPACK #-} !Size
     } -> LRUWriteCache wordType
-    deriving (Show)
+    deriving (Eq, Show)
 
 lrucPsq :: Lens' (LRUWriteCache wordType) (OrdPSQ.OrdPSQ Int Tick wordType)
 lrucPsq f psq = (\psq' -> psq { _lrucPsq = psq' }) <$> f (_lrucPsq psq)
@@ -214,10 +224,45 @@ lrucPsq f psq = (\psq' -> psq { _lrucPsq = psq' }) <$> f (_lrucPsq psq)
 -- MemorySystem code
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
+-- | Create an empty memory system (alternately, use 'mempty')
+initialMemorySystem :: ( Ord addrType
+                       , Bounded addrType
+                       )
+                    => MemorySystem addrType wordType
+initialMemorySystem = MSys { _regions  = IM.insert (IM.ClosedInterval minBound maxBound) EmptyRegion IM.empty }
+
+-- | Combine two memory systems, if their occupied (non-empty) regions don't overlap. If they overlap, an error is raised.
+combineMemorySystems :: ( Integral addrType
+                        , Integral wordType
+                        , DVU.Unbox wordType
+                        , Show addrType
+                        , ShowHex addrType
+                        , Show wordType
+                        )
+                     => MemorySystem addrType wordType
+                     -> MemorySystem addrType wordType
+                     -> MemorySystem addrType wordType
+combineMemorySystems msysA msysB
+  | IM.null intersect
+  = execState (sequence [state (insRegion r) | r <- IM.toAscList occupiedB]) msysA
+  | otherwise
+  = error "MemorySystem:combineMemorySystems: Overlapping regions between memory systems"
+  where
+    intersect = IM.intersection occupiedA occupiedB
+    occupiedA = views regions (IM.filter (/= EmptyRegion)) msysA
+    occupiedB = views regions (IM.filter (/= EmptyRegion)) msysB
+    -- We only care about the altered memory system, so this is what execState's return looks like.
+    insRegion (ivl, mem) msys = ((), insertMemRegion (I.lowerBound ivl) (I.upperBound ivl) mem msys)
+
+
 -- | Create a new RAM memory region. __/Note:/__ memory regions may not overlap; 'error' will signal if this
 -- precondition fails.
 mkRAMRegion :: ( Integral addrType
                , ShowHex addrType
+               , Show addrType
+               , Integral wordType
+               , DVU.Unbox wordType
+               , Show wordType
                )
             => addrType
             -- ^ RAM region start address
@@ -226,7 +271,7 @@ mkRAMRegion :: ( Integral addrType
             -> MemorySystem addrType wordType
             -> MemorySystem addrType wordType
 mkRAMRegion sa len =
-  insertMemRegion sa (sa + fromIntegral len)
+  insertMemRegion sa (sa + fromIntegral (len - 1))
                   RAMRegion { _contents       = DVU.replicate len 0
                             , _writesPending  = initialLRU maxPending
                             , _nWritesPending = 0
@@ -236,7 +281,10 @@ mkRAMRegion sa len =
 -- precondition fails.
 mkROMRegion :: ( Integral addrType
                , ShowHex addrType
+               , Show addrType
+               , Integral wordType
                , DVU.Unbox wordType
+               , Show wordType
                )
             => addrType
             -- ^ Region's start address
@@ -245,13 +293,16 @@ mkROMRegion :: ( Integral addrType
             -> MemorySystem addrType wordType
             -> MemorySystem addrType wordType
 mkROMRegion sa romImg =
-  insertMemRegion sa (sa + fromIntegral (DVU.length romImg)) ROMRegion { _contents = romImg }
+  insertMemRegion sa (sa + fromIntegral (DVU.length romImg - 1)) ROMRegion { _contents = romImg }
 
 -- | Create a new device memory region. __/Note:/__ memory regions may not overlap; 'error' will signal if this
 -- precondition fails.
 mkDevRegion :: ( Integral addrType
                , ShowHex addrType
+               , Show addrType
+               , Integral wordType
                , DVU.Unbox wordType
+               , Show wordType
                )
             => addrType
             -- ^ Region's starting address
@@ -263,11 +314,15 @@ mkDevRegion :: ( Integral addrType
             -- ^ The original memory system
             -> MemorySystem addrType wordType
             -- ^ The result memory system
-mkDevRegion sa len dev = insertMemRegion sa (sa + fromIntegral len) (DevRegion dev)
+mkDevRegion sa len dev = insertMemRegion sa (sa + fromIntegral (len - 1)) (DevRegion dev)
 
 -- | Internal common code that inserts memory regions.
 insertMemRegion :: ( Integral addrType
                    , ShowHex addrType
+                   , Show addrType
+                   , Integral wordType
+                   , DVU.Unbox wordType
+                   , Show wordType
                    )
                 => addrType
                 -> addrType
@@ -275,10 +330,55 @@ insertMemRegion :: ( Integral addrType
                 -> MemorySystem addrType wordType
                 -> MemorySystem addrType wordType
 insertMemRegion sa ea newRegion msys
-  | IM.null (IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea))
-  = over regions (IM.insertWith const (I.IntervalCO sa ea) newRegion) msys
+#if defined(TEST_DEBUG)
+  | trace (concat [ "insertMemRegion: sa = "
+                  , as0xHexS sa
+                  , " ("
+                  , show sa
+                  , ") "
+                  , " ea = "
+                  , as0xHexS ea
+                  , " ("
+                  , show ea
+                  , ") "
+                  , " | regions: "
+                  , views regions (show . IM.keys) msys
+                  , " | intersects"
+                  , (show . IM.keys) intersects
+                  ]) False = undefined
+#endif
+  | all (== EmptyRegion) (IM.elems intersects)
+  = let results = over regions splitRegion msys
+    in  traceResult results
   | otherwise
-  = error ("mkRAMRegion: " ++ as0xHexS sa ++ "-" ++ as0xHexS ea ++ " overlaps with existing regions.")
+  = error (concat [ "insertMemRegion: "
+                  , as0xHexS sa
+                  , "-"
+                  , as0xHexS ea
+                  , " overlaps with "
+                  ] ++ (intercalate ", " (map formatIntersect $ IM.toList intersects))
+          )
+  where
+    intersects = IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea)
+    formatIntersect (rgn, ty) = as0xHexS (I.lowerBound rgn) ++ "-" ++ as0xHexS (I.upperBound rgn) ++ "(" ++ show ty ++ ")"
+    firstIntersect = IM.findMin intersects
+    firstIntersectKey = fst firstIntersect
+    splitRegion rgns = leftSplit . IM.insert (I.ClosedInterval sa ea) newRegion <$> rightSplit $ IM.delete firstIntersectKey rgns
+    leftSplit rgn'
+      | I.lowerBound firstIntersectKey < sa
+      = IM.insert (I.ClosedInterval (I.lowerBound firstIntersectKey) (sa - 1)) EmptyRegion rgn'
+      | otherwise
+      = rgn'
+    rightSplit rgn'
+      | I.upperBound firstIntersectKey > ea
+      = IM.insert (I.ClosedInterval (ea + 1) (I.upperBound firstIntersectKey)) EmptyRegion rgn'
+      | otherwise
+      = rgn'
+#if defined(TEST_DEBUG)
+    traceResult results = trace ("insertMemRegion: result: " ++ (views regions (show . IM.keys) results)) results
+#else
+    traceResult = id
+#endif
 
 
 -- | Fetch a word from a memory address. Note: If the address does not correspond to a region (i.e., the address does not
@@ -298,8 +398,7 @@ mRead addr msys =
       ensureValue []           = 0
       ensureValue (v:_)        = v
       getContent memvals iv mr =
-        let addrOffset = addr - I.lowerBound iv
-        in  case mr of
+        case mr of
               -- Arrows provide a neat shorthand to create the return tuple: '***' applies the RH function (val |>)
               -- to append the value read from the device to the accumulated list of values, and the LH data
               -- constructor to re-wrap the new device state.
@@ -309,6 +408,8 @@ mRead addr msys =
                 let val = fromMaybe (view contents mr ! fromIntegral addrOffset)
                                     (views writesPending (lookupPendingWrite $ fromIntegral addrOffset) mr)
                 in  (memvals |> val, mr)
+        where
+          addrOffset = addr - I.lowerBound iv
   in  ensureValue *** (\updMRs -> msys & regions %~ updDevRegions updMRs) $
           IM.mapAccumWithKey getContent [] (IM.splitAt mregions addr ^. _2)
 
@@ -317,13 +418,14 @@ mRead addr msys =
 -- gaps between regions will be filled with zeroes.
 mReadN :: ( Integral addrType
           , Integral wordType
+          , DVU.Unbox wordType
+          , DVU.Unbox wordType
 #if defined(TEST_DEBUG)
           , PrintfArg addrType
           , PrintfArg wordType
           , Show addrType
           , Show wordType
 #endif
-          , DVU.Unbox wordType
           )
        => addrType
        -- ^ Starting address
@@ -333,22 +435,48 @@ mReadN :: ( Integral addrType
        -- ^ The memory system from which to read
        -> MemReadN addrType wordType
        -- ^ Contents read from memory and updated system state
-mReadN sa nWords msys
+mReadN sAddr nWords msys
   {- Trivial optimizations: -}
   | nWords == 1
-  = first DVU.singleton (mRead sa msys)
+  = first DVU.singleton (mRead sAddr msys)
   {- Otherwise, have to do some work. -}
   | otherwise
-  = (finalVec DVU.++ trailingPad, msys & regions %~ updDevRegions updMem)
+  = (result DVU.empty, msys & regions %~ updDevRegions updMem)
   where
-    (result, updMem)            = IM.mapAccumWithKey collectReads initAccum memRegions
-    finalVec                    = readVec result DVU.empty
-    trailingLen                 = nWords - DVU.length finalVec
-    trailingPad                 = if trailingLen <= 0
-                                  then DVU.empty
-                                  else DVU.replicate trailingLen 0
-    memRegions                  = IM.intersecting (msys ^. regions) (I.ClosedInterval sa (sa + fromIntegral (nWords - 1)))
-    initAccum                   = ReadAccum { lastAddr = sa, wordsRem = nWords, readVec = (DVU.empty DVU.++) }
+    memRegions                  = views regions (flip IM.intersecting (I.ClosedInterval sAddr eAddr)) msys
+    (result, updMem)            = IM.mapAccumWithKey collectReads (DVU.empty DVU.++) memRegions
+    eAddr                       = sAddr + fromIntegral (nWords - 1)
+    collectReads accum iv mr =
+      showProgress $ case mr of
+        EmptyRegion ->
+          ((accum (DVU.replicate (fromIntegral mLen) 0) DVU.++), mr)
+        RAMRegion{} ->
+          ((accum (views contents ((// pendWrites) <$> DVU.slice sOffs (fromIntegral mLen)) mr) DVU.++), mr)
+        ROMRegion{} ->
+          ((accum (views contents (DVU.slice sOffs (fromIntegral mLen)) mr) DVU.++), mr)
+        DevRegion{ _rgnDevice = devRegion } ->
+          let (devReads, devState) = D.devReadSeq (sAddr - I.lowerBound iv) (fromIntegral mLen) devRegion
+          in  ((accum devReads DVU.++)
+              , DevRegion devState
+              )
+      where
+        sRegion    = I.lowerBound iv
+        eRegion    = I.upperBound iv
+        sa         = max sAddr sRegion
+        ea         = min eAddr eRegion
+        sOffs      = fromIntegral (sa - sRegion)
+        mLen       = ea - sa + 1
+        pendWrites = [(addrOffs - sOffs, word) | (addrOffs, word) <- views writesPending getPendingWrites mr]
+          where
+            getPendingWrites = views lrucPsq filterAddrs
+            filterAddrs psq' = [(addrOffs, val) | (addrOffs, _, val) <- OrdPSQ.toList psq'
+                                                , addrOffs - sOffs < fromIntegral mLen]
+#if defined(TEST_DEBUG)
+        showProgress = trace (printf "sa 0x%04x ea 0x%04x sRegion 0x%04x eRegion 0x%04x  mLen %5d sOffs %5d"
+                                     sa ea sRegion eRegion mLen sOffs)
+#else
+        showProgress = id
+#endif
 
 
 -- | Update a memory region interval map with only the device regions in the updating map.
@@ -362,92 +490,6 @@ updDevRegions updRegions {-origRegions-} =
   where
     onlyDevRegions dev@DevRegion{}  k mreg = (IM.update (const (Just dev)) k mreg)
     onlyDevRegions _mr             _k mreg = mreg
-
-
--- | Accumulator for 'mReadN' within 'IM.mapAccumWithKey'. Keeps track of the last address processed to detect when to zero pad
--- the resulting vector. A sectioned function accumulates the resulting vector, analogous to 'ShowS', thereby reducing the
--- append ('DVU.++') overhead to linear time.
-data ReadAccum addrType wordType where
-  ReadAccum ::
-    { lastAddr :: addrType
-    , wordsRem :: Int
-    , readVec  :: Vector wordType -> Vector wordType
-    } -> ReadAccum addrType wordType
-
-
--- | Helper function that collects memory reads over multiple intervals, filling in gaps between intervals with zeroes.
---
--- NOTE: This is a top-level function just to make debugging type checking easier. It's a bit long to be an internal
--- function to mReadN.
-collectReads :: ( Integral addrType
-                , Integral wordType
-                , DVU.Unbox wordType
-#if defined(TEST_DEBUG)
-                , PrintfArg addrType
-                , PrintfArg wordType
-                , Show addrType
-                , Show wordType
-#endif
-                )
-             => ReadAccum addrType wordType
-             -> I.Interval addrType
-             -> MemoryRegion addrType wordType
-             -> (ReadAccum addrType wordType, MemoryRegion addrType wordType)
-collectReads accum iv mr
-#if defined(TEST_DEBUG)
-  | trace showProgress False
-  = undefined
-#endif
-  | saddr < sRegion
-  = collectReads fillGap iv mr
-  | wordsRem accum <= 0
-  = error ("mReadN: Words remaining leq 0: " ++ show (wordsRem accum))
-  | otherwise
-  = case mr of
-      DevRegion{ _rgnDevice = devRegion } ->
-        let (devReads, devState) = D.devReadSeq (saddr - sRegion) mLen devRegion
-        in  (ReadAccum { lastAddr = saddr + fromIntegral mLen
-                       , wordsRem = wordsRem accum - fromIntegral mLen
-                       , readVec = (readVec accum devReads DVU.++)
-                       }
-            , DevRegion devState
-        )
-      _                  ->
-        (ReadAccum { lastAddr = saddr + fromIntegral mLen
-                   , wordsRem = wordsRem accum  - fromIntegral mLen
-                   , readVec = (readVec accum mcontents DVU.++)
-                   }
-        , mr
-        )
-  where
-    saddr      = lastAddr accum
-    -- eaddr      = saddr + fromIntegral mLen - 1
-    sRegion    = I.lowerBound iv
-    sOffs      = fromIntegral (saddr - sRegion)
-    eRegion    = I.upperBound iv
-    mLen       = min (wordsRem accum) (fromIntegral (eRegion - saddr))
-    padLen     = sRegion - saddr
-    zeroPad    = DVU.replicate (fromIntegral padLen) 0
-    mcontents  = views contents (DVU.slice sOffs (fromIntegral mLen)) mr // pendWrites
-    pendWrites = [(addrOffs - sOffs, word) | (addrOffs, word) <- views writesPending getPendingWrites mr]
-      where
-        getPendingWrites = views lrucPsq filterAddrs
-        filterAddrs psq' = [(addrOffs, val) | (addrOffs, _, val) <- OrdPSQ.toList psq'
-                                            , addrOffs - sOffs < fromIntegral mLen]
-    fillGap    = ReadAccum { lastAddr = sRegion
-                           , wordsRem = wordsRem accum - fromIntegral padLen
-                           , readVec = (readVec accum zeroPad DVU.++)
-                           }
-#if defined(TEST_DEBUG)
-    showProgress = printf "lastAddr 0x%04x wordsRem %5d sRegion 0x%04x eRegion 0x%04x padLen %5d mLen %5d sOffs %5d"
-                    (lastAddr accum)
-                    (wordsRem accum)
-                    sRegion
-                    eRegion
-                    padLen
-                    mLen
-                    sOffs
-#endif
 
 
 -- | Write a word into the memory system: inserts the word into the pending write LRU cache, flushing the cache to make
@@ -546,130 +588,66 @@ doWrite :: ( Integral addrType
         -- ^ Patched memory system
 doWrite readOnly startAddr patch msys = msys & regions %~ execState updRegionState
   where
-    updMem = IM.mapAccumWithKey writeContents initState memRegions
-    updRegionState = sequence [state (\m -> ((), IM.update (const (Just v)) k m)) | (k, v) <- (IM.assocs . snd) updMem]
-    memRegions = IM.intersecting (msys ^. regions) (I.ClosedInterval startAddr (startAddr + fromIntegral (nWords - 1)))
+    endAddr = startAddr + fromIntegral nWords - 1
+    memRegions = views regions (flip IM.intersecting (I.ClosedInterval startAddr endAddr)) msys
+    updMem = IM.mapWithKey writeContents memRegions
+    updRegionState = sequence [state (\m -> ((), IM.update (const (Just v)) k m)) | (k, v) <- IM.assocs updMem]
     nWords = DVU.length patch
-    initState = WriteState { curAddr = startAddr
-                           , writeRemaining = nWords
-                           , preserveRO = readOnly
-                           , baseAddr = startAddr
-                           , wordArray = patch
-                           }
 
-
--- | Helper data type while new content is written to memory.
-data WriteState addrType wordType where
-  WriteState ::
-    { curAddr :: addrType
-    , writeRemaining :: Int
-    -- Parameters from doWrite that are carried along
-    , preserveRO :: Bool
-    , baseAddr :: addrType
-    , wordArray :: Vector wordType
-    } -> WriteState addrType wordType
-
-
-writeContents :: ( Integral addrType
-                 , Integral wordType
-                 , DVU.Unbox wordType
+    writeContents iv mr
 #if defined(TEST_DEBUG)
-                 , PrintfArg addrType
-                 , Show addrType
-                 , PrintfArg wordType
-                 , Show wordType
+      | trace showProgress False
+      = undefined
 #endif
-                 )
-              => WriteState addrType wordType
-              -> I.Interval addrType
-              -> MemoryRegion addrType wordType
-              -> (WriteState addrType wordType, MemoryRegion addrType wordType)
-writeContents wstate iv mr
+      | EmptyRegion <- mr
+      = mr
+      -- Don't molest ROM regions if the readOnly flag is true. Otherwise, we can patch the ROM.
+      | ROMRegion{} <- mr
+      = if readOnly
+          then mr
+          else mr & contents %~ spliceWriteVec
+      | DevRegion{} <- mr
+      = DevRegion $ D.devWriteSeq (sAddr - sRegion) patch (_rgnDevice mr)
+      | RAMRegion{} <- mr
+      = if nWrite < maxPending
+          -- Queue into the pending write queue if there's space, otherwise flush the pending writes and overwrite the vector
+          then execState writeQueueSeq mr
+          else mr & writesPending %~ filterPending
+                  & contents %~ spliceWriteVec
+      where
+        sAddr = max startAddr sRegion
+        eAddr = min endAddr eRegion
+        sRegion = I.lowerBound iv
+        eRegion = I.upperBound iv
+        sOffset = fromIntegral (sAddr - startAddr)
+        rOffset = sAddr - sRegion
+        patchSlice  = DVU.slice sOffset nWrite patch
+        spliceWriteVec ctnt = DVU.concat [ leftSlice ctnt
+                                         , patchSlice
+                                         , rightSlice ctnt
+                                         ]
+          where
+            leftSlice {-ctnt'-} = traceLeftSlice $ DVU.slice 0 (fromIntegral rOffset) {-ctnt-}
+            rightSlice {-ctnt'-} = traceRightSlice $ DVU.slice rightStart rightLen {-ctnt-}
+            rightStart = fromIntegral startAddr + fromIntegral nWrite
+            rightLen   = fromIntegral (eRegion + 1) - rightStart
 #if defined(TEST_DEBUG)
-  | trace showProgress False
-  = undefined
+            traceLeftSlice = trace ("leftSlice: slice(0, len " ++ show rOffset ++ ")")
+            traceRightSlice = trace ("rightSlice slice(" ++ show rightStart ++ " len "++ show rightLen ++ ")")
+#else
+            traceLeftSlice = id
+            traceRightSlice = id
 #endif
-  | writeRemaining wstate <= 0
-  = error ("doWrite " ++ (show . preserveRO) wstate ++ ": writeRemaining leq 0: " ++ (show . writeRemaining) wstate ++ "]")
-  | saddr < sRegion
-  -- Skip over unmapped memory here (TODO: Turn writes to unmapped memory into something.)
-  = writeContents skipUnmappedRegion iv mr
-  -- Don't molest ROM regions if the preserveRO flag is true. Otherwise, we can patch the ROM.
-  | ROMRegion{} <- mr
-  = ( updWriteState
-    , if preserveRO wstate
-      then mr
-      else mr & contents .~ DVU.concat [leftSlice, patchSlice, rightSlice]
-    )
-  | DevRegion{} <- mr
-  = ( updWriteState
-    , DevRegion $ D.devWriteSeq (curAddr wstate - sRegion) wordVec (_rgnDevice mr)
-    )
-  -- If nWrite is greater than the LRU flush threshold, then clear out the pending writes and queue up the
-  -- new updates.
-  | nWrite < maxPending
-  = ( updWriteState
-    , execState writeQueueSeq mr
-    )
-  -- Cull all pending writes, update the underlying vector
-  | otherwise
-  = ( updWriteState
-    , mr & writesPending %~ filterPending
-         & contents .~ DVU.concat [ leftSlice, patchSlice, rightSlice ]
-    )
-  where
-    saddr = curAddr wstate
-    wordVec = wordArray wstate
-    eRegion = I.upperBound iv
-    sRegion = I.lowerBound iv
-    sOffset = fromIntegral (saddr - sRegion)
-    nWrite = min (fromIntegral (eRegion - saddr)) (writeRemaining wstate)
-    updWriteState = wstate { curAddr        = saddr + fromIntegral nWrite
-                           , writeRemaining = writeRemaining wstate - nWrite
-                           }
-    skipUnmappedRegion = wstate { curAddr = sRegion
-                                , writeRemaining = writeRemaining wstate - fromIntegral (sRegion - saddr)
-                                }
-    writeQueueSeq = sequence [state (queueLRU (fromIntegral $ a - sRegion) w) | (a, w) <- zip addrWordsList patchAsList]
-    addrWordsList = [fromIntegral offs + saddr | offs <- [0..nWrite]]
-    patchAsList = DVU.toList $ DVU.slice (fromIntegral (saddr - baseAddr wstate)) nWrite wordVec
-
-    -- You'd think something like this would exist in Prelude.
-    posnum x
-      | x >= 0
-      = x
-      | otherwise
-      = 0
-
-    leftLen = fromIntegral (posnum (saddr - sRegion))
-    leftSlice =
-      if leftLen > 0
-      then views contents (DVU.slice 0 leftLen) mr
-      else DVU.empty
-
-    patchSlice =
-      let patchOffset =
-            if baseAddr wstate < saddr
-            then fromIntegral (saddr - baseAddr wstate) + leftLen
-            else 0
-      in  DVU.slice patchOffset nWrite wordVec
-
-    rightSlice =
-      let rightOffs = sOffset + nWrite
-          rightLen  = posnum (fromIntegral eRegion - rightOffs)
-      in  if rightLen > 0
-          then views contents (DVU.slice rightOffs rightLen) mr
-          else DVU.empty
-
-    filterPending lru = lru & lrucPsq %~ prunePsq [k | k <- views lrucPsq OrdPSQ.keys lru
-                                                     , sOffset >= k && k < sOffset + nWrite]
-
+        nWrite = fromIntegral (eAddr - sAddr + 1)
+        writeQueueSeq = sequence [state (queueLRU (fromIntegral a ) w) | (a, w) <- zip addrWordsList patchAsList]
+        addrWordsList = [fromIntegral offs + rOffset | offs <- [0..nWrite]]
+        patchAsList = DVU.toList patchSlice
+        filterPending lru = lru & lrucPsq %~ prunePsq [k | k <- views lrucPsq OrdPSQ.keys lru
+                                                         , let r = fromIntegral rOffset
+                                                         , r >= k && k < r + nWrite]
 #if defined(TEST_DEBUG)
-    showProgress =
-      printf "saddr 0x%04x sOffset %5d nWrite %5d"
-        saddr
-        sOffset
-        nWrite
+        showProgress = printf "writeContents: sAddr 0x%04x eAddr 0x%04x sRegion 0x%04x eRegion 0x%04x sOffset %5d nWrite %5d"
+                              sAddr eAddr sRegion eRegion sOffset nWrite
 #endif
 
 

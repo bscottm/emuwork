@@ -123,6 +123,7 @@ trs80disassemble sys imgReader imgName msize guidance =
   do
     trs80 <- trs80System imgName imgReader (fromIntegral msize) sys
     let (img, _sys') = sysMReadN theOrigin (fromIntegral (theEndAddr - theOrigin) + 1) trs80
+    putStrLn $ "img: " ++ show img
     unless (DVU.null img) $
       case G.getMatchingSection guidance (romMD5 img) of
         Just guidance' ->

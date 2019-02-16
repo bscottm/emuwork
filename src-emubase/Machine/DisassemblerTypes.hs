@@ -53,6 +53,7 @@ import qualified Data.Sequence          as Seq
 import qualified Data.Text              as T
 import           Data.Vector.Unboxed    (Unbox, Vector)
 import qualified Data.Vector.Unboxed    as DVU
+import           Text.Printf
 
 import           Machine.ProgramCounter
 import           Machine.System
@@ -66,6 +67,8 @@ disassembler :: (Ord addrType
                 , Integral wordType
                 , Unbox wordType
                 -- The things you need for debugging. :-)
+                , PrintfArg addrType
+                , PrintfArg wordType
                 , ShowHex addrType
                 , ShowHex wordType
                 , Show addrType
@@ -381,6 +384,10 @@ disasmMRead dstate = (word, dstate & disasmSystem .~ sys'& disasmCurAddr +~ 1)
 disasmMReadN :: ( Integral addrType
                 , Integral wordType
                 , DVU.Unbox wordType
+                , PrintfArg addrType
+                , PrintfArg wordType
+                , Show addrType
+                , Show wordType
                 )
              => Int
              -> DisasmState cpuType insnType addrType wordType extPseudoType

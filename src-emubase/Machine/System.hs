@@ -13,6 +13,7 @@ import           Data.Data
 import qualified Data.Text                     as T
 import           Data.Vector.Unboxed           (Vector)
 import qualified Data.Vector.Unboxed           as DVU
+import           Text.Printf
 
 import           Machine.ProgramCounter
 import           Machine.Utils
@@ -47,7 +48,10 @@ sysAliases :: Lens' (EmulatedSystem cpuType addrType wordType insnSet) [String]
 sysAliases f sys = (\aliases -> sys { _sysAliases = aliases }) <$> f (_sysAliases sys)
 
 -- | Emulated system constructor.
-mkEmulatedSystem :: EmulatedProcessor cpuType insnSet addrType wordType
+mkEmulatedSystem :: ( Ord addrType
+                    , Bounded addrType
+                    )
+                 => EmulatedProcessor cpuType insnSet addrType wordType
                  -- ^ Processor (CPU)
                  -> String
                  -- ^ System name
@@ -194,6 +198,10 @@ sysMRead addr sys = second updateMemSys $ views memory (M.mRead addr) sys
 sysPCReadN :: ( Integral addrType
               , Integral wordType
               , DVU.Unbox wordType
+              , Show addrType
+              , PrintfArg addrType
+              , PrintfArg wordType
+              , Show wordType
               )
            => ProgramCounter addrType
            -> Int
@@ -204,6 +212,10 @@ sysPCReadN pc nwords sys = (pc + fromIntegral nwords, sysMReadN (unPC pc) nwords
 sysMReadN :: ( Integral addrType
              , Integral wordType
              , DVU.Unbox wordType
+             , PrintfArg addrType
+             , PrintfArg wordType
+             , Show addrType
+             , Show wordType
              )
           => addrType
           -> Int
@@ -227,7 +239,10 @@ data NullInsnSet = NullNOP
 type NullSystem addrType wordType = EmulatedSystem NullCPU NullInsnSet addrType wordType
 
 -- | The null system:
-nullSystem :: NullSystem addrType wordType
+nullSystem :: ( Ord addrType
+              , Bounded addrType
+              )
+           => NullSystem addrType wordType
 nullSystem = mkEmulatedSystem nullProcessor name aliases
   where
     name     = "Null/dummy system"

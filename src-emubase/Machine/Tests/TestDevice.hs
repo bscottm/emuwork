@@ -22,7 +22,7 @@ import qualified Machine.Device              as D
 
 #if defined(TEST_DEBUG)
 import           Debug.Trace
-import           Utils
+import           Machine.Utils
 #endif
 
 -- | A very simple counting device
