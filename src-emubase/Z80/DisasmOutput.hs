@@ -99,21 +99,22 @@ z80AnalyticDisassembly dstate disasmSeq =
     formatElt pseudo = formatPseudo pseudo
 
     -- Catch some of the special cases before calling the generic operand formatter.
-    formatOperands insn
-      | IN port <- insn
-      = case port of
-          PortImm imm -> formatOperand imm
-          CIndIO reg8 -> T.append (gFormatOperands reg8) ", (C)"
-          CIndIO0     -> "(C)"
-      | OUT port <- insn
-      = case port of
-          PortImm imm -> formatOperand imm
-          CIndIO reg8 -> T.append "(C), " (gFormatOperands reg8)
-          CIndIO0     -> "(C), 0"
-      | LDSPHL <- insn
-      = "SP, HL"
-      | otherwise
-      = gFormatOperands insn
+    formatOperands insn =
+        case insn of
+          IN port ->
+            case port of
+              PortImm imm -> formatOperand imm
+              CIndIO reg8 -> T.append (gFormatOperands reg8) ", (C)"
+              CIndIO0     -> "(C)"
+          OUT port ->
+            case port of
+              PortImm imm -> formatOperand imm
+              CIndIO reg8 -> T.append "(C), " (gFormatOperands reg8)
+              CIndIO0     -> "(C), 0"
+          RST rst  -> asHex rst
+          LDSPHL   -> "SP, HL"
+          JPHL     -> "(HL)"
+          _        -> gFormatOperands insn
 
 -- | Generate the "analytic" version of the output (opcodes, ASCII representation) and output to an 'IO' handle.
 z80AnalyticDisassemblyOutput :: Handle
