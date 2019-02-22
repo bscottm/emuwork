@@ -28,7 +28,7 @@ section:
     - equate: [BADDCBVEC, 0x4033]
     - comment: Cassette port and line printer width control byte
     - comment: 0=64 char, 8=32 char.
-    - equate: [CASPLPRT, 0x403d]
+    - equate: [CASLPWIDTH, 0x403d]
     - comment: ! 'OSVER$: DOS version number'
     - equate: [DOSVER, 0x403e]
     - comment: 25 millisecond clock count
@@ -313,8 +313,8 @@ section:
         (DEC) of the file.
 
     - disasm:
-        nbytes: 0x0020
-        addr: 0x03c2
+        addr: $
+        end: 0x3e3
     - comment: |+
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
         Read the keyboard's memory locations, determining if a key has
@@ -336,8 +336,8 @@ section:
 
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x0074
-        addr: 0x03e3
+        addr: $
+        end: 0x0458
     - comment: |+
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
         DO (display output) DCB function
@@ -349,7 +349,7 @@ section:
         do the rest of the character processing.
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        addr: 0x0458
+        addr: $
         end: 0x0506
     - comment: == Cursor control table ==
     - disasm:
@@ -358,103 +358,120 @@ section:
     - disasm:
         addr: $
         end: 0x058d
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-    - comment: PR (line printer output) DCB function
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        PR (line printer output) DCB function
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
         addr: $
         end: 0x0674
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-    - comment: Initialize the restart vector table, located at RST08VEC
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        Initialize the restart vector table, located at RST08VEC
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x005d
-        addr: 0x0674
+        addr: $
+        end: 0x06d2
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - comment: Restart vector initialization table. Yes, this is code that is
     - comment: copied into RAM.
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - comment: 0x4000 -> RST08 redirect
     - disasm:
-        nbytes: 0x0002
-        addr: 0x06d2
+        addr: $
+        nbytes: 0x0003
     - comment: 0x4003 -> RST10 redirect
     - disasm:
-        nbytes: 0x0002
-        addr: 0x06d5
+        addr: $
+        nbytes: 0x0003
     - comment: 0x4006 -> RST18 redirect
     - disasm:
-        nbytes: 0x0002
-        addr: 0x06d8
+        addr: $
+        nbytes: 0x0003
     - comment: 0x4009 -> RST20 redirect
     - disasm:
-        nbytes: 0x0002
-        addr: 0x06db
+        addr: $
+        nbytes: 0x0003
     - comment: 0x400c -> RST28 redirect
     - disasm:
-        nbytes: 0x0002
-        addr: 0x06de
+        addr: $
+        nbytes: 0x0003
     - comment: 0x400f -> RST30 redirect
     - disasm:
-        nbytes: 0x0002
-        addr: 0x06e1
+        addr: $
+        nbytes: 0x0003
     - comment: 0x4012 -> RST38 redirect
     - disasm:
-        nbytes: 0x0002
-        addr: 0x06e4
-    - comment: ! '0x4015: KI (keyboard) device control block'
-    - bytes:
-        nbytes: 0x0001
-        addr: 0x06e7
-    - jumptable:
-        nbytes: 0x0002
-        addr: 0x06e8
-    - bytes:
+        addr: $
         nbytes: 0x0003
-        addr: 0x06ea
-    - ascii:
-        nbytes: 0x0002
-        addr: 0x06ed
-    - comment: ! '0x401d: DO (display output) device control block'
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        0x4015: KI (keyboard) device control block
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - bytes:
+        addr: $
         nbytes: 0x0001
-        addr: 0x06ef
     - jumptable:
+        addr: $
         nbytes: 0x0002
-        addr: 0x06f0
     - bytes:
+        addr: $
         nbytes: 0x0003
-        addr: 0x06f2
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x06f5
-    - comment: ! '0x4025: PR (line printer output) device control block'
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        0x401d: DO (display output) device control block
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - bytes:
+        addr: $
         nbytes: 0x0001
-        addr: 0x06f7
     - jumptable:
+        addr: $
         nbytes: 0x0002
-        addr: 0x06f8
     - bytes:
+        addr: $
         nbytes: 0x0003
-        addr: 0x06fa
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x06fd
-    - comment: ! '0x402d:'
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        0x4025: PR (line printer output) device control block
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - bytes:
+        addr: $
+        nbytes: 0x0001
+    - jumptable:
+        addr: $
+        nbytes: 0x0002
+    - bytes:
+        addr: $
+        nbytes: 0x0003
+    - ascii:
+        addr: $
+        nbytes: 0x0002
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        0x402d:
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x0005
-        addr: 0x06ff
-    - comment: ! '0x4033: OUTDCB jumps here if the requested device type bit doesn''t
-        match'
+        addr: $
+        end: 0x0705
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        0x4033: OUTDCB jumps here if the requested device type bit
+        doesn't match
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        nbytes: 0x0002
-        addr: 0x0705
+        addr: $
+        end: 0x0708
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - comment: End of the restart vector initialization table.
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - disasm:
-        addr: 0x0708
+        addr: $
         end: 0x0955
     - comment: |+
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -542,20 +559,20 @@ section:
         nbytes: 0x0004
         addr: 0x1384
     - disasm:
-        nbytes: 0x0202
-        addr: 0x1388
+        addr: $
+        end: 0x158b
     - comment: ! 'PI/2: Exploit''s the identity that cos(theta + pi/2) = sin(theta)'
     - bytes:
+        addr: $
         nbytes: 0x0004
-        addr: 0x158b
     - comment: ! ??Floating point constant?
     - bytes:
+        addr: $
         nbytes: 0x0004
-        addr: 0x158f
     - comment: Floating point constant?
     - bytes:
+        addr: $
         nbytes: 0x0004
-        addr: 0x1593
     - disasm:
         addr: $
         end: 0x1608
@@ -569,89 +586,89 @@ section:
     - comment: BASIC verb table -- first character has high bit set
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - highbits:
-        nbytes: 0x01d0
-        addr: 0x1650
+        addr: $
+        end: 0x1822
     - jumptable:
-        nbytes: 0x00a9
-        addr: 0x1820
+        addr: $
+        end: 0x18c9
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - comment: ! 'BASIC error codes:'
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18c9
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18cb
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18cd
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18cf
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18d1
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18d3
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18d5
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18d7
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18d9
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18db
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18dd
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18df
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18e1
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18e3
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18e5
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18e7
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18e9
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18eb
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18ed
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18ef
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18f1
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18f3
     - ascii:
+        addr: $
         nbytes: 0x0002
-        addr: 0x18f5
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - comment: BASIC reserved data table.
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - bytes:
-        nbytes: 0x0027
-        addr: 0x18f7
+        addr: $
+        end: 0x191e
     - asciiz: $
     - asciiz: $
     - asciiz: $

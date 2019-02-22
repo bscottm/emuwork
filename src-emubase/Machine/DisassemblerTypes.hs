@@ -90,7 +90,7 @@ disassembler = disassembler' (Seq.empty ><)
       = let sys                   = dstate ^. disasmSystem
             decoder               = sys ^. processor . processorOps . idecode
             (seqDisasm', dstate') = second (updateSystem dstate) >>> mkDisElt curPC >>> doPostProc $ decoder curPC sys
-        in  disassembler' ((dseq seqDisasm') ><) dstate'
+        in  disassembler' (dseq seqDisasm' ><) dstate'
       | otherwise
       = (dseq Seq.empty, dstate)
       where
@@ -104,46 +104,37 @@ disassembler = disassembler' (Seq.empty ><)
             newPC = insn'  ^. decodedInsnPC
             (insMem, sys') = sysMReadN (unPC curPC) (fromIntegral (newPC - curPC)) (dstate' ^. disasmSystem)
 
--- | 'DisasmElement' is a dissassembly element: a disassembled instruction (with corresponding address and instruction
+-- | 'DisElement' is a dissassembly element: a disassembled instruction (with corresponding address and instruction
 -- words) or pseudo operation.
-data DisElement insnType addrType wordType extPseudoType where
+data DisElement insnType addrType wordType extPseudoType =
   -- Disassembled instruction
-  DisasmInsn  :: DisEltAddress addrType         -- Instruction address
-              -> Vector wordType                -- Vector of words corresponding to the instruction, e.g. opcodes
-              -> insnType                       -- The instruction
-              -> T.Text                         -- Optional comment
-              -> DisElement insnType addrType wordType extPseudoType
+    DisasmInsn (DisEltAddress addrType)        -- Instruction address
+                (Vector wordType)              -- Vector of words corresponding to the instruction, e.g. opcodes
+                insnType                       -- The instruction
+                T.Text                         -- Optional comment
   -- Disassembly origin
-  DisOrigin   :: DisEltAddress addrType
-              -> DisElement insnType addrType wordType extPseudoType
+  | DisOrigin   (DisEltAddress addrType)
   -- Sequence of bytes
-  ByteRange   :: DisEltAddress addrType         -- Start address
-              -> Vector wordType                -- Bytes
-              -> DisElement insnType addrType wordType extPseudoType
+  | ByteRange   (DisEltAddress addrType)         -- Start address
+                (Vector wordType)                -- Bytes
   -- An (sybolic|absolute) address
-  Addr        :: DisEltAddress addrType         -- Adress of where this address is stored
-              -> SymAbsAddr addrType            -- The address to be annotated
-              -> Vector wordType                -- The actual address bytes
-              -> DisElement insnType addrType wordType extPseudoType
+  | Addr        (DisEltAddress addrType)         -- Adress of where this address is stored
+                (SymAbsAddr addrType)            -- The address to be annotated
+                (Vector wordType)                -- The actual address bytes
   -- 0-terminated string (yes, these were used back in the pre-C days...)
-  AsciiZ      :: DisEltAddress addrType         -- Start of string
-              -> Vector wordType                -- The string, not including the zero terminator
-              -> DisElement insnType addrType wordType extPseudoType
+  | AsciiZ      (DisEltAddress addrType)         -- Start of string
+                (Vector wordType)                -- The string, not including the zero terminator
   -- Simple ASCII string
-  Ascii       :: DisEltAddress addrType
-              -> Vector wordType
-              -> DisElement insnType addrType wordType extPseudoType
+  | Ascii       (DisEltAddress addrType)
+                (Vector wordType)
   -- Address equation: associates a symbol with an address of something, which is also added to the
   -- disassembler's symbol table
-  Equate      :: T.Text
-              -> DisEltAddress addrType
-              -> DisElement insnType addrType wordType extPseudoType
+  | Equate      T.Text
+                (DisEltAddress addrType)
   -- Comment, printed as a line, as opposed to after an mnemonic and operands
-  LineComment :: T.Text
-              -> DisElement insnType addrType wordType extPseudoType
+  | LineComment T.Text
   -- Extensions to the "standard" disassembler pseudo instructions
-  ExtPseudo   :: extPseudoType
-              -> DisElement insnType addrType wordType extPseudoType
+  | ExtPseudo   extPseudoType
   deriving (Data, Typeable, Show)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -303,7 +294,7 @@ disasmSymbolTable f ds = (\syms -> ds { _disasmSymbolTable = syms }) <$> f (_dis
 
 disasmPostProc :: Lens' (DisasmState cpuType insnType addrType wordType extPseudoType)
                         (DisElementPostProc cpuType insnType addrType wordType extPseudoType)
-disasmPostProc f ds = (\postProc -> ds { _disasmPostProc = postProc }) <$> (f (_disasmPostProc ds))
+disasmPostProc f ds = (\postProc -> ds { _disasmPostProc = postProc }) <$> f (_disasmPostProc ds)
 
 -- | Create an initial disassembly state for a given emulated system. (Note: There is no good default for the emulated
 -- system, otherwise, this would be a good candidate for a 'Monoid' instance.)

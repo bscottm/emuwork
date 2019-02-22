@@ -31,8 +31,7 @@ library
     transformers,
     unordered-containers,
     vector,
-    yaml,
-    yaml-combinators
+    yaml
 
   ghc-options:
     -Wall -O2

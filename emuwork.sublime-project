@@ -1,21 +1,35 @@
 {
-	"folders":
-	[
-		{
-			"path": "."
-		}
-	],
-	"SublimeHaskell": {
-		"haskell_build_tool": "stack"
-	},
-	"settings": {
-	    "LSP": {
-			"clients": {
-				"haskell-ide-engine":
-				{
-				    "command": ["~/.local/bin/hie", "--lsp", "-r", "~/play/emuwork"]
-			  	}
-		  	}
-		}
+  "SublimeHaskell":
+  {
+    "haskell_build_tool": "stack"
+  },
+  "folders":
+  [
+    {
+      "path": "."
+    }
+  ],
+  "settings":
+  {
+    "LSP":
+    {
+      "clients":
+      {
+	"haskell-ide-engine":
+	{
+	  "command":
+	  [
+	    "~/.local/bin/hie",
+	    "--lsp",
+	    "-r",
+	    "~/play/emuwork"
+	  ]
 	}
+      },
+      "haskell-ide-engine":
+      {
+	"enabled": true
+      }
+    }
+  }
 }

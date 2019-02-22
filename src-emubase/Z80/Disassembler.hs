@@ -16,6 +16,7 @@ module Z80.Disassembler
   , z80disasciiz
   , z80disascii
   , z80DefaultPostProcessor
+  , z80AddrInDisasmRange
   )
 where
 
@@ -127,30 +128,21 @@ z80disasciiz dstate =
 -- | Grab a sequence of bytes from the memory image, returning an 'Ascii' disassmbly element
 z80disascii
   :: Z80disp
-            -- ^ Current disassembly state
+  -- ^ Current disassembly state
   -> Z80disassembly
-            -- ^ Number of bytes to extract
+  -- ^ Number of bytes to extract
   -> (Z80DisasmElt, Z80disassembly)
-            -- ^ Resulting diassembly state
+  -- ^ Resulting diassembly state
 z80disascii nBytes dstate =
   let sAddr = views disasmCurAddr unPC dstate in first (mkAscii sAddr) $ disasmMReadN (fromIntegral nBytes) dstate
 
 -- | Z80 default instruction post processor. This merely appends the decoded instruction onto the disassembly sequence.
 z80DefaultPostProcessor :: DisElementPostProc Z80state Z80instruction Z80addr Z80word Z80PseudoOps
-z80DefaultPostProcessor disElt@DisasmInsn{} dstate = ((Seq.singleton . internalAddrRef) disElt, labelAddresses disElt dstate)
+z80DefaultPostProcessor disElt@DisasmInsn{} dstate = (Seq.singleton disElt, labelAddresses disElt dstate)
  where
-  inrange addr = views disasmOriginAddr unPC dstate <= addr && addr <= views disasmEndAddr unPC dstate
-  internalAddrRef disElt'@(DisasmInsn disAddr bytes insn _cmnt)
-    | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- insn
-    -- 0x0 tends to be a constant, so if there's an address equate, don't substitute or point out an internal reference.
-                                                    , inrange addr && 0 < addr
-    = (DisasmInsn disAddr bytes insn "poss. internal ref")
-    | otherwise
-    = disElt'
-  internalAddrRef disElt' = disElt'
-
   labelAddresses (DisasmInsn _addr _bytes insn _cmnt) dstate'
-    | Just (prefix, destAddr) <- hasAddress, inrange destAddr && not (views disasmSymbolTable (destAddr `H.member`) dstate')
+    | Just (prefix, destAddr) <- hasAddress, z80AddrInDisasmRange destAddr dstate'
+                                             && not (views disasmSymbolTable (destAddr `H.member`) dstate')
     = dstate' & disasmSymbolTable %~ H.insert destAddr (mkLabel prefix) & disasmLabelNum +~ 1
     | otherwise
     = dstate'
@@ -174,3 +166,9 @@ z80DefaultPostProcessor disElt@DisasmInsn{} dstate = ((Seq.singleton . internalA
   labelAddresses _disElt dstate' = dstate'
 -- Everything else...
 z80DefaultPostProcessor disElt dstate' = defaultPostProcessor disElt dstate'
+
+-- | Commonly used predicate to determine if an address falls within the dissembled start/end.
+z80AddrInDisasmRange :: Z80addr
+                     -> Z80disassembly
+                     -> Bool
+z80AddrInDisasmRange addr dstate = views disasmOriginAddr unPC dstate <= addr && addr <= views disasmEndAddr unPC dstate

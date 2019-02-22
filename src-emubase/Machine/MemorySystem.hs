@@ -318,10 +318,10 @@ mkDevRegion sa len dev = insertMemRegion sa (sa + fromIntegral (len - 1)) (DevRe
 
 -- | Internal common code that inserts memory regions.
 insertMemRegion :: ( Integral addrType
-                   , ShowHex addrType
-                   , Show addrType
                    , Integral wordType
                    , DVU.Unbox wordType
+                   , ShowHex addrType
+                   , Show addrType
                    , Show wordType
                    )
                 => addrType
@@ -356,7 +356,7 @@ insertMemRegion sa ea newRegion msys
                   , "-"
                   , as0xHexS ea
                   , " overlaps with "
-                  ] ++ (intercalate ", " (map formatIntersect $ IM.toList intersects))
+                  ] ++ intercalate ", " (map formatIntersect $ IM.toList intersects)
           )
   where
     intersects = IM.intersecting (msys ^. regions) (I.ClosedInterval sa ea)
@@ -443,7 +443,7 @@ mReadN sAddr nWords msys
   | otherwise
   = (result DVU.empty, msys & regions %~ updDevRegions updMem)
   where
-    memRegions                  = views regions (flip IM.intersecting (I.ClosedInterval sAddr eAddr)) msys
+    memRegions                  = views regions (`IM.intersecting` I.ClosedInterval sAddr eAddr) msys
     (result, updMem)            = IM.mapAccumWithKey collectReads (DVU.empty DVU.++) memRegions
     eAddr                       = sAddr + fromIntegral (nWords - 1)
     collectReads accum iv mr =
@@ -488,7 +488,7 @@ updDevRegions :: ( Ord addrType
 updDevRegions updRegions {-origRegions-} =
   execState $ sequence [state (\m -> ((), onlyDevRegions v k m)) | (k, v) <- IM.assocs updRegions]
   where
-    onlyDevRegions dev@DevRegion{}  k mreg = (IM.update (const (Just dev)) k mreg)
+    onlyDevRegions dev@DevRegion{}  k mreg = IM.update (const (Just dev)) k mreg
     onlyDevRegions _mr             _k mreg = mreg
 
 
@@ -589,7 +589,7 @@ doWrite :: ( Integral addrType
 doWrite readOnly startAddr patch msys = msys & regions %~ execState updRegionState
   where
     endAddr = startAddr + fromIntegral nWords - 1
-    memRegions = views regions (flip IM.intersecting (I.ClosedInterval startAddr endAddr)) msys
+    memRegions = views regions (`IM.intersecting` I.ClosedInterval startAddr endAddr) msys
     updMem = IM.mapWithKey writeContents memRegions
     updRegionState = sequence [state (\m -> ((), IM.update (const (Just v)) k m)) | (k, v) <- IM.assocs updMem]
     nWords = DVU.length patch

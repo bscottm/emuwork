@@ -123,7 +123,6 @@ trs80disassemble sys imgReader imgName msize guidance =
   do
     trs80 <- trs80System imgName imgReader (fromIntegral msize) sys
     let (img, _sys') = sysMReadN theOrigin (fromIntegral (theEndAddr - theOrigin) + 1) trs80
-    putStrLn $ "img: " ++ show img
     unless (DVU.null img) $
       case G.getMatchingSection guidance (romMD5 img) of
         Just guidance' ->
@@ -134,7 +133,7 @@ trs80disassemble sys imgReader imgName msize guidance =
             mapM_ (z80AnalyticDisassemblyOutput stdout finalDState) disSeq
             mapM_ TIO.putStrLn (z80FormatSymbolTable finalDState)
         Nothing ->
-          mapM_ (TIO.hPutStrLn stderr) $
+          mapM_ (TIO.hPutStrLn stderr)
             [ T.append "Could not find guidance section for " (romMD5Hex img)
             , T.append "Origin = " (as0xHex theOrigin)
             , T.append "End addr = " (as0xHex theEndAddr)
@@ -143,7 +142,7 @@ trs80disassemble sys imgReader imgName msize guidance =
   where
     theOrigin                   = getGuidanceAddrDefault (G.origin guidance)
     theEndAddr                  = getGuidanceAddrDefault (G.endAddr guidance)
-    -- Initial disassembly state: known symbols and disassembly address range predicate
+    -- Initial disassembly state
     initialDisassembly sys' guide' =
       mkDisassemblyState sys' theOrigin theEndAddr
         & disasmSymbolTable .~ G.invertKnownSymbols guide'
@@ -273,7 +272,7 @@ highbitCharTable nBytes z80dstate =
       -- Look for the high bit characters within the address range, then convert back to addresses
       byteidxs            = DVU.findIndices (>= 0x80) memBlock
       -- Set up a secondary index vector to make a working zipper
-      byteidx2            = DVU.drop 1 byteidxs `DVU.snoc` (fromIntegral nBytes)
+      byteidx2            = DVU.drop 1 byteidxs `DVU.snoc` fromIntegral nBytes
       -- Grab an individual string from a memory range
       -- grabString :: Int -> Int -> Seq Z80DisasmElt
       grabString memidx memidx' =

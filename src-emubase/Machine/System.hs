@@ -1,3 +1,6 @@
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE TemplateHaskell      #-}
 {-# LANGUAGE DeriveDataTypeable    #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -8,12 +11,13 @@
 module Machine.System where
 
 import           Control.Lens
-import           Control.Arrow                 (second)
+import           Control.Arrow                  ( second )
 import           Data.Data
 import qualified Data.Text                     as T
-import           Data.Vector.Unboxed           (Vector)
+import           Data.Vector.Unboxed            ( Vector )
 import qualified Data.Vector.Unboxed           as DVU
 import           Text.Printf
+import           Generics.SOP.TH                (deriveGeneric)
 
 import           Machine.ProgramCounter
 import           Machine.Utils
@@ -21,8 +25,7 @@ import qualified Machine.MemorySystem          as M
 
 -- | 'EmulatedSystem' encapsulates the various parts required to emulate a system (processor, memory, ...)
 data EmulatedSystem cpuType insnSet addrType wordType where
-  EmulatedSystem ::
-    { _processor  :: EmulatedProcessor cpuType insnSet addrType wordType
+  EmulatedSystem ::{ _processor  :: EmulatedProcessor cpuType insnSet addrType wordType
                   -- ^ System processor
     , _memory     :: M.MemorySystem addrType wordType
                      -- ^ System memory
@@ -48,27 +51,22 @@ sysAliases :: Lens' (EmulatedSystem cpuType addrType wordType insnSet) [String]
 sysAliases f sys = (\aliases -> sys { _sysAliases = aliases }) <$> f (_sysAliases sys)
 
 -- | Emulated system constructor.
-mkEmulatedSystem :: ( Ord addrType
-                    , Bounded addrType
-                    )
-                 => EmulatedProcessor cpuType insnSet addrType wordType
+mkEmulatedSystem
+  :: (Ord addrType, Bounded addrType)
+  => EmulatedProcessor cpuType insnSet addrType wordType
                  -- ^ Processor (CPU)
-                 -> String
+  -> String
                  -- ^ System name
-                 -> [String]
+  -> [String]
                  -- ^ System aliases
-                 -> EmulatedSystem cpuType insnSet addrType wordType
-mkEmulatedSystem sysCpu name aliases = EmulatedSystem { _processor = sysCpu
-                                                      , _memory = M.initialMemorySystem
-                                                      , _sysName = name
-                                                      , _sysAliases = aliases
-                                                      }
+  -> EmulatedSystem cpuType insnSet addrType wordType
+mkEmulatedSystem sysCpu name aliases =
+  EmulatedSystem { _processor = sysCpu, _memory = M.initialMemorySystem, _sysName = name, _sysAliases = aliases }
 
 -- | 'EmulatedProcessor' boxes the emulated machine's processor. All interesting operations on an @EmulatedProcessor@
 -- are in the `ProcessorOps` data type.
 data EmulatedProcessor cpuType insnSet addrType wordType where
-  EmulatedProcessor ::
-    { _procPrettyName :: String
+  EmulatedProcessor ::{ _procPrettyName :: String
     -- ^ Pretty name for the emulated processor
     , _cpu            :: cpuType
     -- ^ Processor-specific internal data (registers, flags, etc.)
@@ -86,22 +84,22 @@ cpu :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) cpuType
 cpu f proc = proc <$ f (_cpu proc)
 
 processorOps :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) (ProcessorOps cpuType insnSet addrType wordType)
-processorOps f ops =  ops <$ f (_ops ops)
+processorOps f ops = ops <$ f (_ops ops)
 
 
 -- | Generic representation of instruction decoder outputs
-data DecodedInsn instructionSet addrType where
-  -- A decoded instruction
-  DecodedInsn ::
+data DecodedInsn instructionSet addrType =
+    -- A decoded instruction
+    DecodedInsn
     { _newPC :: ProgramCounter addrType
     , _insn :: instructionSet
-    } -> DecodedInsn instructionSet addrType
+    }
   -- An address fetched from memory, independent of endian-ness
-  DecodedAddr ::
+  | DecodedAddr
     { _newPC :: ProgramCounter addrType
     , _disAddr :: addrType
-    } -> DecodedInsn instructionSet addrType
-    deriving (Data, Typeable)
+    }
+  deriving (Eq, Data, Typeable)
 
 decodedInsnPC :: Lens' (DecodedInsn insnSet addrType) (ProgramCounter addrType)
 decodedInsnPC f insn = (\pc' -> insn { _newPC = pc' }) <$> f (_newPC insn)
@@ -115,8 +113,7 @@ decodedAddr f insn = (\addr' -> insn { _disAddr = addr' }) <$> f (_disAddr insn)
 
 -- | Processor operations type class
 data ProcessorOps cpuType insnSet addrType wordType where
-  ProcessorOps ::
-    {
+  ProcessorOps ::{
       -- | Instruction decoder, for disassembly and execution
       _idecode :: ProcessorDecoder cpuType insnSet addrType wordType
     } -> ProcessorOps cpuType insnSet addrType wordType
@@ -128,8 +125,8 @@ instance Show (ProcessorOps cpuType insnSet addrType wordType) where
   -- Nothing to show. Need the instance for the EmulatedSystem automagically derived Show instance.
   show ProcessorOps{} = ""
 
-type ProcessorDecoder cpuType insnSet addrType wordType =
-  ProgramCounter addrType
+type ProcessorDecoder cpuType insnSet addrType wordType
+  =  ProgramCounter addrType
   -- ^ Current program counter, from where instructions are fetched
   -> EmulatedSystem cpuType insnSet addrType wordType
   -- ^ The memory system
@@ -147,83 +144,74 @@ type IOSystem portType wordType = M.MemorySystem portType wordType
 
 -- | Symbolic and absolute addresses, used both by disassemblers and instruction sets. For example, the Z80's instruction set uses
 -- both symbolic and absolute addresses as jump and call targets.
-data SymAbsAddr addrType where
-  AbsAddr :: addrType
-          -> SymAbsAddr addrType
-  SymAddr :: T.Text
-          -> SymAbsAddr addrType
-  deriving (Typeable, Data)
+data SymAbsAddr addrType =
+    AbsAddr addrType
+  | SymAddr T.Text
+  deriving (Eq, Ord, Typeable, Data)
 
 instance (ShowHex addrType) => Show (SymAbsAddr addrType) where
-  show (AbsAddr addr)  = as0xHexS addr
+  show (AbsAddr addr ) = as0xHexS addr
   show (SymAddr label) = show label
+
+deriveGeneric ''SymAbsAddr
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- System program counter operations
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-sysReadAndIncPC :: ( Integral addrType
-                   , Integral wordType
-                   , DVU.Unbox wordType
-                   )
-                => ProgramCounter addrType
-                -> EmulatedSystem cpuType insnSet addrType wordType
-                -> (ProgramCounter addrType, (wordType, EmulatedSystem cpuType insnSet addrType wordType))
-sysReadAndIncPC pc sys = (1+ pc, sysMRead (unPC pc) sys)
+sysReadAndIncPC
+  :: (Integral addrType, Integral wordType, DVU.Unbox wordType)
+  => ProgramCounter addrType
+  -> EmulatedSystem cpuType insnSet addrType wordType
+  -> (ProgramCounter addrType, (wordType, EmulatedSystem cpuType insnSet addrType wordType))
+sysReadAndIncPC pc sys = (1 + pc, sysMRead (unPC pc) sys)
 
 -- | Fetch an entity from memory, pre-incrementing the program counter, returning the (incremented pc, contents)
-sysIncPCAndRead :: ( Integral addrType
-                   , Integral wordType
-                   , DVU.Unbox wordType
-                   )
-                => ProgramCounter addrType
-                -> EmulatedSystem cpuType insnSet addrType wordType
-                -> (ProgramCounter addrType, (wordType, EmulatedSystem cpuType insnSet addrType wordType))
-sysIncPCAndRead pc sys = (pc', sysMRead (unPC pc') sys)
-  where
-    pc'               = 1+ pc
+sysIncPCAndRead
+  :: (Integral addrType, Integral wordType, DVU.Unbox wordType)
+  => ProgramCounter addrType
+  -> EmulatedSystem cpuType insnSet addrType wordType
+  -> (ProgramCounter addrType, (wordType, EmulatedSystem cpuType insnSet addrType wordType))
+sysIncPCAndRead pc sys = (pc', sysMRead (unPC pc') sys) where pc' = 1 + pc
 
 
-sysMRead :: ( Integral addrType
-            , Integral wordType
-            , DVU.Unbox wordType
-            )
-         => addrType
-         -> EmulatedSystem cpuType insnSet addrType wordType
-         -> (wordType, EmulatedSystem cpuType insnSet addrType wordType)
-sysMRead addr sys = second updateMemSys $ views memory (M.mRead addr) sys
-  where
-    updateMemSys msys = sys & memory .~ msys
+sysMRead
+  :: (Integral addrType, Integral wordType, DVU.Unbox wordType)
+  => addrType
+  -> EmulatedSystem cpuType insnSet addrType wordType
+  -> (wordType, EmulatedSystem cpuType insnSet addrType wordType)
+sysMRead addr sys = second updateMemSys $ views memory (M.mRead addr) sys where updateMemSys msys = sys & memory .~ msys
 
-sysPCReadN :: ( Integral addrType
-              , Integral wordType
-              , DVU.Unbox wordType
-              , Show addrType
-              , PrintfArg addrType
-              , PrintfArg wordType
-              , Show wordType
-              )
-           => ProgramCounter addrType
-           -> Int
-           -> EmulatedSystem cpuType insnSet addrType wordType
-           -> (ProgramCounter addrType, (Vector wordType, EmulatedSystem cpuType insnSet addrType wordType))
+sysPCReadN
+  :: ( Integral addrType
+     , Integral wordType
+     , DVU.Unbox wordType
+     , Show addrType
+     , PrintfArg addrType
+     , PrintfArg wordType
+     , Show wordType
+     )
+  => ProgramCounter addrType
+  -> Int
+  -> EmulatedSystem cpuType insnSet addrType wordType
+  -> (ProgramCounter addrType, (Vector wordType, EmulatedSystem cpuType insnSet addrType wordType))
 sysPCReadN pc nwords sys = (pc + fromIntegral nwords, sysMReadN (unPC pc) nwords sys)
 
-sysMReadN :: ( Integral addrType
-             , Integral wordType
-             , DVU.Unbox wordType
-             , PrintfArg addrType
-             , PrintfArg wordType
-             , Show addrType
-             , Show wordType
-             )
-          => addrType
-          -> Int
-          -> EmulatedSystem cpuType insnSet addrType wordType
-          -> (Vector wordType, EmulatedSystem cpuType insnSet addrType wordType)
+sysMReadN
+  :: ( Integral addrType
+     , Integral wordType
+     , DVU.Unbox wordType
+     , PrintfArg addrType
+     , PrintfArg wordType
+     , Show addrType
+     , Show wordType
+     )
+  => addrType
+  -> Int
+  -> EmulatedSystem cpuType insnSet addrType wordType
+  -> (Vector wordType, EmulatedSystem cpuType insnSet addrType wordType)
 sysMReadN addr nwords sys = second updateMemSys $ views memory (M.mReadN addr nwords) sys
-  where
-    updateMemSys msys = sys & memory .~ msys
+  where updateMemSys msys = sys & memory .~ msys
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- The null processor and system:
@@ -239,24 +227,16 @@ data NullInsnSet = NullNOP
 type NullSystem addrType wordType = EmulatedSystem NullCPU NullInsnSet addrType wordType
 
 -- | The null system:
-nullSystem :: ( Ord addrType
-              , Bounded addrType
-              )
-           => NullSystem addrType wordType
+nullSystem :: (Ord addrType, Bounded addrType) => NullSystem addrType wordType
 nullSystem = mkEmulatedSystem nullProcessor name aliases
-  where
-    name     = "Null/dummy system"
-    aliases  = ["null", "dummy"]
+ where
+  name    = "Null/dummy system"
+  aliases = ["null", "dummy"]
 
 -- | The null processor
 nullProcessor :: EmulatedProcessor NullCPU NullInsnSet addrType wordType
-nullProcessor = EmulatedProcessor { _procPrettyName = "Null (dummy) processor"
-                                  , _cpu            = NullCPU
-                                  , _ops            = ProcessorOps
-                                                      {
-                                                        _idecode = nullIDecode
-                                                      }
-                                  }
+nullProcessor =
+  EmulatedProcessor { _procPrettyName = "Null (dummy) processor", _cpu = NullCPU, _ops = ProcessorOps { _idecode = nullIDecode } }
 
 -- | Null processor operations
 {- instance ProcessorOps NullCPU NullInsnSet addrType wordType where

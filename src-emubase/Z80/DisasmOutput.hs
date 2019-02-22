@@ -1,6 +1,9 @@
+{-# LANGUAGE DataKinds            #-}
+{-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE BangPatterns         #-}
 {-# LANGUAGE OverloadedStrings    #-}
 {-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# OPTIONS_HADDOCK ignore-exports #-}
 
 -- | Z80 disassmbler output.
@@ -9,19 +12,24 @@
 -- The assembler part is Misosys EDAS-compatible, so, if the "analytic" part is stripped from the output, the resulting "assembler"
 -- part could be fed into the Misosys-EDAS compatible assembler to regenerate the object code.
 module Z80.DisasmOutput
-( z80AnalyticDisassembly
-, z80AnalyticDisassemblyOutput
-, z80FormatSymbolTable
-, formatOperand
-) where
+  ( z80AnalyticDisassembly
+  , z80AnalyticDisassemblyOutput
+  , z80FormatSymbolTable
+  -- , formatOperand
+  , Z80operand(..)
+  ) where
 
 -- import Debug.Trace
 
-import           Control.Lens          hiding ((<|), (|>))
+import           Control.Lens.Getter   (views, (^.))
+import qualified Control.Lens.Getter   as CLG
+import           Control.Lens.Each (each)
+import           Control.Lens.Fold     (foldOf)
 import           Data.Char
+import           Data.Int
 import qualified Data.Foldable         as Foldable
-import           Data.Generics.Aliases
-import           Data.Generics.Schemes
+import           Data.Generics.Aliases (mkT)
+import           Data.Generics.Schemes (everywhere)
 import           Data.HashMap.Strict   (HashMap)
 import qualified Data.HashMap.Strict   as H
 import           Data.List             (sortBy)
@@ -33,11 +41,14 @@ import qualified Data.Text.IO          as TIO
 import           Data.Tuple            ()
 import           Data.Vector.Unboxed   (Vector)
 import qualified Data.Vector.Unboxed   as DVU
+import           Generics.SOP
 import           System.IO
 
 import           Machine
 import           Z80.Disassembler
-import           Z80.InstructionSet
+-- Minor conflicts with Generics.SOP... <sigh!>
+import           Z80.InstructionSet hiding (POP, Z)
+import qualified Z80.InstructionSet as Z80
 import           Z80.Processor
 
 -- | Format the "analytic" version of the disassembled Z80 sequence as a 'Text'
@@ -47,13 +58,62 @@ z80AnalyticDisassembly :: Z80disassembly
                        -> Seq Z80DisasmElt
                        -> Seq T.Text
 z80AnalyticDisassembly dstate disasmSeq =
-  -- Append the symbol table to the formatted instruction sequence
-  -- Unfortunately (maybe not...?) the foldl results in the concatenation of many singletons.
-  formattedDisSeq dstate Seq.empty
+  foldOf (each . CLG.to (formatElt . annotateInternals)) (everywhere (mkT fixupSymbol . mkT fixupEltAddress) disasmSeq)
   where
-    formattedDisSeq z80dstate = Foldable.foldl formatElem (Seq.empty ><) $ fixupSymbols z80dstate disasmSeq
-    formatElem accSeq (DisasmInsn addr bytes ins cmnt) = ((accSeq $ formatLinePrefix bytes addr (formatIns ins cmnt)) ><)
-    formatElem accSeq pseudo                           = ((accSeq $ formatPseudo pseudo) ><)
+    symtab = dstate ^. disasmSymbolTable
+    -- Translate an absolute address, generally hidden inside an instruction operand, into a symbolic address
+    -- if present in the symbol table.
+    fixupSymbol addr@(AbsAddr absAddr) = maybe addr SymAddr (absAddr `H.lookup` symtab)
+    fixupSymbol other                  = other
+
+    -- Lookup address labels in the symbol table
+    fixupEltAddress disAddr@(Plain absAddr) = maybe disAddr (Labeled absAddr) (absAddr `H.lookup` symtab)
+    fixupEltAddress other                   = other
+
+    -- Annotate internal memory references for 16-bit register constant loads
+    annotateInternals disElt@(DisasmInsn disAddr bytes insn cmnt)
+      | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- insn
+      -- 0x0 tends to be a constant, so it's likely not an internal reference.
+      , z80AddrInDisasmRange addr dstate && 0 < addr
+      = DisasmInsn disAddr bytes insn (appendComment cmnt)
+      | otherwise
+      = disElt
+      where
+        intRefMsg = "poss. internal ref"
+        appendComment cmnt'
+          | T.null cmnt'
+          = intRefMsg
+          | otherwise
+          = T.intercalate " " [cmnt', intRefMsg]
+    annotateInternals disElt = disElt
+
+    formatElt (DisasmInsn addr insVec insn cmnt) = theIns
+      where
+        fmtInstruction = T.concat $ [padTo lenMnemonic . insMnemonic, formatOperands] <*> [insn]
+        fmtWithComment inp
+          | T.null cmnt
+          = inp
+          | otherwise
+          = T.concat [padTo lenInstruction inp, "; ", cmnt]
+        theIns = formatLinePrefix insVec addr (fmtWithComment fmtInstruction)
+    formatElt pseudo = formatPseudo pseudo
+
+    -- Catch some of the special cases before calling the generic operand formatter.
+    formatOperands insn
+      | IN port <- insn
+      = case port of
+          PortImm imm -> formatOperand imm
+          CIndIO reg8 -> T.append (gFormatOperands reg8) ", (C)"
+          CIndIO0     -> "(C)"
+      | OUT port <- insn
+      = case port of
+          PortImm imm -> formatOperand imm
+          CIndIO reg8 -> T.append "(C), " (gFormatOperands reg8)
+          CIndIO0     -> "(C), 0"
+      | LDSPHL <- insn
+      = "SP, HL"
+      | otherwise
+      = gFormatOperands insn
 
 -- | Generate the "analytic" version of the output (opcodes, ASCII representation) and output to an 'IO' handle.
 z80AnalyticDisassemblyOutput :: Handle
@@ -66,24 +126,16 @@ z80AnalyticDisassemblyOutput hOut dstate disasmSeq =
 -- | Format the disassembler's symbol table.
 z80FormatSymbolTable :: Z80disassembly
                      -> Seq T.Text
-z80FormatSymbolTable = views disasmSymbolTable formatSymTab
+z80FormatSymbolTable {-dstate-} = views disasmSymbolTable formatSymTab {-dstate-}
 
--- | Pass over the disassembly sequence, translating absolute addresses into symbolic addresses.
-fixupSymbols :: Z80disassembly
-             -> Seq Z80DisasmElt
-             -> Seq Z80DisasmElt
-fixupSymbols z80dstate disasmSeq =
-  let symtab = z80dstate ^. disasmSymbolTable
-      -- Translate an absolute address, generally hidden inside an instruction operand, into a symbolic address
-      -- if present in the symbol table.
-      fixupSymbol addr@(AbsAddr absAddr) = maybe addr SymAddr (absAddr `H.lookup` symtab)
-      fixupSymbol other                  = other
-
-      -- Lookup address labels in the symbol table
-      fixupEltAddress plain@(Plain absAddr) = maybe plain (Labeled absAddr) (absAddr `H.lookup` symtab)
-      fixupEltAddress labeled               = labeled
-  in  -- Note the cool use of composed functions in a SYB transformation!
-      everywhere (mkT fixupSymbol . mkT fixupEltAddress) disasmSeq
+-- | Generic formatting traversal over the Z80 instruction operands
+gFormatOperands ::(Generic x, All2 Z80operand (Code x))
+                 => x
+                 -> T.Text
+gFormatOperands {-elt-} =
+  T.intercalate ", " . hcollapse . hcmap disOperandProxy (mapIK formatOperand) . from {-elt-}
+  where
+    disOperandProxy = Proxy :: Proxy Z80operand
 
 -- | Format the accumulated symbol table as a sequence of 'T.Text's, in columnar format
 formatSymTab :: HashMap Z80addr T.Text
@@ -124,17 +176,6 @@ formatSymTab symTab =
       compareByAddr (a1, _) (a2, _) = compare a1 a2
 
     in  byNameSeq >< byAddrSeq
-
--- | Format a Z80 instruction
-formatIns :: Z80instruction             -- ^ Instruction to format
-          -> T.Text                     -- ^ Optional appended comment
-          -> T.Text                     -- ^ Formatted result
-formatIns ins cmnt = let (mnemonic, opers) = formatInstruction ins
-                         cmnt'             = if (not . T.null) cmnt then
-                                               T.append "; " cmnt
-                                             else
-                                               T.empty
-                     in  T.append (padTo lenInstruction $ T.append (padTo lenMnemonic mnemonic) opers) cmnt'
 
 -- | Output a formatted address in uppercase hex
 upperHex :: ShowHex operand =>
@@ -219,186 +260,134 @@ lenOutputPrefix = lenAddress + lenInsBytes + lenAsChars + 3
 lenOutputLine :: Int
 lenOutputLine = lenOutputPrefix + lenSymLabel + lenInstruction
 
--- | The main workhourse of this module: Format a 'Z80instruction' as the tuple '(mnemonic, operands)'
-formatInstruction :: Z80instruction             -- ^ Instruction to format
-                  -> (T.Text, T.Text)           -- ^ '(mnemonic, operands)' result tuple
-
-formatInstruction (Z80undef _)        = zeroOperands "???"
-formatInstruction (LD x)              = oneOperand "LD" x
-formatInstruction (INC r)             = oneOperand "INC" r
-formatInstruction (DEC r)             = oneOperand "DEC" r
-formatInstruction (INC16 r)           = oneOperand "INC" r
-formatInstruction (DEC16 r)           = oneOperand "DEC" r
-formatInstruction (ADD r)             = oneOperand "ADD" r
-formatInstruction (ADC r)             = oneOperand "ADC" r
-formatInstruction (SUB r)             = oneOperand "SUB" r
-formatInstruction (SBC r)             = oneOperand "SBC" r
-formatInstruction (AND r)             = oneOperand "AND" r
-formatInstruction (XOR r)             = oneOperand "XOR" r
-formatInstruction (OR r)              = oneOperand "OR" r
-formatInstruction (CP r)              = oneOperand "CP" r
-formatInstruction HALT                = zeroOperands "HALT"
-formatInstruction NOP                 = zeroOperands "NOP"
-formatInstruction (EXC AFAF')         = ("EX", "AF, AF'")
-formatInstruction (EXC SPHL)          = ("EX", "(SP), HL")
-formatInstruction (EXC DEHL)          = ("EX", "DE, HL")
-formatInstruction DI                  = zeroOperands "DI"
-formatInstruction EI                  = zeroOperands "EI"
-formatInstruction (EXC Primes)        = zeroOperands "EXX"
-formatInstruction JPHL                = ("JP", "(HL)")
-formatInstruction LDSPHL              = ("LD", "SP, HL")
-formatInstruction RLCA                = zeroOperands "RLCA"
-formatInstruction RRCA                = zeroOperands "RRCA"
-formatInstruction RLA                 = zeroOperands "RLA"
-formatInstruction RRA                 = zeroOperands "RRA"
-formatInstruction DAA                 = zeroOperands "DAA"
-formatInstruction CPL                 = zeroOperands "CPL"
-formatInstruction SCF                 = zeroOperands "SCF"
-formatInstruction CCF                 = zeroOperands "CCF"
-formatInstruction (DJNZ addr)         = oneOperand "DJNZ" addr
-formatInstruction (JR addr)           = oneOperand "JR" addr
-formatInstruction (JRCC cc addr)      = twoOperands "JR" cc addr
-formatInstruction (JP addr)           = oneOperand "JP" addr
-formatInstruction (JPCC cc addr)      = twoOperands "JP" cc addr
-formatInstruction (IN port)           = ("IN", ioPortOperand port True)
-formatInstruction (OUT port)          = ("OUT", ioPortOperand port False)
-formatInstruction (CALL addr)         = oneOperand "CALL" addr
-formatInstruction (CALLCC cc addr)    = twoOperands "CALL" cc addr
-formatInstruction RET                 = zeroOperands "RET"
-formatInstruction (RETCC cc)          = oneOperand "RET" cc
-formatInstruction (PUSH r)            = oneOperand "PUSH" r
-formatInstruction (POP r)             = oneOperand "POP" r
-formatInstruction (RST rst)           = ("RST", upperHex rst)
-formatInstruction (RLC r)             = oneOperand "RLC" r
-formatInstruction (RRC r)             = oneOperand "RRC" r
-formatInstruction (RL r)              = oneOperand "RL" r
-formatInstruction (RR r)              = oneOperand "RR" r
-formatInstruction (SLA r)             = oneOperand "SLA" r
-formatInstruction (SRA r)             = oneOperand "SRA" r
-formatInstruction (SLL r)             = oneOperand "SLL" r
-formatInstruction (SRL r)             = oneOperand "SRL" r
-formatInstruction (BIT bit r)         = twoOperands "BIT" bit r
-formatInstruction (RES bit r)         = twoOperands "RES" bit r
-formatInstruction (SET bit r)         = twoOperands "SET" bit r
-formatInstruction NEG                 = zeroOperands "NEG"
-formatInstruction RETI                = zeroOperands "RETI"
-formatInstruction RETN                = zeroOperands "RETN"
-formatInstruction (IM mode)           = oneOperand "IM" mode
-formatInstruction RLD                 = zeroOperands "RLD"
-formatInstruction RRD                 = zeroOperands "RRD"
-formatInstruction LDI                 = zeroOperands "LDI"
-formatInstruction CPI                 = zeroOperands "CPI"
-formatInstruction INI                 = zeroOperands "INI"
-formatInstruction OUTI                = zeroOperands "OUTI"
-formatInstruction LDD                 = zeroOperands "LDD"
-formatInstruction CPD                 = zeroOperands "CPD"
-formatInstruction IND                 = zeroOperands "IND"
-formatInstruction OUTD                = zeroOperands "OUTD"
-formatInstruction LDIR                = zeroOperands "LDIR"
-formatInstruction CPIR                = zeroOperands "CPIR"
-formatInstruction INIR                = zeroOperands "INIR"
-formatInstruction OTIR                = zeroOperands "OTIR"
-formatInstruction LDDR                = zeroOperands "LDDR"
-formatInstruction CPDR                = zeroOperands "CPDR"
-formatInstruction INDR                = zeroOperands "INDR"
-formatInstruction OTDR                = zeroOperands "OTDR"
+insMnemonic :: Z80instruction -> T.Text
+insMnemonic Z80undef{}        = "???"
+insMnemonic LD{}              = "LD"
+insMnemonic INC{}             = "INC"
+insMnemonic DEC{}             = "DEC"
+insMnemonic INC16{}           = "INC"
+insMnemonic DEC16{}           = "DEC"
+insMnemonic ADD{}             = "ADD"
+insMnemonic ADC{}             = "ADC"
+insMnemonic SUB{}             = "SUB"
+insMnemonic SBC{}             = "SBC"
+insMnemonic AND{}             = "AND"
+insMnemonic XOR{}             = "XOR"
+insMnemonic OR{}              = "OR"
+insMnemonic CP{}              = "CP"
+insMnemonic HALT              = "HALT"
+insMnemonic NOP               = "NOP"
+insMnemonic (EXC AFAF')       = "EX"
+insMnemonic (EXC SPHL)        = "EX"
+insMnemonic (EXC DEHL)        = "EX"
+insMnemonic DI                = "DI"
+insMnemonic EI                = "EI"
+insMnemonic (EXC Primes)      = "EXX"
+insMnemonic JPHL              = "JP"
+insMnemonic LDSPHL            = "LD"
+insMnemonic RLCA              = "RLCA"
+insMnemonic RRCA              = "RRCA"
+insMnemonic RLA               = "RLA"
+insMnemonic RRA               = "RRA"
+insMnemonic DAA               = "DAA"
+insMnemonic CPL               = "CPL"
+insMnemonic SCF               = "SCF"
+insMnemonic CCF               = "CCF"
+insMnemonic DJNZ{}            = "DJNZ"
+insMnemonic JR{}              = "JR"
+insMnemonic JRCC{}            = "JR"
+insMnemonic JP{}              = "JP"
+insMnemonic JPCC{}            = "JP"
+insMnemonic IN{}              = "IN"
+insMnemonic OUT{}             = "OUT"
+insMnemonic CALL{}            = "CALL"
+insMnemonic CALLCC{}          = "CALL"
+insMnemonic RET               = "RET"
+insMnemonic RETCC{}           = "RET"
+insMnemonic PUSH{}            = "PUSH"
+insMnemonic (Z80.POP _)       = "POP"
+insMnemonic RST{}             = "RST"
+insMnemonic RLC{}             = "RLC"
+insMnemonic RRC{}             = "RRC"
+insMnemonic RL{}              = "RL"
+insMnemonic RR{}              = "RR"
+insMnemonic SLA{}             = "SLA"
+insMnemonic SRA{}             = "SRA"
+insMnemonic SLL{}             = "SLL"
+insMnemonic SRL{}             = "SRL"
+insMnemonic BIT{}             = "BIT"
+insMnemonic RES{}             = "RES"
+insMnemonic SET{}             = "SET"
+insMnemonic NEG               = "NEG"
+insMnemonic RETI              = "RETI"
+insMnemonic RETN              = "RETN"
+insMnemonic IM{}              = "IM"
+insMnemonic RLD               = "RLD"
+insMnemonic RRD               = "RRD"
+insMnemonic LDI               = "LDI"
+insMnemonic CPI               = "CPI"
+insMnemonic INI               = "INI"
+insMnemonic OUTI              = "OUTI"
+insMnemonic LDD               = "LDD"
+insMnemonic CPD               = "CPD"
+insMnemonic IND               = "IND"
+insMnemonic OUTD              = "OUTD"
+insMnemonic LDIR              = "LDIR"
+insMnemonic CPIR              = "CPIR"
+insMnemonic INIR              = "INIR"
+insMnemonic OTIR              = "OTIR"
+insMnemonic LDDR              = "LDDR"
+insMnemonic CPDR              = "CPDR"
+insMnemonic INDR              = "INDR"
+insMnemonic OTDR              = "OTDR"
 -- The undocumented CB prefixed instructions
-formatInstruction (RLCidx idx r)      = twoOperands "RLC" idx r
-formatInstruction (RRCidx idx r)      = twoOperands "RRC" idx r
-formatInstruction (RLidx  idx r)      = twoOperands "RL" idx r
-formatInstruction (RRidx  idx r)      = twoOperands "RR" idx r
-formatInstruction (SLAidx idx r)      = twoOperands "SLA" idx r
-formatInstruction (SRAidx idx r)      = twoOperands "SRA" idx r
-formatInstruction (SLLidx idx r)      = twoOperands "SLL" idx r
-formatInstruction (SRLidx idx r)      = twoOperands "SRL" idx r
-formatInstruction (BITidx bit idx _r) = twoOperands "BIT" bit idx
-formatInstruction (RESidx bit idx r)  = threeOperands "RES" bit idx r
-formatInstruction (SETidx bit idx r)  = threeOperands "SET" bit idx r
--- formatInstruction _ = zeroOperands "--!!"
-
--- | Disassembly output with an instruction having no operands
-zeroOperands :: T.Text
-             -> (T.Text, T.Text)
-zeroOperands mne = (mne, T.empty)
-
--- | Disassembly output with an instruction having one operand
-oneOperand :: DisOperandFormat operand =>
-              T.Text
-           -> operand
-           -> (T.Text, T.Text)
-oneOperand mne opnd = (mne, formatOperand opnd)
-
--- | Disassembly output with a two operand instruction
-twoOperands :: (DisOperandFormat operand1, DisOperandFormat operand2) =>
-               T.Text
-            -> operand1
-            -> operand2
-            -> (T.Text, T.Text)
-twoOperands mne op1 op2 = (mne, T.intercalate ", " [ formatOperand op1
-                                                   , formatOperand op2
-                                                   ]
-                          )
--- | Disassembly output with a three operand instruction
-threeOperands :: (DisOperandFormat operand1, DisOperandFormat operand2, DisOperandFormat operand3) =>
-               T.Text
-            -> operand1
-            -> operand2
-            -> operand3
-            -> (T.Text, T.Text)
-threeOperands mne op1 op2 op3 = (mne, T.concat [ formatOperand op1
-                                               , ", "
-                                               , formatOperand op2
-                                               , ", "
-                                               , formatOperand op3
-                                               ]
-                                )
-
--- | Output an I/O port operand
-ioPortOperand :: OperIO         -- ^ Operand
-              -> Bool           -- ^ 'True' means an IN instruction, 'False' means an OUT instruction
-              -> T.Text         -- ^ Operand string
-ioPortOperand port inOut = case port of
-                             (PortImm imm)  -> formatOperand imm
-                             (CIndIO reg8)  -> if inOut then
-                                                 T.append (formatOperand reg8) ", (C)"
-                                               else
-                                                 T.append "(C), " (formatOperand reg8)
-                             CIndIO0        -> if inOut then
-                                                 "(C)"
-                                               else
-                                                 "(C), 0"
+insMnemonic RLCidx{}          = "RLC"
+insMnemonic RRCidx{}          = "RRC"
+insMnemonic RLidx{}           = "RL"
+insMnemonic RRidx{}           = "RR"
+insMnemonic SLAidx{}          = "SLA"
+insMnemonic SRAidx{}          = "SRA"
+insMnemonic SLLidx{}          = "SLL"
+insMnemonic SRLidx{}          = "SRL"
+insMnemonic BITidx{}          = "BIT"
+insMnemonic RESidx{}          = "RES"
+insMnemonic SETidx{}          = "SET"
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Disassembler operand format function class. Make life easy on ourselves when
 -- formatting assembler operands.
-class DisOperandFormat x where
+class Z80operand x where
   -- | Convert an operand into its appropriate representation
   formatOperand :: x -> T.Text
 
-instance DisOperandFormat Z80word where
+instance (Z80operand a)
+         => Z80operand [a] where
+  formatOperand = T.concat . map formatOperand
+
+instance Z80operand Z80word where
   formatOperand = oldStyleHex
 
-instance DisOperandFormat Z80addr where
+instance Z80operand Z80addr where
   formatOperand = oldStyleHex
 
-instance DisOperandFormat OperLD where
-  formatOperand (Reg8Reg8 r r')           = T.append (formatOperand r) (T.append ", " (formatOperand r'))
-  formatOperand (Reg8Imm r imm)           = T.append (formatOperand r) (T.append ", " (formatOperand imm))
+instance Z80operand Int8 where
+  formatOperand = T.pack . show
+
+instance Z80operand OperLD where
+  formatOperand (Reg8Reg8 r r')           = T.intercalate ", " ([formatOperand] <*> [r, r'])
+  formatOperand (Reg8Imm r imm)           = T.intercalate ", " [formatOperand r, formatOperand imm]
   formatOperand AccBCIndirect             = "A, (BC)"
   formatOperand AccDEIndirect             = "A, (DE)"
-  formatOperand (AccImm16Indirect addr)   = T.concat [ "A, ("
-                                                     , formatOperand addr
-                                                     , ")"
-                                                     ]
+  formatOperand (AccImm16Indirect addr)   = T.concat [ "A, (", formatOperand addr , ")" ]
   formatOperand AccIReg                   = "A, I"
   formatOperand AccRReg                   = "A, R"
   formatOperand BCIndirectStore           = "(BC), A"
   formatOperand DEIndirectStore           = "(DE), A"
-  formatOperand (Imm16IndirectStore addr) = T.append (formatOperand addr) ", A"
+  formatOperand (Imm16IndirectStore addr) = T.concat [ "(", formatOperand addr, "), A"]
   formatOperand IRegAcc                   = "I, A"
   formatOperand RRegAcc                   = "R, A"
-  formatOperand (RPair16ImmLoad rp imm)   = T.append (T.append (formatOperand rp) ", ") (formatOperand imm)
+  formatOperand (RPair16ImmLoad rp imm)   = T.intercalate ", " [formatOperand rp, formatOperand imm]
   formatOperand (HLIndirectStore addr)    = T.concat [ "("
                                                      , formatOperand addr
                                                      , "), HL"
@@ -418,20 +407,20 @@ instance DisOperandFormat OperLD where
                                                      , formatOperand rp
                                                      ]
 
-instance DisOperandFormat OperALU where
+instance Z80operand OperALU where
   formatOperand (ALUimm imm)  = formatOperand imm
   formatOperand (ALUreg8 r)   = formatOperand r
   formatOperand ALUHLindirect = "(HL)"
 
-instance DisOperandFormat OperExtendedALU where
+instance Z80operand OperExtendedALU where
   formatOperand (ALU8 opnd) = formatOperand opnd
   formatOperand (ALU16 rp)  = T.append "HL, " (formatOperand rp)
 
-instance DisOperandFormat RegPairSP where
+instance Z80operand RegPairSP where
   formatOperand (RPair16 r) = formatOperand r
   formatOperand SP          = "SP"
 
-instance DisOperandFormat Z80reg8 where
+instance Z80operand Z80reg8 where
   formatOperand A = "A"
   formatOperand B = "B"
   formatOperand C = "C"
@@ -440,29 +429,23 @@ instance DisOperandFormat Z80reg8 where
   formatOperand H = "H"
   formatOperand L = "L"
   formatOperand HLindirect = "(HL)"
-  formatOperand (IXindirect disp) = T.concat ["(IX"
-                                              , showDisp disp
-                                              , ")"
-                                              ]
-  formatOperand (IYindirect disp) = T.concat [ "(IY"
-                                              , showDisp disp
-                                              , ")"
-                                              ]
+  formatOperand (IXindirect disp) = showDisp "IX" disp
+  formatOperand (IYindirect disp) = showDisp "IY" disp
   formatOperand IXh = "IXh"
   formatOperand IXl = "IXl"
   formatOperand IYh = "IYh"
   formatOperand IYl = "IYl"
 
-instance DisOperandFormat Z80reg16 where
+instance Z80operand Z80reg16 where
   formatOperand BC = "BC"
   formatOperand DE = "DE"
   formatOperand HL = "HL"
   formatOperand IX = "IX"
   formatOperand IY = "IY"
 
-instance DisOperandFormat Z80condC where
+instance Z80operand Z80condC where
   formatOperand NZ  = "NZ"
-  formatOperand Z   = "Z"
+  formatOperand Z80.Z   = "Z"
   formatOperand NC  = "NC"
   formatOperand CY  = "C"
   formatOperand PO  = "PO"
@@ -470,13 +453,22 @@ instance DisOperandFormat Z80condC where
   formatOperand POS = "P"
   formatOperand MI  = "M"
 
-instance DisOperandFormat RegPairAF where
+instance Z80operand RegPairAF where
   formatOperand (AFPair16 r) = formatOperand r
   formatOperand AF           = "AF"
 
-instance (DisOperandFormat addrType) => DisOperandFormat (SymAbsAddr addrType) where
+instance (Z80operand addrType) => Z80operand (SymAbsAddr addrType) where
   formatOperand (AbsAddr addr)  = formatOperand addr
   formatOperand (SymAddr label) = label
+
+instance Z80operand Z80ExchangeOper where
+  formatOperand AFAF' = "AF, AF'"
+  formatOperand DEHL  = "DE, HL"
+  formatOperand SPHL  = "(SP), HL"
+  formatOperand Primes = T.empty
+
+instance Z80operand OperIO where
+  formatOperand _ = T.empty
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -558,8 +550,13 @@ fmtByteGroup bytes addr idx outF
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-showDisp :: (Integral dispT, Show dispT) => dispT
+showDisp :: (Integral dispT, Show dispT)
+         => T.Text
+         -> dispT
          -> T.Text
-showDisp disp
-  | disp < 0  = T.pack . show $ disp
-  | otherwise = T.append "+" (T.pack . show $ disp)
+showDisp ixReg disp = T.concat ["(", ixReg, theDisp, ")"]
+  where
+    fmtDisp = T.pack . show $ disp
+    theDisp
+      | disp < 0  = fmtDisp
+      | otherwise = T.append "+" fmtDisp
