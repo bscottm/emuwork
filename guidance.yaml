@@ -16,7 +16,13 @@ section:
     - equate: [RST28VEC, 0x400c]
     - equate: [RST30VEC, 0x400f]
     - equate: [RST38VEC, 0x4012]
+    - comment: 'Keyboard DCB: KIDCB is the start, KIVEC is the keyboard input vector'
     - equate: [KIDCB, 0x4015]
+    - equate: [KIVEC, 0x4016]
+    - equate: [RTSHIFT, 0x4018]
+    - equate: [CAPSLOCKED, 0x4019]
+    - equate: [CBLINKCNT, 0x401a]
+    - equate: [CBLINKSTS, 0x401b]
     - equate: [CURSBLINK, 0x401c]
     - comment: Video device control block ('DO' == Direct Output)
     - equate: [DODCB, 0x401d]
@@ -43,13 +49,13 @@ section:
     - equate: [BASICRESV, 0x4080]
     - comment: USR function pointer
     - equate: [USRFNPTR, 0x408e]
-    - comment: INKEY$ storage
+    - comment: INKEY$ storage, most recent keyboard character
     - equate: [INKEYSTO, 0x4099]
     - comment: Error code for RESUME
     - equate: [RESUMEERC, 0x409a]
     - comment: Printer carriage position
     - equate: [PRCURPOS, 0x409b]
-    - comment: ! 'Device type flag: -1 = tape, 0 = video, 1 = line printer'
+    - comment: 'Device type flag: -1 = tape, 0 = video, 1 = line printer'
     - equate: [DEVTYPEFLAG, 0x409c]
     - comment: ! 'PRINT# scratch space'
     - equate: [PRNUMWORK, 0x409d]
@@ -77,28 +83,82 @@ section:
         Top of memory/highest memory address available for string
         storage. Memory above this address pointer is 'reserved'.
     - equate: [MEMTOP, 0x40b1]
-    - comment: ! 'STRWORKPTR: String work area pointer'
+    - comment: 'STRWORKPTR: String work area pointer'
     - equate: [STRWORKPTR, 0x40b3]
-    - comment: String work area (0x40b5 - 0x40d5
+    - comment: 'String work area (0x40b5 - 0x40d5'
     - equate: [STRWORKAREA, 0x40b5]
-    - comment: Pointer to next byte of string storage
+    - comment: 'Saved length of the ASCII representation of a binary integer'
+    - equate: [NUMFMT$LEN, 0x40d3]
+    - comment: |+
+        Pointer to buffer where ASCII representation of binary integer
+        stored.
+    - equate: [NUMFMT$PTR, 0x40d4]
+    - comment: 'Pointer to next byte of string storage'
     - equate: [NEXTSTRPTR, 0x40d6]
-    - comment: ! 'Double precision accumulator: LSB, LSB, LSB, LSB, LSB, LSB, MSB, EXP'
-    - equate: [DACC, 0x411d]
-    - comment: ! 'Integer accumulator: LSB, MSB'
-    - comment: Single precision accumulator, LSB, LSB, MSB, EXP
-    - equate: [IACC, 0x4121]
-    - comment: Most significant byte in the SP floating point number's mantissa
-    - equate: [SPMANT_MSB, 0x4123]
-    - comment: ! '"Hex" accumulator: integer, single, double precision aligned at'
-    - comment: the same location.
+    - comment: 'BASIC auto line numbering (AUTO) flag'
+    - equate: [AUTOFLAG, 0x40e1]
+    - comment: Variable type table (0x4101 - 0x411A [26 letters])
+    - equate: [VARTYPETAB, 0x4101]
+    - comment: |+
+        Numeric (software) accumulator:
+
+        . Integer accumulator:                              LSB, MSB
+        . Single precision accumulator:                     LSB, LSB, MSB, EXP
+        . Double precision accumulator: LSB, LSB, LSB, LSB, LSB, LSB, MSB, EXP
+    - equate: [SA, 0x411d]
+    - equate: [SA_1, 0x411e]
+    - equate: [SA_2, 0x411f]
+    - equate: [SA_3, 0x4120]
+    - equate: [SA_IACC, 0x4121]
+    - equate: [SA_5, 0x4122]
+    - equate: [SA_MSB, 0x4123]
+    - equate: [SA_EXP, 0x4124]
+    - comment: '"Hex" accumulator: Same as SA, secondary numeric accumulator'
     - equate: [HEXACC, 0x4127]
+    - equate: [HEXACC_1, 0x4128]
+    - equate: [HEXACC_2, 0x4129]
+    - equate: [HEXACC_3, 0x412a]
+    - equate: [HEX_IACC, 0x412b]
+    - equate: [HEXACC_5, 0x412c]
+    - equate: [HEXACC_MSB, 0x412d]
+    - equate: [HEXACC_EXP, 0x412e]
     - comment: TRSDOS command vector redirections. These are also 'JP' instructions
     - equate: [DOSVECCMD, 0x4173]
     - comment: |+
         Input vector address. KIBUFF and GETINPUT pass control via this
         vector when complete.
     - equate: [INPUTVECTOR, 0x41af]
+    - comment: |+
+        Disk BASIC command vectors. If not initialized, they end up jumping to
+        L3ERROR.
+    - equate: [DOSCVI, 0x4152]
+    - equate: [DOSFN, 0x4155]
+    - equate: [DOSCVS, 0x4158]
+    - equate: [DOSDEF, 0x415b]
+    - equate: [DOSCVD, 0x415e]
+    - equate: [DOSEOF, 0x4161]
+    - equate: [DOSLOC, 0x4164]
+    - equate: [DOSLOF, 0x4167]
+    - equate: [DOSMKI$, 0x416a]
+    - equate: [DOSMKS$, 0x416d]
+    - equate: [DOSMKD$, 0x4170]
+    - equate: [DOSCMD, 0x4173]
+    - equate: [DOSTIME$, 0x4176]
+    - equate: [DOSOPEN, 0x4179]
+    - equate: [DOSFIELD, 0x417C]
+    - equate: [DOSGET, 0x417F]
+    - equate: [DOSPUT, 0x4182]
+    - equate: [DOSCLOSE, 0x4185]
+    - equate: [DOSLOAD, 0x4188]
+    - equate: [DOSMERGE, 0x418b]
+    - equate: [DOSNAME, 0x418e]
+    - equate: [DOSKILL, 0x4191]
+    - equate: [DOSAMPSD, 0x4194]
+    - equate: [DOSLSET, 0x4197]
+    - equate: [DOSRSET, 0x419a]
+    - equate: [DOSINSTR, 0x419d]
+    - equate: [DOSSAVE, 0x41a0]
+    - equate: [DOSLINE, 0x41a3]
     - comment: |
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
         Memory mapped I/O addresses
@@ -587,8 +647,14 @@ section:
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
     - highbits:
         addr: $
-        end: 0x1822
+        end: 0x1821
+    - bytes:
+        addr: $
+        nbytes: 0x0001
     - jumptable:
+        addr: $
+        end: 0x189a
+    - disasm:
         addr: $
         end: 0x18c9
     - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -912,23 +978,50 @@ section:
         BASSTOP: 0x1da9
         BASTRON: 0x1df7
         BASTROFF: 0x1df8
+        BASDEFSTR: 0x1e00
+        BASDEFINT: 0x1e03
+        BASDEFSNG: 0x1e06
+        BASDEFDBL: 0x1e09
         FCERROR: 0x1e4a
+        DECVAL: 0x1e5a
+        BASCLEAR: 0x1e7a
+        BASRUN: 0x1ea3
         BASGOSUB: 0x1eb1
         BASRETURN: 0x1ede
         BASGOTO: 0x1ec2
-        BASRUN: 0x1ea3
         BASDATA: 0x1f05
         BASREM: 0x1f07
         BASLET: 0x1f21
+        BASON: 0x1f6c
+        BASRESUME: 0x1faf
+        BASERROR: 0x1ff4
+        BASAUTO: 0x2008
         BASIF: 0x2039
+        BASLPRINT: 0x2067
+        BASPRINT: 0x206f
         BASINPUT: 0x219a
         BASREAD: 0x21ef
         BASNEXT: 0x22b6
         INTDIV: 0x2490
+        CMPSTRS: 0x25a1
         NUMTYPE: 0x25d9
         BASDIM: 0x2608
-        GENOUTPUT: 0x28a7
+        VARPTR: 0x260d
+        BASFRE: 0x27d4
+        BASPOS: 0x27f5
+        BASSTR$: 0x2836
+        OUTSTR: 0x28a7
+        BASLEN: 0x2a03
+        BASASC: 0x2a0f
+        BASCHR$: 0x2a1f
+        BASSTRING$: 0x2a2f
+        BASLEFT$: 0x2a61
+        BASRIGHT$: 0x2a91
+        BASMID$: 0x2a9a
         BASINP: 0x2aef
+        BASVAL: 0x2ac5
+        BASOUT: 0x2afb
         CVTACC2INT: 0x2b05
         CVTHEXVAL: 0x2b1c
+        EDITOR: 0x2e66
 ...

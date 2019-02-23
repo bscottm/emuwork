@@ -26,7 +26,6 @@ import qualified Control.Lens.Getter   as CLG
 import           Control.Lens.Each (each)
 import           Control.Lens.Fold     (foldOf)
 import           Data.Char
-import           Data.Int
 import qualified Data.Foldable         as Foldable
 import           Data.Generics.Aliases (mkT)
 import           Data.Generics.Schemes (everywhere)
@@ -104,12 +103,12 @@ z80AnalyticDisassembly dstate disasmSeq =
           IN port ->
             case port of
               PortImm imm -> formatOperand imm
-              CIndIO reg8 -> T.append (gFormatOperands reg8) ", (C)"
+              CIndIO reg8 -> T.append (formatOperand reg8) ", (C)"
               CIndIO0     -> "(C)"
           OUT port ->
             case port of
               PortImm imm -> formatOperand imm
-              CIndIO reg8 -> T.append "(C), " (gFormatOperands reg8)
+              CIndIO reg8 -> T.append "(C), " (formatOperand reg8)
               CIndIO0     -> "(C), 0"
           RST rst  -> asHex rst
           LDSPHL   -> "SP, HL"
@@ -201,38 +200,35 @@ formatLinePrefix bytes addr outString =
                               addrLabel `T.snoc` ':'
                             else
                               addrLabel
-      bytesToChars vec    = padTo lenAsChars $ DVU.foldl (\s x -> T.append s (mkPrintable x)) T.empty vec
-      mkPrintable x       = if x > 0x20 && x < 0x7f then (T.singleton . chr . fromIntegral) x; else " "
+      mkPrintable x       = if x > 0x20 && x < 0x7f
+                              then (chr . fromIntegral) x
+                              else ' '
       linePrefix          = T.concat [ upperHex (disEltAddress addr)
                                       , ": "
-                                      , formatBytes bytes
+                                      , padTo lenInsBytes . T.intercalate " " $ [ upperHex x | x <- DVU.toList bytes ]
                                       , "|"
-                                      , bytesToChars bytes
+                                      , padTo lenAsChars . T.pack . map mkPrintable $ DVU.toList bytes
                                       , "| "
                                       ]
   in  if T.length label < (lenSymLabel - 2) then
         Seq.singleton (T.concat [ linePrefix
-                                  , padTo lenSymLabel label
-                                  , outString
-                                  ])
+                                , padTo lenSymLabel label
+                                , outString
+                                ])
       else
         Seq.singleton (T.concat [ upperHex (disEltAddress addr)
-                                    , ": "
-                                    , T.replicate lenInsBytes textSpace
-                                    , "|"
-                                    , T.replicate lenAsChars textSpace
-                                    , "| "
-                                    , label
-                                    ])
+                                , ": "
+                                , T.replicate lenInsBytes textSpace
+                                , "|"
+                                , T.replicate lenAsChars textSpace
+                                , "| "
+                                , label
+                                ])
         |> T.concat [ linePrefix
                     , T.replicate lenSymLabel textSpace
                     , outString
                     ]
 
--- | Format a series of bytes
-formatBytes :: Vector Z80word
-            -> T.Text
-formatBytes bytes = padTo lenInsBytes $ T.intercalate " " [ upperHex x | x <- DVU.toList bytes ]
 
 -- Lengths of various output columns:
 
@@ -372,8 +368,8 @@ instance Z80operand Z80word where
 instance Z80operand Z80addr where
   formatOperand = oldStyleHex
 
-instance Z80operand Int8 where
-  formatOperand = T.pack . show
+-- instance Z80operand Int8 where
+--  formatOperand = T.pack . show
 
 instance Z80operand OperLD where
   formatOperand (Reg8Reg8 r r')           = T.intercalate ", " ([formatOperand] <*> [r, r'])
@@ -389,24 +385,10 @@ instance Z80operand OperLD where
   formatOperand IRegAcc                   = "I, A"
   formatOperand RRegAcc                   = "R, A"
   formatOperand (RPair16ImmLoad rp imm)   = T.intercalate ", " [formatOperand rp, formatOperand imm]
-  formatOperand (HLIndirectStore addr)    = T.concat [ "("
-                                                     , formatOperand addr
-                                                     , "), HL"
-                                                     ]
-  formatOperand (HLIndirectLoad  addr)    = T.concat [ "HL, ("
-                                                     , formatOperand addr
-                                                     , ")"
-                                                     ]
-  formatOperand (RPIndirectLoad rp addr)  = T.concat [ formatOperand rp
-                                                     , ", ("
-                                                     , formatOperand addr
-                                                     , ")"
-                                                     ]
-  formatOperand (RPIndirectStore rp addr) = T.concat [ "("
-                                                     , formatOperand addr
-                                                     , "), "
-                                                     , formatOperand rp
-                                                     ]
+  formatOperand (HLIndirectStore addr)    = T.concat [ "(" , formatOperand addr , "), HL" ]
+  formatOperand (HLIndirectLoad  addr)    = T.concat [ "HL, (" , formatOperand addr , ")" ]
+  formatOperand (RPIndirectLoad rp addr)  = T.concat [ formatOperand rp , ", (" , formatOperand addr , ")" ]
+  formatOperand (RPIndirectStore rp addr) = T.concat [ "(" , formatOperand addr , "), " , formatOperand rp ]
 
 instance Z80operand OperALU where
   formatOperand (ALUimm imm)  = formatOperand imm
@@ -445,14 +427,14 @@ instance Z80operand Z80reg16 where
   formatOperand IY = "IY"
 
 instance Z80operand Z80condC where
-  formatOperand NZ  = "NZ"
-  formatOperand Z80.Z   = "Z"
-  formatOperand NC  = "NC"
-  formatOperand CY  = "C"
-  formatOperand PO  = "PO"
-  formatOperand PE  = "PE"
-  formatOperand POS = "P"
-  formatOperand MI  = "M"
+  formatOperand NZ    = "NZ"
+  formatOperand Z80.Z = "Z"
+  formatOperand NC    = "NC"
+  formatOperand CY    = "C"
+  formatOperand PO    = "PO"
+  formatOperand PE    = "PE"
+  formatOperand POS   = "P"
+  formatOperand MI    = "M"
 
 instance Z80operand RegPairAF where
   formatOperand (AFPair16 r) = formatOperand r
@@ -463,12 +445,13 @@ instance (Z80operand addrType) => Z80operand (SymAbsAddr addrType) where
   formatOperand (SymAddr label) = label
 
 instance Z80operand Z80ExchangeOper where
-  formatOperand AFAF' = "AF, AF'"
-  formatOperand DEHL  = "DE, HL"
-  formatOperand SPHL  = "(SP), HL"
+  formatOperand AFAF'  = "AF, AF'"
+  formatOperand DEHL   = "DE, HL"
+  formatOperand SPHL   = "(SP), HL"
   formatOperand Primes = T.empty
 
 instance Z80operand OperIO where
+  -- Never used, but has to be here for Generics.SOP completeness.
   formatOperand _ = T.empty
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -482,7 +465,7 @@ formatPseudo (ByteRange sAddr bytes) =
                                 , T.intercalate ", " [ oldStyleHex x | x <- DVU.toList vec ]
                                 ]
   in  formatLinePrefix initSlice sAddr (mkBytes initSlice)
-      >< fmtByteGroup bytes (disEltAddress sAddr + 8) 8 mkBytes
+      >< fmtByteGroup (DVU.drop 8 bytes) (disEltAddress sAddr + 8) mkBytes
 
 formatPseudo (ExtPseudo (ByteExpression addr expr word)) =
   let outF _vec = T.concat [ padTo lenMnemonic "DB"
@@ -491,7 +474,7 @@ formatPseudo (ExtPseudo (ByteExpression addr expr word)) =
                                 else
                                   upperHex word
                             ]
-  in  fmtByteGroup (DVU.singleton word) addr 0 outF
+  in  fmtByteGroup (DVU.singleton word) addr outF
 
 formatPseudo (Addr sAddr addr bytes) =
   formatLinePrefix bytes sAddr (T.append (padTo lenMnemonic "DA") (formatOperand addr))
@@ -502,14 +485,14 @@ formatPseudo (AsciiZ sAddr str) =
       mkString      = T.cons '\'' (T.snoc (T.pack [ (chr . fromIntegral) x | x <- DVU.toList nonNullSlice ]) '\'')
       outF _vec     = T.empty
   in  formatLinePrefix initSlice sAddr (T.append (padTo lenMnemonic "DS") mkString)
-      >< fmtByteGroup str (disEltAddress sAddr + 8) 8 outF
+      >< fmtByteGroup (DVU.drop 8 str) (disEltAddress sAddr + 8) outF
 
 formatPseudo (Ascii sAddr str) =
   let initSlice     = DVU.slice 0 (min (DVU.length str) 8) str
       mkString      = T.cons '\'' (T.snoc (T.pack [ (chr . fromIntegral) x | x <- DVU.toList str ]) '\'')
       outF _vec     = T.empty
   in  formatLinePrefix initSlice sAddr (T.append (padTo lenMnemonic "DS") mkString)
-      >< fmtByteGroup str (disEltAddress sAddr + 8) 8 outF
+      >< fmtByteGroup (DVU.drop 8 str) (disEltAddress sAddr + 8) outF
 
 formatPseudo (DisOrigin origin) = Seq.singleton $ T.concat [ T.replicate (lenOutputPrefix + lenSymLabel) textSpace
                                                            , padTo lenMnemonic "ORG"
@@ -534,20 +517,16 @@ formatPseudo _unknownPseudo = Seq.singleton "[!!Unknown pseudo instruction]"
 -- | Format groups of bytes by groups of 8
 fmtByteGroup :: Vector Z80word
              -> Z80addr
-             -> Int
              -> (Vector Z80word -> T.Text)
              -> Seq T.Text
-fmtByteGroup bytes addr idx outF
-  | idx >= DVU.length bytes     = Seq.empty
-  | idx + 8 >= DVU.length bytes =
-    -- dump remaining bytes
-    let outString = outF (DVU.slice idx (DVU.length bytes - idx) bytes)
-    in  formatLinePrefix (DVU.slice idx (DVU.length bytes - idx) bytes) (mkPlainAddress addr) outString
-  | otherwise =
-    -- dump a group of 8 bytes
-    let outString = outF (DVU.slice idx 8 bytes)
-    in  formatLinePrefix (DVU.slice idx 8 bytes) (mkPlainAddress addr) outString
-        >< fmtByteGroup bytes (addr + 8) (idx + 8) outF
+fmtByteGroup bytes addr outF
+  | DVU.null bytes
+  = Seq.empty
+  | otherwise
+  = formatLinePrefix chunk (mkPlainAddress addr) outString >< fmtByteGroup (DVU.drop 8 bytes) (addr + 8) outF
+    where
+      chunk = DVU.take 8 bytes
+      outString = outF chunk
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
