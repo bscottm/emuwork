@@ -15,7 +15,8 @@ module Z80.InstructionSet
   , Z80reg16(..)
   , OperLD(..)
   , OperALU(..)
-  , OperExtendedALU(..)
+  , DestALUAcc(..)
+  , DestALU16(..)
   , OperIO(..)
   , RegPairSP(..)
   , RegPairAF(..)
@@ -55,16 +56,19 @@ data Z80instruction =
   | DEC Z80reg8
   | INC16 RegPairSP
   | DEC16 RegPairSP
-  --- ALU group: ADD, ADC, SUB, SBC, AND, XOR, OR and CP
-  -- ADD HL, rp and ADC/SBC HL, rp
+  --- ALU group: ADD, ADC, SUB, SBC, AND, XOR, OR and CP (all are single operand)
   | SUB OperALU
   | AND OperALU
   | XOR OperALU
   | OR OperALU
   | CP OperALU
-  | ADD OperExtendedALU
-  | ADC OperExtendedALU
-  | SBC OperExtendedALU
+  -- 8-bit ALU vs. 16-bit ALU: ADD A, <something> vs. ADD16 (HL|IX|IY), rp
+  | ADD8 DestALUAcc
+  | ADD16 DestALU16 RegPairSP
+  | ADC8 DestALUAcc
+  | ADC16 DestALU16 RegPairSP
+  | SBC8 DestALUAcc
+  | SBC16 DestALU16 RegPairSP
 
   -- HALT; NOP; Exchanges; DI; EI; JP HL; LD SP, HL
   | HALT
@@ -72,7 +76,11 @@ data Z80instruction =
   | DI
   | EI
   | JPHL
+  | JPIX
+  | JPIY
   | LDSPHL
+  | LDSPIX
+  | LDSPIY
   -- Exchanges:
   | EXC Z80ExchangeOper
   -- Accumulator ops: RLCA, RRCA, RLA, RRA, DAA, CPL, SCF, CCF
@@ -128,7 +136,6 @@ data Z80instruction =
   | SRAidx Z80reg8 Z80reg8
   | SLLidx Z80reg8 Z80reg8
   | SRLidx Z80reg8 Z80reg8
-  | BITidx Z80word Z80reg8 Z80reg8
   | RESidx Z80word Z80reg8 Z80reg8
   | SETidx Z80word Z80reg8 Z80reg8
   -- 0xed prefix instructions:
@@ -171,20 +178,29 @@ data OperLD =
   | AccBCIndirect
   | AccDEIndirect
   | AccImm16Indirect (SymAbsAddr Z80addr)
+  -- A, I
   | AccIReg
+  -- A, R
   | AccRReg
   -- Store accumulator
   | BCIndirectStore
   | DEIndirectStore
   | Imm16IndirectStore (SymAbsAddr Z80addr)
+  -- I, A
   | IRegAcc
+  -- R, A
   | RRegAcc
   -- 16-bit immediate load
   | RPair16ImmLoad RegPairSP (SymAbsAddr Z80addr)
   -- HL indirect: (nn), HL and HL, (nn)
   | HLIndirectStore (SymAbsAddr Z80addr)
   | HLIndirectLoad (SymAbsAddr Z80addr)
+  | IXIndirectStore (SymAbsAddr Z80addr)
+  | IXIndirectLoad (SymAbsAddr Z80addr)
+  | IYIndirectStore (SymAbsAddr Z80addr)
+  | IYIndirectLoad (SymAbsAddr Z80addr)
   -- 16-bit indirect loads and stores, e.g. LD BC, (4000H) [load BC from the contents of 0x4000]
+  -- (also DE)
   | RPIndirectLoad RegPairSP (SymAbsAddr Z80addr)
   | RPIndirectStore RegPairSP (SymAbsAddr Z80addr)
   deriving (Show, Eq, Ord, Typeable, Data)
@@ -198,10 +214,15 @@ data OperALU =
   | ALUHLindirect
   deriving (Show, Eq, Ord, Typeable, Data)
 
--- | ALU operations that can also extend to use HL and register pair
-data OperExtendedALU =
-    ALU8 OperALU
-  | ALU16 RegPairSP
+data DestALUAcc =
+  ALUAcc OperALU
+  deriving (Show, Eq, Ord, Typeable, Data)
+
+-- | 16-bit ALU destination operands -- HL, IX or IY
+data DestALU16 =
+    DestHL
+  | DestIX
+  | DestIY
   deriving (Show, Eq, Ord, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -249,7 +270,7 @@ data Z80reg8 =
   deriving (Show, Eq, Ord, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
+-- | General purpose 16-bit register operands
 data Z80reg16 =
     BC
   | DE
@@ -273,11 +294,13 @@ data RegPairAF =
   deriving (Show, Eq, Ord, Typeable, Data)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- | Exchange instruction arguments
+-- | Exchange instruction operands
 data Z80ExchangeOper =
     AFAF'     -- AF with AF'
   | DEHL      -- DE with HL
-  | SPHL      -- SP with HL
+  | SPHL      -- (SP) with HL
+  | SPIX      -- (SP) with IX
+  | SPIY      -- (SP) with IY
   | Primes    -- EXX (regular <-> primes)
   deriving (Show, Eq, Ord, Typeable, Data)
 
@@ -285,17 +308,17 @@ data Z80ExchangeOper =
 -- Generics:
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-deriveGeneric ''Z80instruction
-deriveGeneric ''OperLD
-deriveGeneric ''OperALU
-deriveGeneric ''OperExtendedALU
-deriveGeneric ''OperIO
-deriveGeneric ''Z80condC
-deriveGeneric ''Z80reg8
-deriveGeneric ''Z80reg16
-deriveGeneric ''RegPairSP
-deriveGeneric ''RegPairAF
-deriveGeneric ''Z80ExchangeOper
+$(deriveGeneric ''Z80instruction)
+$(deriveGeneric ''OperLD)
+$(deriveGeneric ''OperALU)
+$(deriveGeneric ''DestALU16)
+$(deriveGeneric ''OperIO)
+$(deriveGeneric ''Z80condC)
+$(deriveGeneric ''Z80reg8)
+$(deriveGeneric ''Z80reg16)
+$(deriveGeneric ''RegPairSP)
+$(deriveGeneric ''RegPairAF)
+$(deriveGeneric ''Z80ExchangeOper)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Register names

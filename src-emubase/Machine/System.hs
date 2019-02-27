@@ -11,7 +11,6 @@
 module Machine.System where
 
 import           Control.Lens
-import           Control.Arrow                  ( second )
 import           Data.Data
 import qualified Data.Text                     as T
 import           Data.Vector.Unboxed            ( Vector )
@@ -24,8 +23,9 @@ import           Machine.Utils
 import qualified Machine.MemorySystem          as M
 
 -- | 'EmulatedSystem' encapsulates the various parts required to emulate a system (processor, memory, ...)
-data EmulatedSystem cpuType insnSet addrType wordType where
-  EmulatedSystem ::{ _processor  :: EmulatedProcessor cpuType insnSet addrType wordType
+data EmulatedSystem cpuType insnSet addrType wordType =
+  EmulatedSystem
+    { _processor  :: EmulatedProcessor cpuType insnSet addrType wordType
                   -- ^ System processor
     , _memory     :: M.MemorySystem addrType wordType
                      -- ^ System memory
@@ -33,7 +33,7 @@ data EmulatedSystem cpuType insnSet addrType wordType where
                   -- ^ The system's name, e.g. "Null/dummy processor"
     , _sysAliases :: [String]
                   -- ^ Names the system is known by.
-    } -> EmulatedSystem cpuType insnSet addrType wordType
+    }
     deriving (Show)
 
 -- Need to manually generate the lenses due to the constraint on EmulatedSystem
@@ -54,12 +54,13 @@ sysAliases f sys = (\aliases -> sys { _sysAliases = aliases }) <$> f (_sysAliase
 mkEmulatedSystem
   :: (Ord addrType, Bounded addrType)
   => EmulatedProcessor cpuType insnSet addrType wordType
-                 -- ^ Processor (CPU)
+  -- ^ Processor (CPU)
   -> String
-                 -- ^ System name
+  -- ^ System name
   -> [String]
-                 -- ^ System aliases
+  -- ^ System aliases
   -> EmulatedSystem cpuType insnSet addrType wordType
+  -- ^ Constructed emulated system
 mkEmulatedSystem sysCpu name aliases =
   EmulatedSystem { _processor = sysCpu, _memory = M.initialMemorySystem, _sysName = name, _sysAliases = aliases }
 
@@ -87,37 +88,36 @@ processorOps :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) (Pro
 processorOps f ops = ops <$ f (_ops ops)
 
 
--- | Generic representation of instruction decoder outputs
+-- | Generic representation of instruction decoder outputs. Each decoded instruction's program counter refers to the address
+-- that follows the instruction, _not_ the address of the instruction.
 data DecodedInsn instructionSet addrType =
-    -- A decoded instruction
-    DecodedInsn
-    { _newPC :: ProgramCounter addrType
-    , _insn :: instructionSet
-    }
-  -- An address fetched from memory, independent of endian-ness
-  | DecodedAddr
-    { _newPC :: ProgramCounter addrType
-    , _disAddr :: addrType
-    }
+  -- | A decoded instruction
+  DecodedInsn
+  { _newPC :: ProgramCounter addrType
+  -- ^ Program counter following the instruction
+  , _insn :: instructionSet
+  -- ^ The instruction to execute
+  }
   deriving (Eq, Data, Typeable)
 
+-- | Lens for the decoded instruction's program counter
 decodedInsnPC :: Lens' (DecodedInsn insnSet addrType) (ProgramCounter addrType)
 decodedInsnPC f insn = (\pc' -> insn { _newPC = pc' }) <$> f (_newPC insn)
-
+-- | Lens for the decoded instruction itself.
 decodedInsn :: Lens' (DecodedInsn insnSet addrType) insnSet
 decodedInsn f insn = (\insn' -> insn { _insn = insn' }) <$> f (_insn insn)
 
-decodedAddr :: Lens' (DecodedInsn insnSet addrType) addrType
-decodedAddr f insn = (\addr' -> insn { _disAddr = addr' }) <$> f (_disAddr insn)
 
+-- | Processor operations function catalog.
+data ProcessorOps cpuType insnSet addrType wordType =
+  ProcessorOps
+  {
+    -- | Instruction decoder, for disassembly and execution
+    _idecode :: ProcessorDecoder cpuType insnSet addrType wordType
+  }
 
--- | Processor operations type class
-data ProcessorOps cpuType insnSet addrType wordType where
-  ProcessorOps ::{
-      -- | Instruction decoder, for disassembly and execution
-      _idecode :: ProcessorDecoder cpuType insnSet addrType wordType
-    } -> ProcessorOps cpuType insnSet addrType wordType
-
+-- | Lens for the instruction decoder function. Note that this is effectively "read-only" -- one cannot change the
+-- instruction decoder function.
 idecode :: Lens' (ProcessorOps cpuType insnSet addrType wordType) (ProcessorDecoder cpuType insnSet addrType wordType)
 idecode f decoder = decoder <$ f (_idecode decoder)
 
@@ -125,13 +125,14 @@ instance Show (ProcessorOps cpuType insnSet addrType wordType) where
   -- Nothing to show. Need the instance for the EmulatedSystem automagically derived Show instance.
   show ProcessorOps{} = ""
 
+-- | Instruction decoder function type.
 type ProcessorDecoder cpuType insnSet addrType wordType
   =  ProgramCounter addrType
   -- ^ Current program counter, from where instructions are fetched
   -> EmulatedSystem cpuType insnSet addrType wordType
-  -- ^ The memory system
+  -- ^ The emulated system (uses the system's memory to read instruction and operands.)
   -> (DecodedInsn insnSet addrType, EmulatedSystem cpuType insnSet addrType wordType)
-  -- ^ The decoded instruction
+  -- ^ The decoded instruction and updated emulated system (because system's memory can change/get updated.)
 
 
 -- | I/O system based on ports, e.g., Zilog and Intel, are an address space of their own, which makes
@@ -153,10 +154,10 @@ instance (ShowHex addrType) => Show (SymAbsAddr addrType) where
   show (AbsAddr addr ) = as0xHexS addr
   show (SymAddr label) = show label
 
-deriveGeneric ''SymAbsAddr
+$(deriveGeneric ''SymAbsAddr)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- System program counter operations
+-- System program counter and memory reading operations
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 sysReadAndIncPC
@@ -164,24 +165,28 @@ sysReadAndIncPC
   => ProgramCounter addrType
   -> EmulatedSystem cpuType insnSet addrType wordType
   -> (ProgramCounter addrType, (wordType, EmulatedSystem cpuType insnSet addrType wordType))
-sysReadAndIncPC pc sys = (1 + pc, sysMRead (unPC pc) sys)
+sysReadAndIncPC pc sys = (1+ pc, sysMRead (unPC pc) sys)
 
--- | Fetch an entity from memory, pre-incrementing the program counter, returning the (incremented pc, contents)
+-- | Fetch the next word from memory (pre-incrementing the program counter), returning the (incremented pc, contents)
 sysIncPCAndRead
   :: (Integral addrType, Integral wordType, DVU.Unbox wordType)
   => ProgramCounter addrType
   -> EmulatedSystem cpuType insnSet addrType wordType
   -> (ProgramCounter addrType, (wordType, EmulatedSystem cpuType insnSet addrType wordType))
-sysIncPCAndRead pc sys = (pc', sysMRead (unPC pc') sys) where pc' = 1 + pc
+sysIncPCAndRead pc sys = (pc', sysMRead (unPC pc') sys) where pc' = 1+ pc
 
-
+-- | Read a single word from a system's memory, updating the system's memory state as part of the return
 sysMRead
   :: (Integral addrType, Integral wordType, DVU.Unbox wordType)
   => addrType
   -> EmulatedSystem cpuType insnSet addrType wordType
   -> (wordType, EmulatedSystem cpuType insnSet addrType wordType)
-sysMRead addr sys = second updateMemSys $ views memory (M.mRead addr) sys where updateMemSys msys = sys & memory .~ msys
+sysMRead addr sys = views memory (M.mRead addr) sys & _2 %~ updateMemSys
+  where
+    updateMemSys msys = sys & memory .~ msys
 
+-- | Read _n_ words starting at the program counter's current value, returning (final program counter, ([word vector], new
+-- system state))
 sysPCReadN
   :: ( Integral addrType
      , Integral wordType
@@ -197,6 +202,8 @@ sysPCReadN
   -> (ProgramCounter addrType, (Vector wordType, EmulatedSystem cpuType insnSet addrType wordType))
 sysPCReadN pc nwords sys = (pc + fromIntegral nwords, sysMReadN (unPC pc) nwords sys)
 
+-- | Read _n_ words from memory starting at address 'addr'. Returns a vector of words read and the updated system
+-- state.
 sysMReadN
   :: ( Integral addrType
      , Integral wordType
@@ -210,8 +217,17 @@ sysMReadN
   -> Int
   -> EmulatedSystem cpuType insnSet addrType wordType
   -> (Vector wordType, EmulatedSystem cpuType insnSet addrType wordType)
-sysMReadN addr nwords sys = second updateMemSys $ views memory (M.mReadN addr nwords) sys
-  where updateMemSys msys = sys & memory .~ msys
+sysMReadN addr nwords sys = views memory (M.mReadN addr nwords) sys & _2 %~ updateMemSys
+  where
+    updateMemSys msys = sys & memory .~ msys
+
+
+-- | Get the system CPU's instruction decoder (this actually occurs often enough that a
+-- utility function is necessary.)
+
+sysGetIDecoder :: EmulatedSystem cpuType insnSet addrType wordType
+               -> ProcessorDecoder cpuType insnSet addrType wordType
+sysGetIDecoder {-sys-} = view (processor . processorOps . idecode) {-sys-}
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- The null processor and system:

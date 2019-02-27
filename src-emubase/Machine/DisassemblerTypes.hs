@@ -88,7 +88,7 @@ disassembler = disassembler' (Seq.empty ><)
       | curPC <- dstate ^. disasmCurAddr
       , curPC < dstate ^. disasmFinishAddr
       = let sys                   = dstate ^. disasmSystem
-            decoder               = sys ^. processor . processorOps . idecode
+            decoder               = sysGetIDecoder sys
             (seqDisasm', dstate') = second (updateSystem dstate) >>> mkDisElt curPC >>> doPostProc $ decoder curPC sys
         in  disassembler' (dseq seqDisasm' ><) dstate'
       | otherwise

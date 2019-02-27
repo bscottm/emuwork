@@ -111,8 +111,12 @@ z80AnalyticDisassembly dstate disasmSeq =
               CIndIO reg8 -> T.append "(C), " (formatOperand reg8)
               CIndIO0     -> "(C), 0"
           RST rst  -> asHex rst
-          LDSPHL   -> "SP, HL"
           JPHL     -> "(HL)"
+          JPIX     -> "(IX)"
+          JPIY     -> "(IY)"
+          LDSPHL   -> "SP, HL"
+          LDSPIX   -> "SP, IX"
+          LDSPIY   -> "SP, IY"
           _        -> gFormatOperands insn
 
 -- | Generate the "analytic" version of the output (opcodes, ASCII representation) and output to an 'IO' handle.
@@ -264,24 +268,29 @@ insMnemonic INC{}             = "INC"
 insMnemonic DEC{}             = "DEC"
 insMnemonic INC16{}           = "INC"
 insMnemonic DEC16{}           = "DEC"
-insMnemonic ADD{}             = "ADD"
-insMnemonic ADC{}             = "ADC"
+insMnemonic ADD8{}            = "ADD"
+insMnemonic ADD16{}           = "ADD"
+insMnemonic ADC8{}            = "ADC"
+insMnemonic ADC16{}           = "ADC"
 insMnemonic SUB{}             = "SUB"
-insMnemonic SBC{}             = "SBC"
+insMnemonic SBC8{}            = "SBC"
+insMnemonic SBC16{}           = "SBC"
 insMnemonic AND{}             = "AND"
 insMnemonic XOR{}             = "XOR"
 insMnemonic OR{}              = "OR"
 insMnemonic CP{}              = "CP"
 insMnemonic HALT              = "HALT"
 insMnemonic NOP               = "NOP"
-insMnemonic (EXC AFAF')       = "EX"
-insMnemonic (EXC SPHL)        = "EX"
-insMnemonic (EXC DEHL)        = "EX"
+insMnemonic (EXC Primes)      = "EXX"
+insMnemonic (EXC _)           = "EX"
 insMnemonic DI                = "DI"
 insMnemonic EI                = "EI"
-insMnemonic (EXC Primes)      = "EXX"
 insMnemonic JPHL              = "JP"
+insMnemonic JPIX              = "JP"
+insMnemonic JPIY              = "JP"
 insMnemonic LDSPHL            = "LD"
+insMnemonic LDSPIX            = "LD"
+insMnemonic LDSPIY            = "LD"
 insMnemonic RLCA              = "RLCA"
 insMnemonic RRCA              = "RRCA"
 insMnemonic RLA               = "RLA"
@@ -346,7 +355,6 @@ insMnemonic SLAidx{}          = "SLA"
 insMnemonic SRAidx{}          = "SRA"
 insMnemonic SLLidx{}          = "SLL"
 insMnemonic SRLidx{}          = "SRL"
-insMnemonic BITidx{}          = "BIT"
 insMnemonic RESidx{}          = "RES"
 insMnemonic SETidx{}          = "SET"
 
@@ -386,7 +394,11 @@ instance Z80operand OperLD where
   formatOperand RRegAcc                   = "R, A"
   formatOperand (RPair16ImmLoad rp imm)   = T.intercalate ", " [formatOperand rp, formatOperand imm]
   formatOperand (HLIndirectStore addr)    = T.concat [ "(" , formatOperand addr , "), HL" ]
+  formatOperand (IXIndirectStore addr)    = T.concat [ "(" , formatOperand addr , "), IX" ]
+  formatOperand (IYIndirectStore addr)    = T.concat [ "(" , formatOperand addr , "), IY" ]
   formatOperand (HLIndirectLoad  addr)    = T.concat [ "HL, (" , formatOperand addr , ")" ]
+  formatOperand (IXIndirectLoad  addr)    = T.concat [ "IX, (" , formatOperand addr , ")" ]
+  formatOperand (IYIndirectLoad  addr)    = T.concat [ "IY, (" , formatOperand addr , ")" ]
   formatOperand (RPIndirectLoad rp addr)  = T.concat [ formatOperand rp , ", (" , formatOperand addr , ")" ]
   formatOperand (RPIndirectStore rp addr) = T.concat [ "(" , formatOperand addr , "), " , formatOperand rp ]
 
@@ -395,9 +407,13 @@ instance Z80operand OperALU where
   formatOperand (ALUreg8 r)   = formatOperand r
   formatOperand ALUHLindirect = "(HL)"
 
-instance Z80operand OperExtendedALU where
-  formatOperand (ALU8 opnd) = formatOperand opnd
-  formatOperand (ALU16 rp)  = T.append "HL, " (formatOperand rp)
+instance Z80operand DestALUAcc where
+  formatOperand (ALUAcc opnd) = T.append "A, " $ gFormatOperands opnd
+
+instance Z80operand DestALU16 where
+  formatOperand DestHL = "HL"
+  formatOperand DestIX = "IX"
+  formatOperand DestIY = "IY"
 
 instance Z80operand RegPairSP where
   formatOperand (RPair16 r) = formatOperand r
@@ -448,6 +464,8 @@ instance Z80operand Z80ExchangeOper where
   formatOperand AFAF'  = "AF, AF'"
   formatOperand DEHL   = "DE, HL"
   formatOperand SPHL   = "(SP), HL"
+  formatOperand SPIX   = "(SP), IX"
+  formatOperand SPIY   = "(SP), IY"
   formatOperand Primes = T.empty
 
 instance Z80operand OperIO where
