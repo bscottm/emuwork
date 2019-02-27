@@ -233,6 +233,12 @@ section:
     - comment: Clear the screen (BASIC CLS)
     - disasm:
         addr: $
+        end: 0x032a
+    - comment: |
+        General-purpose output. Dispatches the character in A to either
+        the cassette, printer or video.
+    - disasm:
+        addr: $
         end: 0x033a
     - comment: |
         This is an alternate entry point into CHARPRINT, which preserves
@@ -782,10 +788,6 @@ section:
         addr: $
         end: 0x2178
     - asciiz: $
-    # - disasm:
-    #     addr: $
-    #     end: 0x217f
-    # - asciiz: $
     - disasm:
         addr: $
         end: 0x25d9
@@ -882,8 +884,10 @@ section:
         CASSPULSE3: 0x01ed
         CASSDLY3: 0x01f3
         CASSOFF: 0x01f8
+        CASSWRBYTE: 0x0264
         CASSLEADER: 0x0296
         BASSYSTEM: 0x02b2
+        OUTCHAR: 0x032a
         COUT: 0x033a
         KBDSCN2: 0x035b
         KIBUFF: 0x0361
