@@ -197,13 +197,10 @@ mkExtPseudo = ExtPseudo
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Disassembly element's address, with optional label
-data DisEltAddress addrType where
-  Plain   :: addrType
-          -> DisEltAddress addrType
-  Labeled :: addrType
-          -> T.Text
-          -> DisEltAddress addrType
-  deriving (Data, Typeable, Show)
+data DisEltAddress addrType =
+    Plain addrType
+  | Labeled addrType T.Text
+  deriving (Eq, Show, Data, Typeable)
 
 instance (ShowHex addrType)
          => ShowHex (DisEltAddress addrType) where
@@ -235,8 +232,8 @@ mkLabeledAddress = Labeled
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Disassembler state needed to generically support instruction disassembly
-data DisasmState cpuType insnType addrType wordType extPseudoType where
-  DisasmState ::
+data DisasmState cpuType insnType addrType wordType extPseudoType =
+  DisasmState
     { _disasmSystem :: EmulatedSystem cpuType insnType addrType wordType
       -- ^ The system whose memory is being accessed and disassembled
     , _disasmLabelNum    :: Int
@@ -255,7 +252,7 @@ data DisasmState cpuType insnType addrType wordType extPseudoType where
       -- uses the "RST 08" instruction to compare the accumulator with a character following the instruction.
       -- The post-processing function looks for "RST 08" instructions and subsequently moves the '_curAddr'
       -- forward to collect the byte.
-    } -> DisasmState cpuType insnType addrType wordType extPseudoType
+    }
 
 
 -- | 'DisElement' post-processing function

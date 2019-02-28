@@ -60,7 +60,7 @@ instance Monoid VideoDevice where
   mempty           = VideoDevice {
                       _vidRAM   = M.mkRAMRegion 0 vidLinearSize mempty
                      } & vidRAM %~ M.mPatch 0 (DVU.fromList videoTestPattern)
-  _ `mappend` vidB = vidB
+  mappend = (<>)
 
 -- | The video system
 type VideoRAMSystem = M.MemorySystem Word16 Word8

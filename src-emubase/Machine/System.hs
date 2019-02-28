@@ -66,14 +66,15 @@ mkEmulatedSystem sysCpu name aliases =
 
 -- | 'EmulatedProcessor' boxes the emulated machine's processor. All interesting operations on an @EmulatedProcessor@
 -- are in the `ProcessorOps` data type.
-data EmulatedProcessor cpuType insnSet addrType wordType where
-  EmulatedProcessor ::{ _procPrettyName :: String
+data EmulatedProcessor cpuType insnSet addrType wordType =
+  EmulatedProcessor
+    { _procPrettyName :: String
     -- ^ Pretty name for the emulated processor
     , _cpu            :: cpuType
     -- ^ Processor-specific internal data (registers, flags, etc.)
     , _ops            :: ProcessorOps cpuType insnSet addrType wordType
     -- ^ Processor operation functions
-    } -> EmulatedProcessor  cpuType insnSet addrType wordType
+    }
     deriving (Show)
 
 -- | Lens for the processor's pretty name

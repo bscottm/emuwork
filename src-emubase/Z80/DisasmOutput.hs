@@ -405,7 +405,6 @@ instance Z80operand OperLD where
 instance Z80operand OperALU where
   formatOperand (ALUimm imm)  = formatOperand imm
   formatOperand (ALUreg8 r)   = formatOperand r
-  formatOperand ALUHLindirect = "(HL)"
 
 instance Z80operand DestALUAcc where
   formatOperand (ALUAcc opnd) = T.append "A, " $ gFormatOperands opnd

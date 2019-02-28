@@ -31,8 +31,8 @@ data Device addrType wordType where
     , devWrite  :: DeviceWriter addrType wordType devTag
     -- ^ Device writer function. Writes the word into the specified zero-based offset address. See 'devReader'.
     -- NOTE: The type signature for the function is exactly what 'execState' requires. Yes, it is awkward, but avoids
-    -- additional overhead while executing wrapper functions just to make the signature pretty.
-  } -> Device addrType wordType
+    -- additional overhead and wrapper functions just to make the signature pretty.
+    } -> Device addrType wordType
 
 instance Eq (Device addrType wordType) where
   devA == devB = devA == devB

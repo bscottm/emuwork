@@ -209,12 +209,12 @@ type Tick = Int
 type Size = Int
 -- | Least Recently Used (LRU) write cache. Pending writes are queued in the LRU cache to avoid having to recreate or
 -- modify a RAM region's vector, which can be expensive when new values are written to RAM.
-data LRUWriteCache wordType where
-  LRUWriteCache ::
+data LRUWriteCache wordType =
+  LRUWriteCache
     { _lrucNextTick :: {-# UNPACK #-} !Tick
     , _lrucPsq      ::                !(OrdPSQ.OrdPSQ Int Tick wordType)
     , _lrucMaxSize  :: {-# UNPACK #-} !Size
-    } -> LRUWriteCache wordType
+    }
     deriving (Eq, Show)
 
 lrucPsq :: Lens' (LRUWriteCache wordType) (OrdPSQ.OrdPSQ Int Tick wordType)

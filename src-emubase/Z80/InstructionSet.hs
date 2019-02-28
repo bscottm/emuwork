@@ -35,9 +35,7 @@ where
 
 import           Data.Data
 import           Data.Int
-import           Data.Map                       ( Map
-                                                , (!)
-                                                )
+import           Data.Map                       ( Map , (!))
 import qualified Data.Map                      as Map
 import qualified Data.Text                     as T
 import           Generics.SOP.TH                ( deriveGeneric )
@@ -211,9 +209,10 @@ data OperLD =
 data OperALU =
     ALUimm Z80word
   | ALUreg8 Z80reg8
-  | ALUHLindirect
   deriving (Show, Eq, Ord, Typeable, Data)
 
+-- | 8-bit ALU operands where the accumulator is the destination, as distinct
+-- from 16-bit ALU operations.
 data DestALUAcc =
   ALUAcc OperALU
   deriving (Show, Eq, Ord, Typeable, Data)
@@ -235,6 +234,8 @@ data OperIO =
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
+-- | Z80 condition flags
+-- (note: rethink the names?)
 data Z80condC =
     NZ
   | Z
