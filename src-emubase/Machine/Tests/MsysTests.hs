@@ -6,7 +6,7 @@ import           Control.Arrow                        (first, second)
 import           Control.Monad                        (mapM_, replicateM, sequence_, unless)
 import           Control.Monad.Trans.State.Strict     (evalState, execState, runState, state)
 import           Data.Char                            (ord)
-import qualified Data.Foldable                        as Fold (foldl)
+import qualified Data.Foldable                        as Fold
 import qualified Data.IntervalMap.Interval            as I
 import           Data.List                            (elemIndices)
 import           Data.Maybe                           (fromMaybe)
@@ -438,7 +438,7 @@ test_RAMwrite1 _args =
 test_RAMwrite5 :: TestParams -> Assertion
 test_RAMwrite5 _args =
   let initRAM = writeRAMMsys 0 0x00ff
-      msys    = Fold.foldl writeRAM initRAM [(0, 0xff), (3, 0xaa), (2, 0xbb), (1, 0xcc), (4, 0x55)]
+      msys    = Fold.foldr writeRAM initRAM [(0, 0xff), (3, 0xaa), (2, 0xbb), (1, 0xcc), (4, 0x55)]
       memvec  = mReadN_ 0 7 msys
       cmpvec  = DVU.fromList [0xff, 0xcc, 0xbb, 0xaa, 0x55, 0x05, 0x06]
   in  assertBool (if not (M.sanityCheck msys)
@@ -472,7 +472,7 @@ test_RAMSequentialWrite _args =
   let ramSize = 0x1000
       ramBase = 0x0100 :: Word16
       pairs   = [(fromIntegral addr + ramBase, val) | addr <- [0..ramSize - 1], let val = fromIntegral (addr `mod` 256)]
-      msys    = Fold.foldl writeRAM (M.mkRAMRegion ramBase ramSize testSystem) pairs
+      msys    = Fold.foldr writeRAM (M.mkRAMRegion ramBase ramSize testSystem) pairs
       memvec  = mReadN_ ramBase ramSize msys
       cmpvec  = DVU.generate ramSize (\x -> fromIntegral (x `mod` 256))
   in assertBool (fromMaybe "successful" (compareVectors memvec cmpvec "memvec" "cmpvec"))
@@ -488,15 +488,15 @@ test_RAMRandReads args ramBase ramSize = forAll (choose (1, DVU.length addrPairs
     testWrites n m =
       let m'      = getLarge (getNonNegative m)
           writes  = DVU.slice n (min m' (DVU.length addrPairs - n)) addrPairs
-          msys    = DVU.foldl' writeRAM ramMsys writes
+          msys    = DVU.foldr' writeRAM ramMsys writes
           memvec  = mReadN_ ramBase ramSize msys
           cmpvec  = DVU.update ramMvec (DVU.map (first fromIntegral) writes)
       in  M.sanityCheck msys && memvec == cmpvec
 
-writeRAM :: TestMemSystem
-         -> (Word16, Word8)
+writeRAM :: (Word16, Word8)
          -> TestMemSystem
-writeRAM sys (addr, val) = M.mWrite addr val sys
+         -> TestMemSystem
+writeRAM (addr, val) sys = M.mWrite addr val sys
 {-# INLINABLE writeRAM #-}
 
 testMemMappedDev :: TestMemSystem

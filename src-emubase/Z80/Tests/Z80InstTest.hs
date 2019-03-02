@@ -1,6 +1,6 @@
 module Main where
 
-import           Control.Lens                         ((^.), (&), (.~))
+import           Lens.Micro                           ((^.), (&), (.~))
 import           Test.Framework                       (Test, defaultMain, testGroup)
 import           Test.Framework.Providers.HUnit       (testCase)
 import           Test.HUnit                           (Assertion, (@?=))

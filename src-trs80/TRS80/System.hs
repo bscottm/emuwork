@@ -9,7 +9,7 @@ module TRS80.System
   , TRS80ModelISystem
   ) where
 
-import           Control.Lens        ((&), (%~))
+import           Lens.Micro          ((&), (%~))
 import           Data.Vector.Unboxed (Vector)
 
 import           Machine

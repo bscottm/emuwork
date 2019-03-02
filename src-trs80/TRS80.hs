@@ -13,7 +13,7 @@ module TRS80
 
 import System.IO
 import System.Exit
-import Control.Lens ((&), (.~))
+import Lens.Micro ((&), (.~))
 
 import Machine
 

@@ -31,7 +31,7 @@ module Z80.Processor
   , intmode
   ) where
 
-import           Control.Lens (makeLenses)
+import           Lens.Micro.TH (makeLenses)
 import           Data.Int
 import           Data.Word
 

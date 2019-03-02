@@ -10,7 +10,8 @@
 
 module Machine.System where
 
-import           Control.Lens
+import           Lens.Micro
+import           Lens.Micro.Extras
 import           Data.Data
 import qualified Data.Text                     as T
 import           Data.Vector.Unboxed            ( Vector )
@@ -182,7 +183,7 @@ sysMRead
   => addrType
   -> EmulatedSystem cpuType insnSet addrType wordType
   -> (wordType, EmulatedSystem cpuType insnSet addrType wordType)
-sysMRead addr sys = views memory (M.mRead addr) sys & _2 %~ updateMemSys
+sysMRead addr sys = sys ^. memory & M.mRead addr & _2 %~ updateMemSys
   where
     updateMemSys msys = sys & memory .~ msys
 
@@ -218,7 +219,7 @@ sysMReadN
   -> Int
   -> EmulatedSystem cpuType insnSet addrType wordType
   -> (Vector wordType, EmulatedSystem cpuType insnSet addrType wordType)
-sysMReadN addr nwords sys = views memory (M.mReadN addr nwords) sys & _2 %~ updateMemSys
+sysMReadN addr nwords sys = sys ^. memory & M.mReadN addr nwords & _2 %~ updateMemSys
   where
     updateMemSys msys = sys & memory .~ msys
 

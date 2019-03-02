@@ -21,10 +21,9 @@ module Z80.DisasmOutput
 
 -- import Debug.Trace
 
-import           Control.Lens.Getter   (views, (^.))
-import qualified Control.Lens.Getter   as CLG
-import           Control.Lens.Each (each)
-import           Control.Lens.Fold     (foldOf)
+import           Lens.Micro            hiding (to)
+import qualified Lens.Micro            as Lens
+import           Lens.Micro.Extras     (view)
 import           Data.Char
 import qualified Data.Foldable         as Foldable
 import           Data.Generics.Aliases (mkT)
@@ -57,7 +56,7 @@ z80AnalyticDisassembly :: Z80disassembly
                        -> Seq Z80DisasmElt
                        -> Seq T.Text
 z80AnalyticDisassembly dstate disasmSeq =
-  foldOf (each . CLG.to (formatElt . annotateInternals)) (everywhere (mkT fixupSymbol . mkT fixupEltAddress) disasmSeq)
+  Foldable.foldr formatElt Seq.empty $ everywhere (mkT fixupSymbol . mkT fixupEltAddress) disasmSeq
   where
     symtab = dstate ^. disasmSymbolTable
     -- Translate an absolute address, generally hidden inside an instruction operand, into a symbolic address
@@ -69,33 +68,33 @@ z80AnalyticDisassembly dstate disasmSeq =
     fixupEltAddress disAddr@(Plain absAddr) = maybe disAddr (Labeled absAddr) (absAddr `H.lookup` symtab)
     fixupEltAddress other                   = other
 
-    -- Annotate internal memory references for 16-bit register constant loads
-    annotateInternals disElt@(DisasmInsn disAddr bytes insn cmnt)
-      | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- insn
-      -- 0x0 tends to be a constant, so it's likely not an internal reference.
-      , z80AddrInDisasmRange addr dstate && 0 < addr
-      = DisasmInsn disAddr bytes insn (appendComment cmnt)
-      | otherwise
-      = disElt
+    formatElt (DisasmInsn addr insVec insn cmnt) seq = formatLinePrefix insVec addr (fmtWithComment fmtInstruction cmnt') >< seq
       where
+        fmtInstruction = T.concat $ [padTo lenMnemonic . insMnemonic, formatOperands] <*> [insn]
+
+        fmtWithComment inp insComment
+          | T.null insComment
+          = inp
+          | otherwise
+          = T.concat [padTo lenInstruction inp, "; ", insComment]
+
+        -- For 16-bit constant loads, point out potential internal references
+        cmnt'
+          | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- insn
+          -- 0x0 tends to be a constant, so it's likely not an internal reference.
+          , z80AddrInDisasmRange addr dstate && 0 < addr
+          = appendIntRef cmnt
+          | otherwise
+          = cmnt
+
         intRefMsg = "poss. internal ref"
-        appendComment cmnt'
+        appendIntRef cmnt'
           | T.null cmnt'
           = intRefMsg
           | otherwise
           = T.intercalate " " [cmnt', intRefMsg]
-    annotateInternals disElt = disElt
 
-    formatElt (DisasmInsn addr insVec insn cmnt) = theIns
-      where
-        fmtInstruction = T.concat $ [padTo lenMnemonic . insMnemonic, formatOperands] <*> [insn]
-        fmtWithComment inp
-          | T.null cmnt
-          = inp
-          | otherwise
-          = T.concat [padTo lenInstruction inp, "; ", cmnt]
-        theIns = formatLinePrefix insVec addr (fmtWithComment fmtInstruction)
-    formatElt pseudo = formatPseudo pseudo
+    formatElt pseudo seq = formatPseudo pseudo >< seq
 
     -- Catch some of the special cases before calling the generic operand formatter.
     formatOperands insn =
@@ -130,7 +129,7 @@ z80AnalyticDisassemblyOutput hOut dstate disasmSeq =
 -- | Format the disassembler's symbol table.
 z80FormatSymbolTable :: Z80disassembly
                      -> Seq T.Text
-z80FormatSymbolTable {-dstate-} = views disasmSymbolTable formatSymTab {-dstate-}
+z80FormatSymbolTable {-dstate-} = formatSymTab <$> view disasmSymbolTable {-dstate-}
 
 -- | Generic formatting traversal over the Z80 instruction operands
 gFormatOperands ::(Generic x, All2 Z80operand (Code x))
@@ -145,7 +144,7 @@ gFormatOperands {-elt-} =
 formatSymTab :: HashMap Z80addr T.Text
              -> Seq T.Text
 formatSymTab symTab =
-  let !maxsym     = H.foldl' (\len str -> max len (T.length str)) 0 symTab
+  let !maxsym     = H.foldr (\str len -> max len (T.length str)) 0 symTab
       !totalCols  = fromIntegral(((lenOutputLine - maxsym) `div` (maxsym + extraSymPad)) + 1) :: Int
       !symsAsList = H.toList symTab
       byNameSyms  = sortBy compareByName symsAsList
@@ -154,12 +153,12 @@ formatSymTab symTab =
                     <| T.empty
                     <| "Symbol Table (numeric):"
                     <| T.empty
-                    <| columnar (Foldable.foldl formatSymbol Seq.empty byAddrSyms)
+                    <| columnar (Foldable.foldr formatSymbol Seq.empty byAddrSyms)
       byNameSeq   = T.empty
                     <| T.empty
                     <| "Symbol Table (alpha):"
                     <| T.empty
-                    <| columnar (Foldable.foldl formatSymbol Seq.empty byNameSyms)
+                    <| columnar (Foldable.foldr formatSymbol Seq.empty byNameSyms)
       -- Consolidate sequence into columnar format
       columnar symSeq = if Seq.length symSeq >= totalCols then
                           let (thisCol, rest) = Seq.splitAt totalCols symSeq
@@ -171,10 +170,7 @@ formatSymTab symTab =
       extraSymPad = 4 + 3 + 2
 
       -- Format the symbol:
-      formatSymbol theSeq (addr, sym) = theSeq |> T.concat [ padTo maxsym sym
-                                                           , " = "
-                                                           , upperHex addr
-                                                           ]
+      formatSymbol (addr, sym) theSeq = T.concat [ padTo maxsym sym , " = " , upperHex addr ] <| theSeq
       -- Comparison functions
       compareByName (_, n1) (_, n2) = compare n1 n2
       compareByAddr (a1, _) (a2, _) = compare a1 a2
@@ -522,10 +518,10 @@ formatPseudo (Equate label addr) = Seq.singleton $ T.concat [ T.replicate lenOut
                                                             , oldStyleHex addr
                                                             ]
 
-formatPseudo (LineComment comment) = Foldable.foldl (\acc cmnt -> acc |> T.concat [ T.replicate lenOutputPrefix textSpace
-                                                                                  , "; "
-                                                                                  , cmnt
-                                                                                  ])
+formatPseudo (LineComment comment) = Foldable.foldr (\cmnt acc -> T.concat [ T.replicate lenOutputPrefix textSpace
+                                                                           , "; "
+                                                                           , cmnt
+                                                                           ] <| acc)
                                                     Seq.empty
                                                     (T.lines comment)
 

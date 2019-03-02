@@ -20,13 +20,7 @@ module Z80.Disassembler
   )
 where
 
-import           Control.Lens                   ( views
-                                                , (%~)
-                                                , (&)
-                                                , (+~)
-                                                , (.~)
-                                                , (^.)
-                                                )
+import           Lens.Micro                     ( (%~), (&), (+~), (.~), (^.) )
 import           Control.Arrow                  ( first )
 import qualified Data.Char                     as C
 import           Data.Data
@@ -84,7 +78,7 @@ z80disbytes
   -> (Z80DisasmElt, Z80disassembly)
             -- ^ Resulting diassembly state
 z80disbytes nBytes dstate =
-  let sAddr = views disasmCurAddr unPC dstate in first (mkByteRange sAddr) $ disasmMReadN (fromIntegral nBytes) dstate
+  let sAddr = disasmCurAddr' dstate in first (mkByteRange sAddr) $ disasmMReadN (fromIntegral nBytes) dstate
 
 -- | Grab (what is presumably) an ASCII string sequence, terminating at the first 0 encountered. This is somewhat inefficient
 -- because multiple 'Vector' slices get created.
@@ -94,11 +88,11 @@ z80disasciiz
   -> (Seq.Seq Z80DisasmElt, Z80disassembly)
              -- ^ Resulting diassembly state
 z80disasciiz dstate =
-  let sAddr            = views disasmCurAddr unPC dstate
+  let sAddr            = disasmCurAddr' dstate
       -- findZero :: Z80addr -> Z80disassembly -> DVU.Vector Z80word -> (Z80disassembly, Maybe (DVU.Vector Z80word))
       findZero sAddr' dstate' bytes =
-        if sAddr' < unPC (dstate' ^. disasmEndAddr)
-        then  let nToRead = fromIntegral $ min 16 (unPC (dstate' ^. disasmEndAddr) - sAddr)
+        if sAddr' < disasmEndAddr' dstate'
+        then  let nToRead = fromIntegral $ min 16 (disasmEndAddr' dstate' - sAddr)
                   (seg, sys') = sysMReadN sAddr' nToRead (dstate' ^. disasmSystem)
               in  maybe (findZero (sAddr' + 16) (dstate' & disasmSystem .~ sys') (bytes DVU.++ seg))
                         (\idx -> (dstate' & disasmSystem .~ sys', Just $ bytes DVU.++ DVU.slice 0 (idx + 1) seg))
@@ -134,7 +128,7 @@ z80disascii
   -> (Z80DisasmElt, Z80disassembly)
   -- ^ Resulting diassembly state
 z80disascii nBytes dstate =
-  let sAddr = views disasmCurAddr unPC dstate in first (mkAscii sAddr) $ disasmMReadN (fromIntegral nBytes) dstate
+  let sAddr = disasmCurAddr' dstate in first (mkAscii sAddr) $ disasmMReadN (fromIntegral nBytes) dstate
 
 -- | Z80 default instruction post processor. This merely appends the decoded instruction onto the disassembly sequence.
 z80DefaultPostProcessor :: DisElementPostProc Z80state Z80instruction Z80addr Z80word Z80PseudoOps
@@ -142,7 +136,7 @@ z80DefaultPostProcessor disElt@DisasmInsn{} dstate = (Seq.singleton disElt, labe
  where
   labelAddresses (DisasmInsn _addr _bytes insn _cmnt) dstate'
     | Just (prefix, destAddr) <- hasAddress, z80AddrInDisasmRange destAddr dstate'
-                                             && not (views disasmSymbolTable (destAddr `H.member`) dstate')
+                                             && not (destAddr `H.member` (dstate' ^. disasmSymbolTable))
     = dstate' & disasmSymbolTable %~ H.insert destAddr (mkLabel prefix) & disasmLabelNum +~ 1
     | otherwise
     = dstate'
@@ -162,7 +156,7 @@ z80DefaultPostProcessor disElt@DisasmInsn{} dstate = (Seq.singleton disElt, labe
       CALL (AbsAddr addr)       -> Just ("SUB", addr)
       CALLCC _cc (AbsAddr addr) -> Just ("SUB", addr)
       _otherwise                -> Nothing
-    mkLabel prefix = T.append prefix (views disasmLabelNum (T.pack . show) dstate')
+    mkLabel prefix = T.append prefix (T.pack $ show $ dstate' ^. disasmLabelNum)
   labelAddresses _disElt dstate' = dstate'
 -- Everything else...
 z80DefaultPostProcessor disElt dstate' = defaultPostProcessor disElt dstate'
@@ -171,4 +165,4 @@ z80DefaultPostProcessor disElt dstate' = defaultPostProcessor disElt dstate'
 z80AddrInDisasmRange :: Z80addr
                      -> Z80disassembly
                      -> Bool
-z80AddrInDisasmRange addr dstate = views disasmOriginAddr unPC dstate <= addr && addr <= views disasmEndAddr unPC dstate
+z80AddrInDisasmRange addr dstate = unPC (dstate ^. disasmOriginAddr) <= addr && addr <= unPC (dstate ^. disasmEndAddr)

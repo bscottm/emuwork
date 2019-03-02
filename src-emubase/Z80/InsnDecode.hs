@@ -12,7 +12,7 @@ module Z80.InsnDecode
   , z80getAddr
   ) where
 
-import           Control.Lens
+import           Lens.Micro
 import           Data.Bits
 import           Data.IntMap         (IntMap, (!))
 import qualified Data.IntMap         as IntMap
@@ -507,10 +507,6 @@ reg8DecodedInsn xform sys pc regWord ctor =
   in  (DecodedInsn (newpc + 1) (ctor theReg), sys')
 
 -- | Convert an 8-bit register index to an ALU operand 'OperALU'
---
--- This uses Control.Lens to apply the 'ALUreg8' data constructor on the first element of the pair
--- returned by 'reg8'
-
 aluReg8 :: Z80reg8XForm sysType
         -- ^ IX/IY transform function, when needed
         -> Z80system sysType
@@ -520,7 +516,8 @@ aluReg8 :: Z80reg8XForm sysType
         -> Z80word
         -- ^ Register code
         -> (Z80PC, OperALU, Z80system sysType)
-
+-- Use the _2 tuple lens to apply the 'ALUreg8' data constructor on the first element of the pair
+-- returned by 'reg8'
 aluReg8 xform sys pc val = _2 %~ ALUreg8 $ reg8 xform sys pc val
 
 -- | Convert condition code

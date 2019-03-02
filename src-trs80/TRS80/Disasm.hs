@@ -10,7 +10,7 @@ module TRS80.Disasm
   ) where
 
 import           Control.Arrow (first)
-import           Control.Lens (views, (^.), (%~), (.~), (&))
+import           Lens.Micro ((^.), (%~), (.~), (&))
 import           Control.Monad (unless, mapM_)
 import           Control.Monad.Trans.State.Strict (state, runState)
 import           Data.Binary
@@ -94,7 +94,7 @@ getDisasmOptions :: [String]
                  -> IO (DisasmOptions, [String])
 getDisasmOptions opts =
   case getOpt Permute disasmOptions opts of
-    (optsActions, rest, [])   -> return (Foldable.foldl (flip id) mkDisasmOptions optsActions, rest)
+    (optsActions, rest, [])   -> return (Foldable.foldr id mkDisasmOptions optsActions, rest)
     (_,           _,    errs) -> mapM_ (hPutStrLn stderr) errs
                                  >> return (InvalidDisasm, [])
 
@@ -159,7 +159,7 @@ trs80disassemble sys imgReader imgName msize guidance =
                   |> mkLineComment T.empty
     commentBreak           = "=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~="
     romMD5                 = encode . md5 . B.pack . DVU.toList
-    romMD5Hex img          = B.foldl (\a x -> T.append a (asHex x)) T.empty (romMD5 img)
+    romMD5Hex img          = B.foldr (\x a -> T.append (asHex x) a) T.empty (romMD5 img)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -266,7 +266,7 @@ highbitCharTable :: Z80disp
                  -> (Seq.Seq Z80DisasmElt, Z80disassembly)
                  -- ^ Resulting diassembly state
 highbitCharTable nBytes z80dstate =
-  let sAddr               = views disasmCurAddr fromIntegral z80dstate
+  let sAddr               = fromIntegral (z80dstate ^. disasmCurAddr)
       -- Fetch the block from memory as a 'Vector'
       (memBlock, z80dstate') = disasmMReadN (fromIntegral nBytes) z80dstate
       -- Look for the high bit characters within the address range, then convert back to addresses
@@ -290,7 +290,7 @@ highbitCharTable nBytes z80dstate =
             else
               Seq.singleton firstBytePseudo
       -- Zip the two index vectors to a sequence
-      disasmElts   = Foldable.foldl (><) Seq.empty (zipWith grabString (DVU.toList byteidxs) (DVU.toList byteidx2))
+      disasmElts   = Foldable.foldr (><) Seq.empty (zipWith grabString (DVU.toList byteidxs) (DVU.toList byteidx2))
   in  ( disasmElts
       , z80dstate'
       )
@@ -306,7 +306,7 @@ jumpTable :: Z80disp
 jumpTable nBytes dstate = first Seq.fromList $ runState (sequence [state genAddr | _elt <- [0..(nBytes - 2) `div` 2]]) dstate
   where
     genAddr dstate'        = first (genPseudo dstate') $ disasmMReadN 2 dstate'
-    genPseudo dstate' addr = mkAddr (views disasmCurAddr unPC dstate') ((AbsAddr . flipWords) addr) addr
+    genPseudo dstate' addr = mkAddr (unPC (dstate' ^. disasmCurAddr)) ((AbsAddr . flipWords) addr) addr
     flipWords addr         = shiftL (fromIntegral (addr DVU.! 1)) 8 .|. fromIntegral (addr DVU.! 0)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -314,7 +314,7 @@ jumpTable nBytes dstate = first Seq.fromList $ runState (sequence [state genAddr
 -- by a character; (HL) is compared to this following character and flags set.
 trs80RomPostProcessor :: DisElementPostProc Z80state Z80instruction Z80addr Z80word Z80PseudoOps
 trs80RomPostProcessor rst08@(DisasmInsn _ _ (RST 8) _) dstate =
-  let curPC = views disasmCurAddr unPC dstate
+  let curPC = unPC (dstate ^. disasmCurAddr)
       (byte, dstate') = disasmMRead dstate
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
       pseudo = if byte >= 0x20 && byte <= 0x7f then mkAscii else mkByteRange

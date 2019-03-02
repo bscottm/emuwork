@@ -10,7 +10,7 @@ module Machine.Tests.TestDevice
         ) where
 
 import           Control.Arrow               (second)
-import           Control.Lens                (Lens', set, views, (%~), (&))
+import           Lens.Micro                  (Lens', set, (^.), (%~), (&))
 import           Data.Char                   (ord)
 import           Data.List                   (cycle)
 import qualified Data.Vector.Unboxed         as DVU
@@ -89,7 +89,7 @@ videoReset _dev = mempty :: VideoDevice
 
 -- | Read a byte from the video device's memory
 videoReader :: D.DeviceReader Word16 Word8 VideoDevice
-videoReader addr vdev = second updVidRAM (views vidRAM (M.mRead addr) vdev)
+videoReader addr vdev = second updVidRAM (M.mRead addr (vdev ^. vidRAM))
   where
     updVidRAM vram = set vidRAM vram vdev
 
