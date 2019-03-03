@@ -33,6 +33,7 @@ module Z80.InstructionSet
   )
 where
 
+import           Lens.Micro.TH
 import           Data.Data
 import           Data.Int
 import           Data.Map                       ( Map , (!))
@@ -188,17 +189,10 @@ data OperLD =
   | IRegAcc
   -- R, A
   | RRegAcc
-  -- 16-bit immediate load
+  -- 16-bit immediate load, e.g., LD BC, 4000H
   | RPair16ImmLoad RegPairSP (SymAbsAddr Z80addr)
-  -- HL indirect: (nn), HL and HL, (nn)
-  | HLIndirectStore (SymAbsAddr Z80addr)
-  | HLIndirectLoad (SymAbsAddr Z80addr)
-  | IXIndirectStore (SymAbsAddr Z80addr)
-  | IXIndirectLoad (SymAbsAddr Z80addr)
-  | IYIndirectStore (SymAbsAddr Z80addr)
-  | IYIndirectLoad (SymAbsAddr Z80addr)
-  -- 16-bit indirect loads and stores, e.g. LD BC, (4000H) [load BC from the contents of 0x4000]
-  -- (also DE)
+  -- 16-bit indirect loads and stores, e.g. LD [BC|DE|HL|IX|IY], (4000H)
+  -- Load [BC|DE|HL|IX|IY] from the contents of 0x4000.
   | RPIndirectLoad RegPairSP (SymAbsAddr Z80addr)
   | RPIndirectStore RegPairSP (SymAbsAddr Z80addr)
   deriving (Show, Eq, Ord, Typeable, Data)
@@ -304,6 +298,12 @@ data Z80ExchangeOper =
   | SPIY      -- (SP) with IY
   | Primes    -- EXX (regular <-> primes)
   deriving (Show, Eq, Ord, Typeable, Data)
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- Automagically generated lenses:
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+makeLenses ''Z80reg8
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Generics:

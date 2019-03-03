@@ -21,8 +21,8 @@ module Z80.DisasmOutput
 
 -- import Debug.Trace
 
-import           Lens.Micro            hiding (to)
-import qualified Lens.Micro            as Lens
+import           Prelude               hiding (seq)
+import           Lens.Micro
 import           Lens.Micro.Extras     (view)
 import           Data.Char
 import qualified Data.Foldable         as Foldable
@@ -80,19 +80,19 @@ z80AnalyticDisassembly dstate disasmSeq =
 
         -- For 16-bit constant loads, point out potential internal references
         cmnt'
-          | LD (RPair16ImmLoad _rp (AbsAddr addr)) <- insn
+          | LD (RPair16ImmLoad _rp (AbsAddr addr')) <- insn
           -- 0x0 tends to be a constant, so it's likely not an internal reference.
-          , z80AddrInDisasmRange addr dstate && 0 < addr
+          , z80AddrInDisasmRange addr' dstate && 0 < addr'
           = appendIntRef cmnt
           | otherwise
           = cmnt
 
         intRefMsg = "poss. internal ref"
-        appendIntRef cmnt'
-          | T.null cmnt'
+        appendIntRef disCmnt
+          | T.null disCmnt
           = intRefMsg
           | otherwise
-          = T.intercalate " " [cmnt', intRefMsg]
+          = T.intercalate " " [disCmnt, intRefMsg]
 
     formatElt pseudo seq = formatPseudo pseudo >< seq
 
@@ -389,12 +389,6 @@ instance Z80operand OperLD where
   formatOperand IRegAcc                   = "I, A"
   formatOperand RRegAcc                   = "R, A"
   formatOperand (RPair16ImmLoad rp imm)   = T.intercalate ", " [formatOperand rp, formatOperand imm]
-  formatOperand (HLIndirectStore addr)    = T.concat [ "(" , formatOperand addr , "), HL" ]
-  formatOperand (IXIndirectStore addr)    = T.concat [ "(" , formatOperand addr , "), IX" ]
-  formatOperand (IYIndirectStore addr)    = T.concat [ "(" , formatOperand addr , "), IY" ]
-  formatOperand (HLIndirectLoad  addr)    = T.concat [ "HL, (" , formatOperand addr , ")" ]
-  formatOperand (IXIndirectLoad  addr)    = T.concat [ "IX, (" , formatOperand addr , ")" ]
-  formatOperand (IYIndirectLoad  addr)    = T.concat [ "IY, (" , formatOperand addr , ")" ]
   formatOperand (RPIndirectLoad rp addr)  = T.concat [ formatOperand rp , ", (" , formatOperand addr , ")" ]
   formatOperand (RPIndirectStore rp addr) = T.concat [ "(" , formatOperand addr , "), " , formatOperand rp ]
 

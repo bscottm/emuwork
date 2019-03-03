@@ -9,6 +9,7 @@ packages:
   - '.'
   - src-emubase/
   - src-trs80/
+  - src-z80/
 # - src-edas/
 
 extra-deps:

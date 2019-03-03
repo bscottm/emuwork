@@ -21,14 +21,24 @@ module Z80.Processor
   , regs
   , z80pc
   , primes
-  , ix
-  , iy
   , sp
   , ipage
   , refresh
   , iff1
   , iff2
   , intmode
+  , z80accum
+  , z80flags
+  , z80breg
+  , z80creg
+  , z80dreg
+  , z80ereg
+  , z80hreg
+  , z80lreg
+  , z80ixh
+  , z80ixl
+  , z80iyh
+  , z80iyl
   ) where
 
 import           Lens.Micro.TH (makeLenses)
@@ -60,6 +70,10 @@ data Z80registers = Z80registers {
   , _z80ereg  :: {-# UNPACK #-} !Z80word         -- ^ E register
   , _z80hreg  :: {-# UNPACK #-} !Z80word         -- ^ "High" register
   , _z80lreg  :: {-# UNPACK #-} !Z80word         -- ^ "Low" register
+  , _z80ixh   :: {-# UNPACK #-} !Z80word         -- ^ Upper 8 bits of IX
+  , _z80ixl   :: {-# UNPACK #-} !Z80word         -- ^ Lower 8 bits of IX
+  , _z80iyh   :: {-# UNPACK #-} !Z80word         -- ^ Upper 8 bits of IY
+  , _z80iyl   :: {-# UNPACK #-} !Z80word         -- ^ Lower 8 bits of IY
   }
 
 -- | Default/zeroed register set
@@ -73,6 +87,10 @@ initialRegisters = Z80registers {
   , _z80ereg = 0
   , _z80hreg = 0
   , _z80lreg = 0
+  , _z80ixh  = 0
+  , _z80ixl  = 0
+  , _z80iyh  = 0
+  , _z80iyl  = 0
   }
 
 -- | The minimum usable address
@@ -89,8 +107,6 @@ data Z80state =
         { _regs    :: Z80registers                            -- ^ Current operating register file
         , _z80pc   :: Z80PC                                   -- ^ Program counter
         , _primes  :: Z80registers                            -- ^ The "prime" register set
-        , _ix      :: Z80addr                                 -- ^ IX index register
-        , _iy      :: Z80addr                                 -- ^ IY index register
         , _sp      :: Z80addr                                 -- ^ Stack pointer
         , _ipage   :: Z80word                                 -- ^ Interrupt page
         , _refresh :: Z80word                                 -- ^ (Dynamic memory) Refresh register
@@ -100,7 +116,7 @@ data Z80state =
         }
 
 -- Emit Template Haskell hair for lenses
-$(makeLenses ''Z80state)
+$(concat <$> mapM makeLenses [''Z80state, ''Z80registers])
 
 -- | The address range, needed to calculate the size of a 'Data.Vector' data type
 z80MemSizeIntegral :: Int
@@ -112,8 +128,6 @@ z80initialState = Z80state
                   { _regs    = initialRegisters
                   , _primes  = initialRegisters
                   , _z80pc   = 0
-                  , _ix      = 0
-                  , _iy      = 0
                   , _sp      = 0xffff
                   , _ipage   = 0
                   , _refresh = 0

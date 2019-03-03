@@ -85,14 +85,14 @@ group0decode opc sys pc xForm
   = case p of
       0          -> oneByteInsn sys pc $ LD BCIndirectStore
       1          -> oneByteInsn sys pc $ LD DEIndirectStore
-      2          -> mkAbsAddrIns sys pc $ LD . indirectStoreXFormF . HLIndirectStore
+      2          -> mkAbsAddrIns sys pc $ LD . indirectStoreXFormF . RPIndirectStore (RPair16 HL)
       3          -> mkAbsAddrIns sys pc $ LD . Imm16IndirectStore
       _otherwise -> undefined
   | z == 2, q == 1
   = case p of
       0          -> oneByteInsn sys pc $ LD AccBCIndirect
       1          -> oneByteInsn sys pc $ LD AccDEIndirect
-      2          -> mkAbsAddrIns sys pc $ LD . indirectLoadXFormF . HLIndirectLoad
+      2          -> mkAbsAddrIns sys pc $ LD . indirectLoadXFormF . RPIndirectLoad (RPair16 HL)
       3          -> mkAbsAddrIns sys pc $ LD . AccImm16Indirect
       _otherwise -> undefined
   | z == 3
@@ -634,12 +634,12 @@ ixXFormALU16 other  = other
 -- | Transform 16-bit indirect stores, e.g., "LD (aaaa), HL" when HL is the
 -- source.
 ixXFormIndirectStore :: Z80IndirectStoreXForm
-ixXFormIndirectStore (HLIndirectStore addr) = IXIndirectStore addr
-ixXFormIndirectStore other                  = other
+ixXFormIndirectStore (RPIndirectStore (RPair16 HL) addr) = RPIndirectStore (RPair16 IX) addr
+ixXFormIndirectStore other                               = other
 
 ixXFormIndirectLoad :: Z80IndirectLoadXForm
-ixXFormIndirectLoad (HLIndirectLoad addr) = IXIndirectLoad addr
-ixXFormIndirectLoad other                  = other
+ixXFormIndirectLoad (RPIndirectLoad (RPair16 HL) addr) = RPIndirectLoad (RPair16 IX) addr
+ixXFormIndirectLoad other                              = other
 
 ixXFormExchange :: Z80ExchangeXForm
 ixXFormExchange SPHL  = SPIX
@@ -660,11 +660,11 @@ iyXFormALU16 DestHL = DestIY
 iyXFormALU16 other  = other
 
 iyXFormIndirectStore :: Z80IndirectStoreXForm
-iyXFormIndirectStore (HLIndirectStore addr) = IYIndirectStore addr
-iyXFormIndirectStore other                  = other
+iyXFormIndirectStore (RPIndirectStore (RPair16 HL) addr) = RPIndirectStore (RPair16 IY) addr
+iyXFormIndirectStore other                               = other
 
 iyXFormIndirectLoad :: Z80IndirectLoadXForm
-iyXFormIndirectLoad (HLIndirectLoad addr)  = IYIndirectLoad addr
+iyXFormIndirectLoad (RPIndirectLoad (RPair16 HL) addr)   = RPIndirectLoad (RPair16 IY) addr
 iyXFormIndirectLoad other                  = other
 
 iyXFormExchange :: Z80ExchangeXForm

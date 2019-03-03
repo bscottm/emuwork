@@ -144,8 +144,6 @@ z80DefaultPostProcessor disElt@DisasmInsn{} dstate = (Seq.singleton disElt, labe
     hasAddress = case insn of
         -- Somewhat dubious:
         -- LD (RPair16ImmLoad _rp (AbsAddr addr))  -> doCollectSymtab "M"
-      LD (HLIndirectStore (AbsAddr addr)) -> Just ("M", addr)
-      LD (HLIndirectLoad (AbsAddr addr)) -> Just ("M", addr)
       LD (RPIndirectLoad _rp (AbsAddr addr)) -> Just ("M", addr)
       LD (RPIndirectStore _rp (AbsAddr addr)) -> Just ("M", addr)
       DJNZ (AbsAddr addr)       -> Just ("L", addr)

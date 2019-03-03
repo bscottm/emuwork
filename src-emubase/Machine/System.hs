@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE GADTs #-}
+
 {- | Machine emulation data types.
 -}
 
@@ -33,25 +34,31 @@ data EmulatedSystem cpuType insnSet addrType wordType =
     , _sysName    :: String
                   -- ^ The system's name, e.g. "Null/dummy processor"
     , _sysAliases :: [String]
-                  -- ^ Names the system is known by.
+                  -- ^ Names by which the system is known (short forms that are easier to remember.)
     }
-    deriving (Show)
 
--- Need to manually generate the lenses due to the constraint on EmulatedSystem
-
+-- | Lens on the 'EmulatedSystem'-s processor. This lens is read/write because the processor is stateful and gets updated.
+-- This doesn't mean you should try to replace a Z80 with a Motorola 6502.
 processor :: Lens' (EmulatedSystem cpuType insnSet addrType wordType) (EmulatedProcessor cpuType insnSet addrType wordType)
 processor f sys = (\proc -> sys { _processor = proc }) <$> f (_processor sys)
 
+-- | Lens on the 'EmulatedSystem'-s memory. This lens is read/write because the memory system is stateful and gets updated.
 memory :: Lens' (EmulatedSystem cpuType insnSet addrType wordType) (M.MemorySystem addrType wordType)
 memory f sys = (\msys -> sys { _memory = msys }) <$> f (_memory sys)
 
+-- | Lens on the 'EmulatedSystem'-s full name. This lens is read-only.
 sysName :: Lens' (EmulatedSystem cpuType addrType wordType insnSet) String
 sysName f sys = (\name -> sys { _sysName = name }) <$> f (_sysName sys)
 
+-- | Lens on the 'EmulatedSystem'-s list of aliases (short names). This lens is read-only.
 sysAliases :: Lens' (EmulatedSystem cpuType addrType wordType insnSet) [String]
 sysAliases f sys = (\aliases -> sys { _sysAliases = aliases }) <$> f (_sysAliases sys)
 
--- | Emulated system constructor.
+-- | Make an emulated system.
+-- 
+-- /NOTE:/ The initial memory system is not one of the parameters nor is it required to construct an emulated system.
+-- 'mkEmulatedSystem' creates an initial, empty memory system for the system. It's up to you to customize the memory
+-- system after you invoke 'mkEmulatedSystem'.
 mkEmulatedSystem
   :: (Ord addrType, Bounded addrType)
   => EmulatedProcessor cpuType insnSet addrType wordType
@@ -76,16 +83,16 @@ data EmulatedProcessor cpuType insnSet addrType wordType =
     , _ops            :: ProcessorOps cpuType insnSet addrType wordType
     -- ^ Processor operation functions
     }
-    deriving (Show)
 
--- | Lens for the processor's pretty name
+-- | Lens for the processor's pretty name. This is a read-only lens.
 procPrettyName :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) String
-procPrettyName f proc = (\name' -> proc { _procPrettyName = name' }) <$> f (_procPrettyName proc)
+procPrettyName f proc = proc <$ f (_procPrettyName proc)
 
--- | Lens for the processor's internals (the CPU).
+-- | Lens for the processor's internals (the CPU). This is a read/write lens because the CPU is stateful and gets updated.
 cpu :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) cpuType
 cpu f proc = proc <$ f (_cpu proc)
 
+-- | Lens for the processor operations (functions). This is a read-only lens.
 processorOps :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) (ProcessorOps cpuType insnSet addrType wordType)
 processorOps f ops = ops <$ f (_ops ops)
 
@@ -98,9 +105,8 @@ data DecodedInsn instructionSet addrType =
   { _newPC :: ProgramCounter addrType
   -- ^ Program counter following the instruction
   , _insn :: instructionSet
-  -- ^ The instruction to execute
+  -- ^ The instruction to decode
   }
-  deriving (Eq, Data, Typeable)
 
 -- | Lens for the decoded instruction's program counter
 decodedInsnPC :: Lens' (DecodedInsn insnSet addrType) (ProgramCounter addrType)
@@ -114,12 +120,14 @@ decodedInsn f insn = (\insn' -> insn { _insn = insn' }) <$> f (_insn insn)
 data ProcessorOps cpuType insnSet addrType wordType =
   ProcessorOps
   {
-    -- | Instruction decoder, for disassembly and execution
     _idecode :: ProcessorDecoder cpuType insnSet addrType wordType
+  -- ^ Instruction decoder, for disassembly and execution
+  , _iexecute :: InstructionExecute cpuType insnSet addrType wordType
+  -- ^ Instruction execution function.
   }
 
 -- | Lens for the instruction decoder function. Note that this is effectively "read-only" -- one cannot change the
--- instruction decoder function.
+-- instruction decoder function (and why would one do that?.)
 idecode :: Lens' (ProcessorOps cpuType insnSet addrType wordType) (ProcessorDecoder cpuType insnSet addrType wordType)
 idecode f decoder = decoder <$ f (_idecode decoder)
 
@@ -127,7 +135,7 @@ instance Show (ProcessorOps cpuType insnSet addrType wordType) where
   -- Nothing to show. Need the instance for the EmulatedSystem automagically derived Show instance.
   show ProcessorOps{} = ""
 
--- | Instruction decoder function type.
+-- | Instruction decoder function type. The signature is set up for 'runState' and friends.
 type ProcessorDecoder cpuType insnSet addrType wordType
   =  ProgramCounter addrType
   -- ^ Current program counter, from where instructions are fetched
@@ -136,6 +144,14 @@ type ProcessorDecoder cpuType insnSet addrType wordType
   -> (DecodedInsn insnSet addrType, EmulatedSystem cpuType insnSet addrType wordType)
   -- ^ The decoded instruction and updated emulated system (because system's memory can change/get updated.)
 
+-- | Instruction execution function type. The signature is set up for 'runState' and friends.
+type InstructionExecute cpuType insnSet addrType wordType
+  = DecodedInsn insnSet addrType
+  -- ^ The decoded instruction to execute
+  ->  EmulatedSystem cpuType insnSet addrType wordType
+  -- ^ The emulated system (potentially uses the system's memory to make memory references within the instruction.)
+  -> EmulatedSystem cpuType insnSet addrType wordType
+  -- ^ The updated emulated system
 
 -- | I/O system based on ports, e.g., Zilog and Intel, are an address space of their own, which makes
 -- a type alias for `MemorySystem` appropriate. Port-based I/O systems use ports for their address space and this
@@ -207,13 +223,8 @@ sysPCReadN pc nwords sys = (pc + fromIntegral nwords, sysMReadN (unPC pc) nwords
 -- | Read _n_ words from memory starting at address 'addr'. Returns a vector of words read and the updated system
 -- state.
 sysMReadN
-  :: ( Integral addrType
-     , Integral wordType
-     , DVU.Unbox wordType
-     , PrintfArg addrType
-     , PrintfArg wordType
-     , Show addrType
-     , Show wordType
+  :: ( Integral addrType, Integral wordType, DVU.Unbox wordType, PrintfArg addrType, PrintfArg wordType
+     , Show addrType, Show wordType
      )
   => addrType
   -> Int
@@ -222,6 +233,15 @@ sysMReadN
 sysMReadN addr nwords sys = sys ^. memory & M.mReadN addr nwords & _2 %~ updateMemSys
   where
     updateMemSys msys = sys & memory .~ msys
+
+sysMWrite
+  :: (Integral addrType, Integral wordType, Show wordType, DVU.Unbox wordType, PrintfArg addrType
+     , Show addrType , PrintfArg wordType , Show wordType)
+  => addrType
+  -> wordType
+  -> EmulatedSystem cpuType insnSet addrType wordType
+  -> EmulatedSystem cpuType insnSet addrType wordType
+sysMWrite addr word sys = sys & memory %~ M.mWrite addr word
 
 
 -- | Get the system CPU's instruction decoder (this actually occurs often enough that a
@@ -254,11 +274,14 @@ nullSystem = mkEmulatedSystem nullProcessor name aliases
 -- | The null processor
 nullProcessor :: EmulatedProcessor NullCPU NullInsnSet addrType wordType
 nullProcessor =
-  EmulatedProcessor { _procPrettyName = "Null (dummy) processor", _cpu = NullCPU, _ops = ProcessorOps { _idecode = nullIDecode } }
-
--- | Null processor operations
-{- instance ProcessorOps NullCPU NullInsnSet addrType wordType where
-  idecode pc sys = (DecodedInsn pc NullNOP, sys) -}
+  EmulatedProcessor
+    { _procPrettyName = "Null (dummy) processor"
+    , _cpu = NullCPU
+    , _ops = ProcessorOps { _idecode = nullIDecode, _iexecute = nullExecute }
+    }
 
 nullIDecode :: ProcessorDecoder NullCPU NullInsnSet addrType wordType
 nullIDecode pc sys = (DecodedInsn pc NullNOP, sys)
+
+nullExecute :: InstructionExecute NullCPU NullInsnSet addrType wordType
+nullExecute _insn sys = sys

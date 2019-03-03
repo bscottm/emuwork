@@ -21,7 +21,8 @@ executable emuwork
     lens,
     vector,
     trs80,
-    emubase
+    emubase,
+    z80
 
   ghc-options:          -Wall -O2
 

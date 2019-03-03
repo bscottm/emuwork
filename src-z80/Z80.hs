@@ -12,6 +12,7 @@ import           Machine
 import           Z80.DisasmOutput   as Z80exports
 import           Z80.Disassembler   as Z80exports
 import           Z80.InsnDecode     as Z80exports
+import           Z80.InsnExecute    as Z80exports
 import           Z80.InstructionSet as Z80exports
 import           Z80.Processor      as Z80exports
 import           Z80.System         as Z80exports
@@ -29,6 +30,7 @@ z80processor = EmulatedProcessor
                , _ops            = ProcessorOps
                                    {
                                      _idecode = z80InsDecode
+                                   , _iexecute = z80instructionExecute
                                    }
                }
 
