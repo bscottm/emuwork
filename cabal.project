@@ -2,5 +2,3 @@ packages: .
           src-emubase/
           src-trs80/
           src-z80/
-shared: True
-executable-dynamic: True

@@ -38,6 +38,9 @@ module Machine.MemorySystem
   , mkRAMRegion
   , mkROMRegion
   , mkDevRegion
+  , msysRAMRegion
+  , msysROMRegion
+  , msysDevRegion
   -- * Memory read primitives
   , mRead
   , mReadN
@@ -250,8 +253,8 @@ combineMemorySystems msysA msysB
   = error "MemorySystem:combineMemorySystems: Overlapping regions between memory systems"
   where
     intersect = IM.intersection occupiedA occupiedB
-    occupiedA = msysA ^. regions & (IM.filter (/= EmptyRegion))
-    occupiedB = msysB ^. regions & (IM.filter (/= EmptyRegion))
+    occupiedA = msysA ^. regions & IM.filter (/= EmptyRegion)
+    occupiedB = msysB ^. regions & IM.filter (/= EmptyRegion)
     -- We only care about the altered memory system, so this is what execState's return looks like.
     insRegion (ivl, mem) msys = ((), insertMemRegion (I.lowerBound ivl) (I.upperBound ivl) mem msys)
 
@@ -316,6 +319,62 @@ mkDevRegion :: ( Integral addrType
             -> MemorySystem addrType wordType
             -- ^ The result memory system
 mkDevRegion sa len dev = insertMemRegion sa (sa + fromIntegral (len - 1)) (DevRegion dev)
+
+-- | Make a RAM region in an empty 'MemorySystem'. This is intended to be used with 'mappend' to chain together
+-- several memory systems.
+msysRAMRegion
+  :: ( Integral addrType
+     , Bounded addrType
+     , ShowHex addrType
+     , Show addrType
+     , Integral wordType
+     , DVU.Unbox wordType
+     , Show wordType
+     )
+     => addrType
+     -- ^ RAM region start address
+     -> Int
+     -- ^ Length of the RAM region
+     -> MemorySystem addrType wordType
+msysRAMRegion addr size = mkRAMRegion addr size mempty
+
+-- | Make a ROM region in an empty 'MemorySystem'. This is intended to be used with 'mappend' to chain together
+-- several memory systems.
+msysROMRegion
+  :: ( Integral addrType
+     , Bounded addrType
+     , ShowHex addrType
+     , Show addrType
+     , Integral wordType
+     , DVU.Unbox wordType
+     , Show wordType
+     )
+     => addrType
+     -- ^ RAM region start address
+     -> Vector wordType
+     -- ^ ROM image to insert as the region's contents
+     -> MemorySystem addrType wordType
+msysROMRegion addr vec = mkROMRegion addr vec mempty
+
+msysDevRegion
+  :: ( Integral addrType
+     , Bounded addrType
+     , ShowHex addrType
+     , Show addrType
+     , Integral wordType
+     , DVU.Unbox wordType
+     , Show wordType
+     )
+     => addrType
+     -- ^ Region's starting address
+     -> Int
+     -- ^ Region length
+     -> D.Device addrType wordType
+     -- ^ The device itself
+     -> MemorySystem addrType wordType
+     -- ^ The result memory system
+msysDevRegion sa len dev = mkDevRegion sa len dev mempty
+
 
 -- | Internal common code that inserts memory regions.
 insertMemRegion :: ( Integral addrType
@@ -641,8 +700,8 @@ doWrite readOnly startAddr patch msys = msys & regions %~ execState updRegionSta
         writeQueueSeq = sequence [state (queueLRU (fromIntegral a ) w) | (a, w) <- zip addrWordsList patchAsList]
         addrWordsList = [fromIntegral offs + rOffset | offs <- [0..nWrite]]
         patchAsList = DVU.toList patchSlice
-        filterPending lru = lru & lrucPsq %~ prunePsq [k | k <- lru ^. lrucPsq & OrdPSQ.keys
-                                                         , let r = fromIntegral rOffset
+        filterPending lru = lru & lrucPsq %~ prunePsq [k | let r = fromIntegral rOffset
+                                                         , k <- lru ^. lrucPsq & OrdPSQ.keys
                                                          , r >= k && k < r + nWrite]
 #if defined(TEST_DEBUG)
         showProgress = printf "writeContents: sAddr 0x%04x eAddr 0x%04x sRegion 0x%04x eRegion 0x%04x sOffset %5d nWrite %5d"

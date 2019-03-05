@@ -181,7 +181,8 @@ data OperLD =
   | AccIReg
   -- A, R
   | AccRReg
-  -- Store accumulator
+  -- Store accumulator via (BC) or (DE) indirectly (as pointers). Note that (HL) and (IX|IY+d) are already
+  -- handled in Z80reg8
   | BCIndirectStore
   | DEIndirectStore
   | Imm16IndirectStore (SymAbsAddr Z80addr)
@@ -191,8 +192,8 @@ data OperLD =
   | RRegAcc
   -- 16-bit immediate load, e.g., LD BC, 4000H
   | RPair16ImmLoad RegPairSP (SymAbsAddr Z80addr)
-  -- 16-bit indirect loads and stores, e.g. LD [BC|DE|HL|IX|IY], (4000H)
-  -- Load [BC|DE|HL|IX|IY] from the contents of 0x4000.
+  -- 16-bit indirect loads and stores, e.g. LD [BC|DE|HL|IX|IY|SP], (4000H)
+  -- Load [BC|DE|HL|IX|IY|SP] from the contents of 0x4000.
   | RPIndirectLoad RegPairSP (SymAbsAddr Z80addr)
   | RPIndirectStore RegPairSP (SymAbsAddr Z80addr)
   deriving (Show, Eq, Ord, Typeable, Data)
@@ -207,8 +208,7 @@ data OperALU =
 
 -- | 8-bit ALU operands where the accumulator is the destination, as distinct
 -- from 16-bit ALU operations.
-data DestALUAcc =
-  ALUAcc OperALU
+newtype DestALUAcc = ALUAcc OperALU
   deriving (Show, Eq, Ord, Typeable, Data)
 
 -- | 16-bit ALU destination operands -- HL, IX or IY

@@ -5,10 +5,10 @@ where
 
 import qualified Control.Arrow as Arrow
 import Control.Monad (sequence)
+import           Control.Monad.Trans.State.Strict (execState)
 import Data.Bits
-import Data.List (last)
 import Data.Functor.Identity (Identity)
-import           Data.Vector.Unboxed            ((!))
+import           Data.Vector.Unboxed            (Vector, (!))
 import Lens.Micro
 
 import Machine
@@ -29,6 +29,11 @@ z80instructionExecute insn sys =
     nextInsnPC = updatePC insnPC
     updatePC addr sys' = sys' & processor . cpu . z80pc .~ addr
 
+-- ==~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~~
+-- LD instruction:
+-- ==~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~~
+
+-- | Z80 load instruction, with all of its manifest operands
 insLoad :: OperLD
         -> Z80system sysType
         -> Z80system sysType
@@ -51,25 +56,35 @@ insLoad (AccImm16Indirect (AbsAddr addr)) sys = reg8set sys' A val
     (val, sys') = sysMRead addr sys
 insLoad (AccImm16Indirect (SymAddr _   )) _   = error "insLoad/AccImm16Indirect: SymAddr encountered."
 
-insLoad AccIReg sys = reg8set sys A (sys ^. processor . cpu . ipage)
-insLoad AccRReg sys = reg8set sys A (sys ^. processor . cpu . refresh)
+insLoad AccIReg sys = sys' & processor . cpu .~ z80''
+  where
+    sys' = reg8set sys A (sys ^. processor . cpu . regs . z80ipage)
+    z80' = sys' ^. processor . cpu
+    acc  = z80' ^. regs . z80accum
+    z80'' = z80' & flagSign .~ (acc .&. 0x80 /= 0)
+                 & flagZero .~ (acc == 0)
+                 & flagHalfCarry .~ False
+                 & flagParOv .~ computeParity acc
+                 & flagNFlag .~ False
+insLoad AccRReg sys = reg8set sys A (sys ^. processor . cpu . regs . z80rreg)
 
 insLoad BCIndirectStore sys = sysMWrite (reg16get BC sys) (sys ^. processor . cpu . regs . z80accum) sys
 insLoad DEIndirectStore sys = sysMWrite (reg16get DE sys) (sys ^. processor . cpu . regs . z80accum) sys
 insLoad (Imm16IndirectStore (AbsAddr addr)) sys = sysMWrite addr (sys ^. processor . cpu . regs . z80accum) sys
 insLoad (Imm16IndirectStore (SymAddr _   )) _   = error "insLoad/Imm16IndirectStore: SymAddr encountered."
 
-insLoad IRegAcc sys = sys & processor . cpu .~ z80'
+insLoad IRegAcc sys = sys & processor . cpu . regs .~ z80regs'
   where
-    z80 = sys ^. processor . cpu
-    z80' = z80 & ipage .~ z80 ^. regs . z80accum
-insLoad RRegAcc sys = sys & processor . cpu .~ z80'
+    z80regs = sys ^. processor . cpu . regs
+    z80regs' = z80regs & z80ipage .~ z80regs ^. z80accum
+
+insLoad RRegAcc sys = sys & processor . cpu . regs .~ z80regs'
   where
-    z80 = sys ^. processor . cpu
-    z80' = z80 & refresh .~ z80 ^. regs . z80accum
+    z80regs  = sys ^. processor . cpu . regs
+    z80regs' = z80regs & z80rreg .~ z80regs ^. z80accum
 
 insLoad (RPair16ImmLoad (RPair16 rp) (AbsAddr val))  sys = reg16set val rp sys
-insLoad (RPair16ImmLoad SP           (AbsAddr addr)) sys = sys & processor . cpu . sp .~ addr
+insLoad (RPair16ImmLoad SP           (AbsAddr addr)) sys = sys & processor . cpu . regs . z80sp .~ addr
 insLoad (RPair16ImmLoad _            (SymAddr _  ))  _   = error "insLoad/RPair16ImmLoad: SymAddr encountered."
 
 insLoad (RPIndirectStore (RPair16 BC) (AbsAddr addr)) sys = doIndirectStoreReg16 addr z80breg z80creg sys
@@ -77,13 +92,13 @@ insLoad (RPIndirectStore (RPair16 DE) (AbsAddr addr)) sys = doIndirectStoreReg16
 insLoad (RPIndirectStore (RPair16 HL) (AbsAddr addr)) sys = doIndirectStoreReg16 addr z80hreg z80lreg sys
 insLoad (RPIndirectStore (RPair16 IX) (AbsAddr addr)) sys = doIndirectStoreReg16 addr z80ixh  z80ixl  sys
 insLoad (RPIndirectStore (RPair16 IY) (AbsAddr addr)) sys = doIndirectStoreReg16 addr z80iyh  z80iyl sys
-insLoad (RPIndirectStore SP           (AbsAddr addr)) sys =
-  last $ sequence [sysMWrite storeAddr lo, sysMWrite (storeAddr + 1) hi] sys'
+insLoad (RPIndirectStore SP           (AbsAddr addr)) sys = execState writeSeq sys'
   where
-    z80 = sys ^. processor . cpu
-    (storeAddr, sys')  = Arrow.first make16bit $ sysMReadN addr 2 sys
-    hi                 = (fromIntegral (z80 ^. sp) `shiftR` 8) .&. 0xff :: Z80word
-    lo                 = (fromIntegral (z80 ^. sp) .&. 0xff) :: Z80word
+    z80regs           = sys ^. processor . cpu . regs
+    (storeAddr, sys') = Arrow.first make16bit $ sysMReadN addr 2 sys
+    hi                = (fromIntegral (z80regs ^. z80sp) `shiftR` 8) .&. 0xff :: Z80word
+    lo                = (fromIntegral (z80regs ^. z80sp) .&. 0xff)            :: Z80word
+    writeSeq          = sequence [stateSysMWrite storeAddr lo, stateSysMWrite (storeAddr + 1) hi]
 insLoad (RPIndirectStore _            (SymAddr _   )) _   = error "insLoad/HLIndirectStore: SymAddr encountered"
 
 insLoad (RPIndirectLoad  (RPair16 BC) (AbsAddr addr)) sys = doIndirectLoadReg16 addr z80breg z80creg sys
@@ -91,18 +106,17 @@ insLoad (RPIndirectLoad  (RPair16 DE) (AbsAddr addr)) sys = doIndirectLoadReg16 
 insLoad (RPIndirectLoad  (RPair16 HL) (AbsAddr addr)) sys = doIndirectLoadReg16 addr z80hreg z80lreg sys
 insLoad (RPIndirectLoad  (RPair16 IX) (AbsAddr addr)) sys = doIndirectLoadReg16 addr z80ixh  z80ixl  sys
 insLoad (RPIndirectLoad  (RPair16 IY) (AbsAddr addr)) sys = doIndirectLoadReg16 addr z80iyh  z80iyl sys
-insLoad (RPIndirectLoad  SP           (AbsAddr addr)) sys = sys'' & processor . cpu .~ z80'
+insLoad (RPIndirectLoad  SP           (AbsAddr addr)) sys = sys'' & processor . cpu . regs .~ z80regs'
   where
-    z80              = sys ^. processor . cpu
+    z80regs          = sys ^. processor . cpu . regs
     (loadAddr, sys') = Arrow.first make16bit $ sysMReadN addr 2 sys
     (val, sys'')     = sysMReadN loadAddr 2 sys'
-    z80'             = z80 & sp .~ make16bit val
+    z80regs'         = z80regs & z80sp .~ make16bit val
 
 insLoad (RPIndirectLoad  _            (SymAddr _   )) _   = error "insLoad/HLIndirectLoad: SymAddr encountered"
 
-insLoad _ sys = sys
-
-make16bit bytes  = (fromIntegral (bytes ! 1)) `shiftL` 8 .|. (fromIntegral (bytes ! 0))
+make16bit :: Vector Z80word -> Z80addr
+make16bit bytes  = fromIntegral (bytes ! 1) `shiftL` 8 .|. fromIntegral (bytes ! 0)
 
 reg8set :: Z80system sysType
         -> Z80reg8
@@ -118,14 +132,14 @@ reg8set sys dstReg val =
     H               -> sys & procRegs . z80hreg .~ val
     L               -> sys & procRegs . z80lreg .~ val
     HLindirect      -> sysMWrite (reg16get HL sys) val sys
-    IXindirect disp -> sysMWrite ((reg16get IX sys) + signExtend disp) val sys
-    IYindirect disp -> sysMWrite ((reg16get IY sys) + signExtend disp) val sys
+    IXindirect disp -> sysMWrite (reg16get IX sys + signExtend disp) val sys
+    IYindirect disp -> sysMWrite (reg16get IY sys + signExtend disp) val sys
     IXh             -> sys & procRegs . z80ixh .~ val
     IXl             -> sys & procRegs . z80ixl .~ val
     IYh             -> sys & procRegs . z80iyh .~ val
     IYl             -> sys & procRegs . z80iyl .~ val
   where
-    procRegs = (processor . cpu . regs)
+    procRegs = processor . cpu . regs
 
 reg8get :: Z80system sysType
         -> Z80reg8
@@ -140,14 +154,14 @@ reg8get sys srcReg =
     H               -> (sys ^. procRegs . z80hreg, sys)
     L               -> (sys ^. procRegs . z80lreg, sys)
     HLindirect      -> sysMRead (reg16get HL sys) sys
-    IXindirect disp -> sysMRead ((reg16get IX sys) + signExtend disp) sys
-    IYindirect disp -> sysMRead ((reg16get IY sys) + signExtend disp) sys
+    IXindirect disp -> sysMRead (reg16get IX sys + signExtend disp) sys
+    IYindirect disp -> sysMRead (reg16get IY sys + signExtend disp) sys
     IXh             -> (sys ^. procRegs . z80ixh, sys)
     IXl             -> (sys ^. procRegs . z80ixl, sys)
     IYh             -> (sys ^. procRegs . z80iyh, sys)
     IYl             -> (sys ^. procRegs . z80iyl, sys)
   where
-    procRegs = (processor . cpu . regs)
+    procRegs = processor . cpu . regs
 
 reg16get
   :: Z80reg16
@@ -161,9 +175,8 @@ reg16get IX {-sys-} = doReg16get z80ixh  z80ixl  {-sys-}
 reg16get IY {-sys-} = doReg16get z80iyh  z80iyl  {-sys-}
 
 doReg16get
-  :: (Integral a1, Integral a2)
-  => Getting a1 Z80registers a1
-  -> Getting a2 Z80registers a2
+  :: Getting Z80word Z80registers Z80word
+  -> Getting Z80word Z80registers Z80word
   -> Z80system sysType
   -> Z80addr
 doReg16get higetter logetter sys = ((fromIntegral hi :: Z80addr) `shiftL` 8) .|. (fromIntegral lo :: Z80addr)
@@ -187,8 +200,8 @@ reg16set val IY {-sys-} = doReg16set val z80iyh  z80iyl  {-sys-}
 
 doReg16set
   :: Z80addr
-  -> ((a2 -> Identity Z80word) -> Z80registers -> Identity Z80registers)
-  -> ((a3 -> Identity Z80word) -> Z80registers -> Identity Z80registers)
+  -> ((Z80word -> Identity Z80word) -> Z80registers -> Identity Z80registers)
+  -> ((Z80word -> Identity Z80word) -> Z80registers -> Identity Z80registers)
   -> Z80system sysType
   -> Z80system sysType
 doReg16set val hisetter losetter sys = sys & processor . cpu .~ z80'
@@ -204,15 +217,16 @@ doIndirectStoreReg16
   -> EmulatedSystem Z80state insnSet Z80addr Z80word
   -> EmulatedSystem Z80state insnSet Z80addr Z80word
 doIndirectStoreReg16 addr higetter logetter sys =
-  last $ sequence [ sysMWrite storeAddr (z80regs ^. logetter), sysMWrite (storeAddr + 1) (z80regs ^. higetter)] sys'
+  execState (sequence writeSeq) sys'
   where
     z80regs = sys ^. processor . cpu . regs
     (storeAddr, sys')  = Arrow.first make16bit $ sysMReadN addr 2 sys
+    writeSeq = [stateSysMWrite storeAddr (z80regs ^. logetter), stateSysMWrite (storeAddr + 1) (z80regs ^. higetter)]
 
 doIndirectLoadReg16
   :: Z80addr
-  -> ((a2 -> Identity Z80word) -> Z80registers -> Identity Z80registers)
-  -> ((a3 -> Identity Z80word) -> Z80registers -> Identity Z80registers)
+  -> ((Z80word -> Identity Z80word) -> Z80registers -> Identity Z80registers)
+  -> ((Z80word -> Identity Z80word) -> Z80registers -> Identity Z80registers)
   -> EmulatedSystem Z80state insnSet Z80addr Z80word
   -> EmulatedSystem Z80state insnSet Z80addr Z80word
 doIndirectLoadReg16 addr hisetter losetter sys = sys'' & processor . cpu . regs .~ z80regs'
@@ -222,3 +236,8 @@ doIndirectLoadReg16 addr hisetter losetter sys = sys'' & processor . cpu . regs 
     (val, sys'')     = sysMReadN loadAddr 2 sys'
     z80regs'         = z80regs & hisetter .~ val ! 1
                                & losetter .~ val ! 0
+
+-- | Compute a byte's parity. Returns 'True' if parity is even (P flag gets set) or 'False' if parity is odd.
+-- Adapted from (https://graphics.stanford.edu/~seander/bithacks.html#ParityNaive)
+computeParity :: Z80word -> Bool
+computeParity val = ((0x96 :: Z80word) `shiftR` fromIntegral ((val `xor` (val `shiftR` 4)) .&. 0xf)) .&. 1 == 0

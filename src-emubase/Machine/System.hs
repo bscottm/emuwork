@@ -11,6 +11,8 @@
 
 module Machine.System where
 
+import           Control.Monad.Trans.State.Strict (StateT, state)
+import           Data.Functor.Identity (Identity)
 import           Lens.Micro
 import           Lens.Micro.Extras
 import           Data.Data
@@ -36,6 +38,7 @@ data EmulatedSystem cpuType insnSet addrType wordType =
     , _sysAliases :: [String]
                   -- ^ Names by which the system is known (short forms that are easier to remember.)
     }
+    deriving (Show)
 
 -- | Lens on the 'EmulatedSystem'-s processor. This lens is read/write because the processor is stateful and gets updated.
 -- This doesn't mean you should try to replace a Z80 with a Motorola 6502.
@@ -83,6 +86,7 @@ data EmulatedProcessor cpuType insnSet addrType wordType =
     , _ops            :: ProcessorOps cpuType insnSet addrType wordType
     -- ^ Processor operation functions
     }
+    deriving (Show)
 
 -- | Lens for the processor's pretty name. This is a read-only lens.
 procPrettyName :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) String
@@ -90,7 +94,7 @@ procPrettyName f proc = proc <$ f (_procPrettyName proc)
 
 -- | Lens for the processor's internals (the CPU). This is a read/write lens because the CPU is stateful and gets updated.
 cpu :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) cpuType
-cpu f proc = proc <$ f (_cpu proc)
+cpu f proc = (\cpu' -> proc { _cpu = cpu' }) <$> f (_cpu proc)
 
 -- | Lens for the processor operations (functions). This is a read-only lens.
 processorOps :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) (ProcessorOps cpuType insnSet addrType wordType)
@@ -178,6 +182,8 @@ $(deriveGeneric ''SymAbsAddr)
 -- System program counter and memory reading operations
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
+-- | Read a word from memory, then increment the program counter. Returns the updated program counter, memory value
+-- and updated system state as the tuple @(newPC, (val, updatedSystem))@.
 sysReadAndIncPC
   :: (Integral addrType, Integral wordType, DVU.Unbox wordType)
   => ProgramCounter addrType
@@ -185,7 +191,8 @@ sysReadAndIncPC
   -> (ProgramCounter addrType, (wordType, EmulatedSystem cpuType insnSet addrType wordType))
 sysReadAndIncPC pc sys = (1+ pc, sysMRead (unPC pc) sys)
 
--- | Fetch the next word from memory (pre-incrementing the program counter), returning the (incremented pc, contents)
+-- | Fetch the next word from memory (pre-incrementing the program counter), returning the incremented pc, memory value
+-- and updated system state as the tuple @(newPC, (val, updatedSystem))@.
 sysIncPCAndRead
   :: (Integral addrType, Integral wordType, DVU.Unbox wordType)
   => ProgramCounter addrType
@@ -202,6 +209,13 @@ sysMRead
 sysMRead addr sys = sys ^. memory & M.mRead addr & _2 %~ updateMemSys
   where
     updateMemSys msys = sys & memory .~ msys
+
+-- | 'sysMRead' adapted as a 'Control.Monad.Trans.State' state transformer.
+stateSysMRead
+  :: (Integral addrType, Integral wordType, DVU.Unbox wordType)
+  => addrType
+  -> StateT (EmulatedSystem cpuType0 insnSet0 addrType wordType) Identity wordType
+stateSysMRead addr = state (sysMRead addr)
 
 -- | Read _n_ words starting at the program counter's current value, returning (final program counter, ([word vector], new
 -- system state))
@@ -234,6 +248,7 @@ sysMReadN addr nwords sys = sys ^. memory & M.mReadN addr nwords & _2 %~ updateM
   where
     updateMemSys msys = sys & memory .~ msys
 
+-- | Write a 'word' value to memory at address 'addr'. Returns the updated system state.
 sysMWrite
   :: (Integral addrType, Integral wordType, Show wordType, DVU.Unbox wordType, PrintfArg addrType
      , Show addrType , PrintfArg wordType , Show wordType)
@@ -243,10 +258,18 @@ sysMWrite
   -> EmulatedSystem cpuType insnSet addrType wordType
 sysMWrite addr word sys = sys & memory %~ M.mWrite addr word
 
+-- | Adapt 'sysMWrite` to a 'Control.Monad.Trans.State' state transformer for 'execState' and friends.
+stateSysMWrite
+  :: (Integral addrType, Integral wordType, Show wordType, DVU.Unbox wordType, PrintfArg addrType
+     , Show addrType , PrintfArg wordType , Show wordType)
+  => addrType
+  -> wordType
+  -> StateT (EmulatedSystem cpuType1 insnSet1 addrType wordType) Identity ()
+stateSysMWrite addr word = state (\sys -> ((), sysMWrite addr word sys))
+
 
 -- | Get the system CPU's instruction decoder (this actually occurs often enough that a
 -- utility function is necessary.)
-
 sysGetIDecoder :: EmulatedSystem cpuType insnSet addrType wordType
                -> ProcessorDecoder cpuType insnSet addrType wordType
 sysGetIDecoder {-sys-} = view (processor . processorOps . idecode) {-sys-}

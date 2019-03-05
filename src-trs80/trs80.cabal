@@ -71,7 +71,8 @@ test-suite yamltest
         text,
         unordered-containers,
         vector,
-        yaml
+        yaml,
+        z80
     Main-is:            TRS80/Disasm/YamlTest.hs
     Other-Modules:      TRS80.Disasm.Guidance
     default-extensions: GADTs,
