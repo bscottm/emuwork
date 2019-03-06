@@ -3,8 +3,9 @@
 module Main where
 
 -- import           Control.Arrow                        (first)
-import           Control.Monad                        (sequence, when)
--- import           Control.Monad.Trans.State.Strict     (evalState, execState, runState, state)
+import Control.Applicative (liftA2)
+import           Control.Monad                        (replicateM, sequence, when)
+import           Control.Monad.Trans.State.Strict     (evalState, execState, runState, state)
 -- import           Data.Char                            (ord)
 -- import qualified Data.Foldable                        as Fold
 -- import Data.Functor.Identity (Identity)
@@ -13,15 +14,15 @@ import Data.Bits
 import           Data.List                            (and)
 -- import           Data.Maybe                           (fromMaybe)
 -- import           Data.Monoid                          (mempty)
--- import           Data.Vector.Unboxed                  (Vector, (!))
--- import qualified Data.Vector.Unboxed                  as DVU
+import           Data.Vector.Unboxed                  (Vector, (!))
+import qualified Data.Vector.Unboxed                  as DVU
 -- import           Data.Word
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 import           Lens.Micro
 -- import           System.IO                            (hPutStrLn, stderr)
--- import           System.Random                        (Random, StdGen, getStdGen, randomR, setStdGen)
+import           System.Random                        (Random, StdGen, getStdGen, randomR, setStdGen)
 import           Test.Framework                       (Test, defaultMain, testGroup)
 -- import           Test.Framework.Options               (TestOptions' (..))
 import           Test.Framework.Providers.HUnit       (testCase)
@@ -44,7 +45,30 @@ import          Z80
 
 main :: IO ()
 main =
-    defaultMain z80ExecTests
+  do
+    stdGen <- getStdGen
+    let ((mem0x7200, mem0x6100, mem0x6200), stdGen') =
+          runState ((,,) <$> state (finiteRandList (0, 0xff) 1024 :: (StdGen -> ([Z80word], StdGen)))
+                         <*> state (finiteRandList (0, 0xff)  256 :: (StdGen -> ([Z80word], StdGen)))
+                         <*> state (finiteRandList (0, 0xff)  256 :: (StdGen -> ([Z80word], StdGen)))
+                   )
+                   stdGen
+        sysSeq = sequence [ stateSysMWriteN 0x7200 (DVU.fromList mem0x7200)
+                          , stateSysMWriteN 0x6100 (DVU.fromList mem0x6100)
+                          , stateSysMWriteN 0x6200 (DVU.fromList mem0x6200)
+                          ]
+    let testOptions =
+          TestOptions
+            { randGen = stdGen'
+            , z80randMem = execState sysSeq z80system
+            }
+    defaultMain (z80ExecTests testOptions)
+
+data TestOptions =
+  TestOptions
+    { randGen :: StdGen
+    , z80randMem :: Z80system Z80BaseSystem
+    }
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- The tests...
@@ -57,11 +81,13 @@ z80system = z80generic & sysName .~ "Test Z80 generic system"
                           <> msysRAMRegion 0x6100  256
                           <> msysRAMRegion 0x6300  256
 
-
-z80ExecTests :: [Test]
-z80ExecTests =
+-- | The test groups and cases
+z80ExecTests
+  :: TestOptions
+  -> [Test]
+z80ExecTests opts =
   [ testGroup "LD group"
-    [ testCase "Reg8Reg8            " test_ldReg8Reg8
+    [ testCase "Reg8Reg8            " (test_ldReg8Reg8 opts)
     ]
   ]
 
@@ -83,6 +109,8 @@ z80initialCPU = z80system & processor . cpu . regs .~
                     & z80iyh   .~ 0x63
                     & z80iyl   .~ 0x7b)
 
+-- | Compare two systems' registers: 'leftRegs' are the expected registers, 'rightRegs' are the actual values. If they
+-- don't match, then the contents of both are printed to 'stdout'.
 compareRegs
   :: Z80system sysType
   -> Z80system sysType
@@ -118,6 +146,11 @@ printRegs zregs =
     (((fromIntegral (zregs ^. z80iyh) :: Z80addr) `shiftL` 8)  .|. (fromIntegral (zregs ^. z80iyl)  :: Z80addr) .&. 0x00ff)
     (zregs ^. z80sp)
 
+-- | Generate finite sized random lists.
+finiteRandList :: (Random a, Num a) => (a, a) -> Int -> StdGen -> ([a], StdGen)
+finiteRandList range lim = runState (replicateM lim (state (randomR range)))
+
+-- | The ordinary 8-bit registers (does not include the indirect (HL), (IX|IY+d) memory references)
 ordinaryReg8 :: [(Z80reg8, ASetter Z80registers Z80registers Z80word Z80word, Z80word, Text)]
 ordinaryReg8 = [ (A, z80accum, 0x5a, "A")
                , (B, z80breg,  0x3b, "B")
@@ -128,16 +161,21 @@ ordinaryReg8 = [ (A, z80accum, 0x5a, "A")
                , (L, z80lreg,  0xc2, "L")
                ]
 
-test_ldReg8Reg8 :: Assertion
-test_ldReg8Reg8 =
+-- | Test the 8-bit-to-8-bit loads (LD A, B; LD B, (HL); LD H, (IX+3) ...)
+test_ldReg8Reg8
+  :: TestOptions
+  -> Assertion
+test_ldReg8Reg8 opts =
   do
-    retval <- testReg8Loads
-    assertBool "" (and retval)
+    retval <- testReg8DirectLoads
+    assertBool "Reg8Reg8 failed." (and retval)
   where
-    testReg8Loads = sequence [testReg8Load dst src | dst <- ordinaryReg8, src <- ordinaryReg8]
+    testReg8DirectLoads = sequence [testReg8Load dst src | dst <- ordinaryReg8, src <- ordinaryReg8]
     testReg8Load (dstReg, dstSetter, _dstVal, dstText) (srcReg, srcSetter, srcVal, srcText) =
       compareRegs z80expected z80' (T.pack (printf "LD %s, %s (0x%02x)" dstText srcText srcVal))
       where
         z80'        = z80instructionExecute (DecodedInsn 0x1003 (LD (Reg8Reg8 dstReg srcReg))) z80test
         z80test     = z80initialCPU & processor . cpu . regs . srcSetter .~ srcVal
-        z80expected = z80test    & processor . cpu . regs . dstSetter .~ srcVal
+        z80expected = z80test       & processor . cpu . regs . dstSetter .~ srcVal
+
+    z80indirectSys  = z80randMem opts

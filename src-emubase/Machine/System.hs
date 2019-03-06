@@ -267,6 +267,24 @@ stateSysMWrite
   -> StateT (EmulatedSystem cpuType1 insnSet1 addrType wordType) Identity ()
 stateSysMWrite addr word = state (\sys -> ((), sysMWrite addr word sys))
 
+sysMWriteN
+  :: (Integral addrType, Integral wordType, Show wordType, DVU.Unbox wordType, PrintfArg addrType
+     , Show addrType , PrintfArg wordType , Show wordType)
+  => addrType
+  -> Vector wordType
+  -> EmulatedSystem cpuType insnSet addrType wordType
+  -> EmulatedSystem cpuType insnSet addrType wordType
+sysMWriteN addr vec sys = sys & memory %~ M.mWriteN addr vec
+
+-- | Adapt 'sysMWriteN` to a 'Control.Monad.Trans.State' state transformer for 'execState' and friends.
+stateSysMWriteN
+  :: (Integral addrType, Integral wordType, Show wordType, DVU.Unbox wordType, PrintfArg addrType
+     , Show addrType , PrintfArg wordType , Show wordType)
+  => addrType
+  -> Vector wordType
+  -> StateT (EmulatedSystem cpuType1 insnSet1 addrType wordType) Identity ()
+stateSysMWriteN addr word = state (\sys -> ((), sysMWriteN addr word sys))
+
 
 -- | Get the system CPU's instruction decoder (this actually occurs often enough that a
 -- utility function is necessary.)

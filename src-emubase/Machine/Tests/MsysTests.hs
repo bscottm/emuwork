@@ -41,17 +41,18 @@ main =
   do
     stdGen  <- getStdGen
     -- Generate the various random vectors we need to test:
-    let (romImg, stdGen')        = generateROMImg 4096 stdGen
-        (writePairs, stdGen'')   = generateRandWrites 32768 stdGen'
-        options                  = TestParams { randROMImg     = DVU.fromList romImg
-                                              , randWrites     = DVU.fromList writePairs
-                                              , randWritesMVec = writeRAMInitial randWritesSize
-                                              , randWritesMem  = writeRAMMsys randWritesBase randWritesSize
-                                              }
-    setStdGen stdGen''
+    let ((romImg, writePairs), stdGen') = runState ((,) <$> generateROMImg 4096
+                                                        <*> state (generateRandWrites 32768)
+                                                   ) stdGen
+        options                         = TestParams { randROMImg     = DVU.fromList romImg
+                                                     , randWrites     = DVU.fromList writePairs
+                                                     , randWritesMVec = writeRAMInitial randWritesSize
+                                                     , randWritesMem  = writeRAMMsys randWritesBase randWritesSize
+                                                     }
+    setStdGen stdGen'
     defaultMain (mkMsysTests options)
   where
-    generateROMImg = finiteRandList (0, 0xff)
+    generateROMImg size = state (finiteRandList (0, 0xff) size)
 
     randWritesBase = 0x0
     randWritesSize = 0x1000 :: Int
@@ -496,7 +497,7 @@ test_RAMRandReads args ramBase ramSize = forAll (choose (1, DVU.length addrPairs
 writeRAM :: (Word16, Word8)
          -> TestMemSystem
          -> TestMemSystem
-writeRAM (addr, val) sys = M.mWrite addr val sys
+writeRAM (addr, val) {-sys-} = M.mWrite addr val {-sys-}
 {-# INLINABLE writeRAM #-}
 
 testMemMappedDev :: TestMemSystem
