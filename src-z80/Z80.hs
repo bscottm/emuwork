@@ -16,7 +16,6 @@ import           Z80.InsnExecute    as Z80exports
 import           Z80.InstructionSet as Z80exports
 import           Z80.Processor      as Z80exports
 import           Z80.System         as Z80exports
--- import Z80.ParseAnalytic
 
 import           Z80.InstructionSet (Z80instruction)
 import           Z80.Processor      (Z80state, z80initialState)

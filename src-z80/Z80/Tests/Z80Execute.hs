@@ -12,7 +12,7 @@ import           Control.Monad                        (sequence, when)
 import Data.Bits
 import           Data.List                            (and)
 -- import           Data.Maybe                           (fromMaybe)
-import           Data.Monoid                          (mempty)
+-- import           Data.Monoid                          (mempty)
 -- import           Data.Vector.Unboxed                  (Vector, (!))
 -- import qualified Data.Vector.Unboxed                  as DVU
 -- import           Data.Word
@@ -53,8 +53,7 @@ main =
 z80system :: Z80system Z80BaseSystem
 z80system = z80generic & sysName .~ "Test Z80 generic system"
                        & sysAliases .~ []
-                       & memory .~ (mempty :: MemorySystem Z80addr Z80word)
-                          <> msysRAMRegion 0x7200 1024
+                       & memory .~ msysRAMRegion 0x7200 1024
                           <> msysRAMRegion 0x6100  256
                           <> msysRAMRegion 0x6300  256
 
@@ -67,24 +66,22 @@ z80ExecTests =
   ]
 
 z80initialCPU :: Z80system Z80BaseSystem
-z80initialCPU = z80system & processor . cpu . regs .~ updRegs
-  where
-    z80regs = z80system ^. processor . cpu . regs
-    updRegs = z80regs
-                  & z80accum .~ 0xa5
-                  & z80breg  .~ 0xb3
-                  & z80creg  .~ 0xc0
-                  & z80dreg  .~ 0xd8
-                  & z80ereg  .~ 0xe2
-                  -- HL should be in the 0x7200 RAM area
-                  & z80hreg  .~ 0x72
-                  & z80lreg  .~ 0x2c
-                  -- IX should be in the 0x6300 RAM area
-                  & z80ixh   .~ 0x61
-                  & z80ixl   .~ 0x5d
-                  -- IY should be in the 0x6300 RAM area
-                  & z80iyh   .~ 0x63
-                  & z80iyl   .~ 0x7b
+z80initialCPU = z80system & processor . cpu . regs .~
+                  (z80registers z80system &
+                      z80accum .~ 0xa5
+                    & z80breg  .~ 0xb3
+                    & z80creg  .~ 0xc0
+                    & z80dreg  .~ 0xd8
+                    & z80ereg  .~ 0xe2
+                    -- HL should be in the 0x7200 RAM area
+                    & z80hreg  .~ 0x72
+                    & z80lreg  .~ 0x2c
+                    -- IX should be in the 0x6300 RAM area
+                    & z80ixh   .~ 0x61
+                    & z80ixl   .~ 0x5d
+                    -- IY should be in the 0x6300 RAM area
+                    & z80iyh   .~ 0x63
+                    & z80iyl   .~ 0x7b)
 
 compareRegs
   :: Z80system sysType
@@ -102,8 +99,8 @@ compareRegs leftSys rightSys banner =
         printRegs rightRegs
     return (leftRegs == rightRegs)
   where
-    leftRegs  = leftSys ^. processor . cpu . regs
-    rightRegs = rightSys ^. processor . cpu . regs
+    leftRegs  = z80registers leftSys
+    rightRegs = z80registers rightSys
 
 -- | Dump registers to stdout.
 printRegs

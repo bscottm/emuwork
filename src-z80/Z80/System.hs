@@ -1,5 +1,7 @@
 module Z80.System where
 
+import Lens.Micro
+
 import Machine.System
 import Machine.MemorySystem
 import Z80.Processor
@@ -16,3 +18,11 @@ type Z80system sysType = EmulatedSystem Z80state Z80instruction Z80addr Z80word
 
 -- | Z80 memory system type
 type Z80memory         = MemorySystem Z80addr Z80word
+
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
+-- Common accessors...
+-- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
+
+-- | Accessor to the register set.
+z80registers :: Z80system sysType -> Z80registers
+z80registers z80 = z80 ^. processor . cpu . regs
