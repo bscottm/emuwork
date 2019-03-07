@@ -679,7 +679,7 @@ doWrite readOnly startAddr patch msys = msys & regions %~ execState updRegionSta
         eRegion = I.upperBound iv
         sOffset = fromIntegral (sAddr - startAddr)
         rOffset = sAddr - sRegion
-        patchSlice  = DVU.slice sOffset nWrite patch
+        patchSlice  = tracePatchSlice $ DVU.slice sOffset nWrite patch
         spliceWriteVec ctnt = DVU.concat [ leftSlice ctnt
                                          , patchSlice
                                          , rightSlice ctnt
@@ -690,8 +690,8 @@ doWrite readOnly startAddr patch msys = msys & regions %~ execState updRegionSta
             rightStart = fromIntegral startAddr + fromIntegral nWrite
             rightLen   = fromIntegral (eRegion + 1) - rightStart
 #if defined(TEST_DEBUG)
-            traceLeftSlice = trace ("leftSlice: slice(0, len " ++ show rOffset ++ ")")
-            traceRightSlice = trace ("rightSlice slice(" ++ show rightStart ++ " len "++ show rightLen ++ ")")
+            traceLeftSlice = trace (printf "leftSlice: slice(0, len %d)" rOffset)
+            traceRightSlice = trace (printf "rightSlice slice(%d, len %d)" rightStart rightLen)
 #else
             traceLeftSlice = id
             traceRightSlice = id
@@ -704,8 +704,11 @@ doWrite readOnly startAddr patch msys = msys & regions %~ execState updRegionSta
                                                          , k <- lru ^. lrucPsq & OrdPSQ.keys
                                                          , r >= k && k < r + nWrite]
 #if defined(TEST_DEBUG)
+        tracePatchSlice = trace (printf "patchSlice: sOffset = %d nWrite = %d" sOffset nWrite)
         showProgress = printf "writeContents: sAddr 0x%04x eAddr 0x%04x sRegion 0x%04x eRegion 0x%04x sOffset %5d nWrite %5d"
                               sAddr eAddr sRegion eRegion sOffset nWrite
+#else
+        tracePatchSlice = id
 #endif
 
 

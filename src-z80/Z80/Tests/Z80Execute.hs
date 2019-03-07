@@ -53,21 +53,20 @@ main =
                          <*> state (finiteRandList (0, 0xff)  256 :: (StdGen -> ([Z80word], StdGen)))
                    )
                    stdGen
-        sysSeq = sequence [ stateSysMWriteN 0x7200 (DVU.fromList mem0x7200)
-                          , stateSysMWriteN 0x6100 (DVU.fromList mem0x6100)
-                          , stateSysMWriteN 0x6200 (DVU.fromList mem0x6200)
+        sysSeq = sequence [ trace "stateSysMWriteN 0x7200" $ stateSysMWriteN 0x7200 (DVU.fromList mem0x7200)
+                          , trace "stateSysMWriteN 0x6100" $ stateSysMWriteN 0x6100 (DVU.fromList mem0x6100)
+                          , trace "stateSysMWriteN 0x6200" $ stateSysMWriteN 0x6200 (DVU.fromList mem0x6200)
                           ]
     let testOptions =
           TestOptions
-            { randGen = stdGen'
-            , z80randMem = execState sysSeq z80system
+            { z80randMem = execState sysSeq z80system
             }
+    setStdGen stdGen'
     defaultMain (z80ExecTests testOptions)
 
-data TestOptions =
+newtype TestOptions =
   TestOptions
-    { randGen :: StdGen
-    , z80randMem :: Z80system Z80BaseSystem
+    { z80randMem :: Z80system Z80BaseSystem
     }
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -108,6 +107,9 @@ z80initialCPU = z80system & processor . cpu . regs .~
                     -- IY should be in the 0x6300 RAM area
                     & z80iyh   .~ 0x63
                     & z80iyl   .~ 0x7b)
+
+initialHLAddr :: Z80addr
+initialHLAddr = 0x722c
 
 -- | Compare two systems' registers: 'leftRegs' are the expected registers, 'rightRegs' are the actual values. If they
 -- don't match, then the contents of both are printed to 'stdout'.
@@ -167,8 +169,10 @@ test_ldReg8Reg8
   -> Assertion
 test_ldReg8Reg8 opts =
   do
-    retval <- testReg8DirectLoads
-    assertBool "Reg8Reg8 failed." (and retval)
+    reg8direct <- testReg8DirectLoads
+    assertBool "Reg8Reg8 failed." (and reg8direct)
+    reg8HLIndirect <- testReg8HLIndirectLoads
+    assertBool "Reg8 HLindirect failed." reg8HLIndirect -- (and reg8HLIndirect)
   where
     testReg8DirectLoads = sequence [testReg8Load dst src | dst <- ordinaryReg8, src <- ordinaryReg8]
     testReg8Load (dstReg, dstSetter, _dstVal, dstText) (srcReg, srcSetter, srcVal, srcText) =
@@ -179,3 +183,11 @@ test_ldReg8Reg8 opts =
         z80expected = z80test       & processor . cpu . regs . dstSetter .~ srcVal
 
     z80indirectSys  = z80randMem opts
+
+    testReg8HLIndirectLoads = testHLIndirect (head ordinaryReg8) -- sequence [testHLIndirect dst | dst <- ordinaryReg8]
+    testHLIndirect (dstReg, dstSetter, _dstVal, dstText) =
+      compareRegs z80expected z80' (T.pack (printf "LD %s, (HL)" dstText))
+      where
+        hlval       = trace "read hlval" $ fst $ sysMRead initialHLAddr z80indirectSys
+        z80'        = trace "z80instructionExecute" $ z80instructionExecute (DecodedInsn 0x1005 (LD (Reg8Reg8 dstReg HLindirect))) z80indirectSys
+        z80expected = trace (printf "dstsetter: %02x" hlval) $ z80indirectSys & processor . cpu . regs . dstSetter .~ hlval
