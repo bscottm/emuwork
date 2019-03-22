@@ -38,7 +38,7 @@ library
     unordered-containers,
     vector
 
-  cpp-options: -DTEST_DEBUG
+  -- cpp-options: -DTEST_DEBUG
   ghc-options: -Wall -O2
 
   default-extensions:
@@ -131,7 +131,7 @@ test-suite z80execute
     type:               exitcode-stdio-1.0
     main-is:            Z80/Tests/Z80Execute.hs
     hs-source-dirs:     ., ../src-emubase
-    cpp-options:        -DTEST_DEBUG
+    -- cpp-options:        -DTEST_DEBUG
     ghc-options:        -Wall
     build-depends:
       base,

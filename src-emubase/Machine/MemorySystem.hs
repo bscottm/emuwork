@@ -678,19 +678,27 @@ doWrite readOnly startAddr patch msys = msys & regions %~ execState updRegionSta
         sRegion = I.lowerBound iv
         eRegion = I.upperBound iv
         sOffset = fromIntegral (sAddr - startAddr)
-        rOffset = sAddr - sRegion
+        lOffset = sAddr - sRegion
         patchSlice  = tracePatchSlice $ DVU.slice sOffset nWrite patch
         spliceWriteVec ctnt = DVU.concat [ leftSlice ctnt
                                          , patchSlice
                                          , rightSlice ctnt
                                          ]
           where
-            leftSlice {-ctnt'-} = traceLeftSlice $ DVU.slice 0 (fromIntegral rOffset) {-ctnt-}
-            rightSlice {-ctnt'-} = traceRightSlice $ DVU.slice rightStart rightLen {-ctnt-}
-            rightStart = fromIntegral startAddr + fromIntegral nWrite
+            leftSlice ctnt'
+              | lOffset > 0
+              = traceLeftSlice $ DVU.slice 0 (fromIntegral lOffset) ctnt'
+              | otherwise
+              = DVU.empty
+            rightSlice ctnt'
+              | rightStart < DVU.length ctnt'
+              = traceRightSlice $ DVU.slice rightStart rightLen ctnt'
+              | otherwise
+              = DVU.empty
+            rightStart = fromIntegral lOffset + fromIntegral nWrite
             rightLen   = fromIntegral (eRegion + 1) - rightStart
 #if defined(TEST_DEBUG)
-            traceLeftSlice = trace (printf "leftSlice: slice(0, len %d)" rOffset)
+            traceLeftSlice = trace (printf "leftSlice: slice(0, len %d)" lOffset)
             traceRightSlice = trace (printf "rightSlice slice(%d, len %d)" rightStart rightLen)
 #else
             traceLeftSlice = id
@@ -698,9 +706,9 @@ doWrite readOnly startAddr patch msys = msys & regions %~ execState updRegionSta
 #endif
         nWrite = fromIntegral (eAddr - sAddr + 1)
         writeQueueSeq = sequence [state (queueLRU (fromIntegral a ) w) | (a, w) <- zip addrWordsList patchAsList]
-        addrWordsList = [fromIntegral offs + rOffset | offs <- [0..nWrite]]
+        addrWordsList = [fromIntegral offs + lOffset | offs <- [0..nWrite]]
         patchAsList = DVU.toList patchSlice
-        filterPending lru = lru & lrucPsq %~ prunePsq [k | let r = fromIntegral rOffset
+        filterPending lru = lru & lrucPsq %~ prunePsq [k | let r = fromIntegral lOffset
                                                          , k <- lru ^. lrucPsq & OrdPSQ.keys
                                                          , r >= k && k < r + nWrite]
 #if defined(TEST_DEBUG)
