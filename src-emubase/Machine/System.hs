@@ -13,8 +13,7 @@ module Machine.System where
 
 import           Control.Monad.Trans.State.Strict (StateT, state)
 import           Data.Functor.Identity (Identity)
-import           Lens.Micro
-import           Lens.Micro.Extras
+import           Lens.Micro.Platform
 import           Data.Data
 import qualified Data.Text                     as T
 import           Data.Vector.Unboxed            ( Vector )

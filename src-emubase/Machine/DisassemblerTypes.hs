@@ -46,7 +46,11 @@ module Machine.DisassemblerTypes
   ) where
 
 import           Control.Arrow          (second, (>>>))
-import           Lens.Micro             (Lens', (&), (.~), (^.), (+~))
+#if MIN_VERSION_microlens_platform(0,4,10)
+import           Lens.Micro.Platform    (Lens', (&), (.~), (^.), (+~))
+#else
+import           Lens.Micro.Platform    (Lens', (&), (.~), (^.), ASetter, over)
+#endif
 import           Data.Data
 import           Data.HashMap.Strict    (HashMap)
 import qualified Data.HashMap.Strict    as H
@@ -395,3 +399,9 @@ disasmMReadN :: ( Integral addrType
 disasmMReadN nWords dstate = (wvec, dstate & disasmSystem .~ sys'& disasmCurAddr +~ fromIntegral nWords)
   where
     (wvec, sys') = sysMReadN (dstate ^. disasmCurAddr & unPC) nWords (dstate ^. disasmSystem)
+
+#if !MIN_VERSION_microlens_platform(0,4,10)
+(+~) :: Num a => ASetter s t a a -> a -> s -> t
+l +~ n = over l (+ n)
+{-# INLINE (+~) #-}
+#endif

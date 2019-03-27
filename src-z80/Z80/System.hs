@@ -1,6 +1,6 @@
 module Z80.System where
 
-import Lens.Micro
+import Lens.Micro.Platform
 
 import Machine.System
 import Machine.MemorySystem
@@ -24,5 +24,7 @@ type Z80memory         = MemorySystem Z80addr Z80word
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 
 -- | Accessor to the register set.
-z80registers :: Z80system sysType -> Z80registers
+z80registers
+ :: Z80system sysType
+ -> Z80registers
 z80registers z80 = z80 ^. processor . cpu . regs

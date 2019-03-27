@@ -10,7 +10,7 @@ module Machine.Tests.TestDevice
         ) where
 
 import           Control.Arrow               (second)
-import           Lens.Micro                  (Lens', set, (^.), (%~), (&))
+import           Lens.Micro.Platform         (Lens', set, (^.), (%~), (&))
 import           Data.Char                   (ord)
 import           Data.List                   (cycle)
 import qualified Data.Vector.Unboxed         as DVU

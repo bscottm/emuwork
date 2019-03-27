@@ -12,7 +12,7 @@ module Z80.InsnDecode
   , z80getAddr
   ) where
 
-import           Lens.Micro
+import           Lens.Micro.Platform
 import           Data.Bits
 import           Data.IntMap         (IntMap, (!))
 import qualified Data.IntMap         as IntMap

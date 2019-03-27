@@ -56,8 +56,11 @@ module Machine.MemorySystem
 
 import           Prelude                          hiding (words)
 import           Control.Arrow                    (first, second)
-import           Lens.Micro                       (Lens', over, to, (&), (.~), (%~), (^.), (+~), (-~))
-import           Lens.Micro.Extras                (view)
+#if MIN_VERSION_microlens_platform(0,4,10)
+import           Lens.Micro.Platform              (Lens', over, to, (&), (.~), (%~), (^.), (+~), (-~), view)
+#else
+import           Lens.Micro.Platform              (Lens', over, to, (&), (.~), (%~), (^.), ASetter, view)
+#endif
 import           Control.Monad.Trans.State.Strict (state, execState)
 import           Control.Monad                    (sequence)
 import           Data.List                        (intercalate)
@@ -858,3 +861,13 @@ prunePsq :: [Int]
          -- ^ Resulting ordered priority queue
 prunePsq addrOffsets psq = Fold.foldr' OrdPSQ.delete psq addrOffsets
 {-# INLINE prunePsq #-}
+
+#if !MIN_VERSION_microlens_platform(0,4,10)
+(+~) :: Num a => ASetter s t a a -> a -> s -> t
+l +~ n = over l (+ n)
+{-# INLINE (+~) #-}
+
+(-~) :: Num a => ASetter s t a a -> a -> s -> t
+l -~ n = over l (subtract n)
+{-# INLINE (-~) #-}
+#endif

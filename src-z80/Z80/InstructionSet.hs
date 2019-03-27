@@ -33,7 +33,7 @@ module Z80.InstructionSet
   )
 where
 
-import           Lens.Micro.TH
+import           Lens.Micro.Platform
 import           Data.Data
 import           Data.Int
 import           Data.Map                       ( Map , (!))
@@ -177,15 +177,15 @@ data OperLD =
   | AccBCIndirect
   | AccDEIndirect
   | AccImm16Indirect (SymAbsAddr Z80addr)
-  -- A, I
-  | AccIReg
-  -- A, R
-  | AccRReg
   -- Store accumulator via (BC) or (DE) indirectly (as pointers). Note that (HL) and (IX|IY+d) are already
   -- handled in Z80reg8
   | BCIndirectStore
   | DEIndirectStore
   | Imm16IndirectStore (SymAbsAddr Z80addr)
+  -- A, I
+  | AccIReg
+  -- A, R
+  | AccRReg
   -- I, A
   | IRegAcc
   -- R, A

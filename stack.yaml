@@ -5,6 +5,7 @@
 
 resolver: nightly-2019-03-19 
 # resolver: lts-13.8
+# resolver: lts-12.26
 
 packages:
   - '.'

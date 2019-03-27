@@ -48,7 +48,7 @@ module Z80.Processor
   , z80rreg
   ) where
 
-import           Lens.Micro.TH (makeLenses)
+import           Lens.Micro.Platform (makeLenses)
 import           Data.Int
 import           Data.Word
 

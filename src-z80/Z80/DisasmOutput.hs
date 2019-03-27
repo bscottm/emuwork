@@ -22,8 +22,7 @@ module Z80.DisasmOutput
 -- import Debug.Trace
 
 import           Prelude               hiding (seq)
-import           Lens.Micro
-import           Lens.Micro.Extras     (view)
+import           Lens.Micro.Platform
 import           Data.Char
 import qualified Data.Foldable         as Foldable
 import           Data.Generics.Aliases (mkT)
