@@ -3,8 +3,6 @@ module Z80.Execute.IncDec
   )
 where
 
-import Data.Bits
-import Data.Word
 import Data.Int
 import Lens.Micro.Platform
 

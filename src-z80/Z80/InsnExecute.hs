@@ -16,7 +16,6 @@ import Z80.Execute.LoadStore
 import Z80.Execute.IncDec
 import Z80.InstructionSet
 import Z80.Processor
-import Z80.System
 
 -- import Debug.Trace
 -- import Text.Printf
