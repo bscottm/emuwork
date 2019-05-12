@@ -13,7 +13,7 @@ library
   default-language:     Haskell2010
 
   build-depends:
-    base,
+    base <5,
     IntervalMap,
     bytestring,
     comonad,
@@ -136,8 +136,8 @@ test-suite z80execute
     -- cpp-options:        -DTEST_DEBUG
     ghc-options:        -Wall
     build-depends:
-      base,
-      random,
+      base <5,
+      random >= 1,
       Cabal,
       HUnit >= 1.2,
       QuickCheck >= 2,
@@ -154,14 +154,14 @@ test-suite z80execute
       generics-sop,
       hashable,
       microlens-platform,
-      transformers,
+      transformers >= 0.5,
       old-locale,
       parsec,
       primitive,
       psqueues,
       syb,
       text,
-      time,
+      time >= 1.8,
       uniplate,
       unordered-containers,
       vector

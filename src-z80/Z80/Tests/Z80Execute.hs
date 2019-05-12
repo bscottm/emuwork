@@ -67,6 +67,7 @@ z80ExecTests opts =
     testGroup "INC/DEC"
     [ testCase "Increment/Decrement Reg8      " (test_incDecReg8      opts)
     , testCase "Increment/Decrement Reg8 flags" (test_incDecReg8CC    opts)
+    , testCase "Increment/Decrement Reg16     " (test_incDecReg16     opts)
     ]
   ]
 

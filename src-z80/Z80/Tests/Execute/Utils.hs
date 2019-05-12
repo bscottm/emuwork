@@ -2,11 +2,13 @@ module Z80.Tests.Execute.Utils where
 
 import           Control.Monad                        (when)
 import Data.Bits
+import Data.List as List
 import Data.Text (Text)
 import Data.Text as T
 import qualified Data.Text.IO as TIO
 import Lens.Micro.Platform
 import System.IO
+import           Test.HUnit                           (Assertion, assertBool)
 import Text.Printf
 
 import Machine
@@ -101,3 +103,11 @@ printFlags banner z80 =
     valParOv = flagVal flagParOv
     valNFlag = flagVal flagNFlag
     valCarry = flagVal flagCarry
+
+assertBoolMessages
+    :: [Text]
+    -> Assertion
+assertBoolMessages msgs =
+  do
+    let result = List.filter (not . T.null) msgs
+    assertBool (T.unpack $ T.intercalate "\n" result) (List.null result)
