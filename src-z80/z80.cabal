@@ -186,4 +186,9 @@ test-suite z80execute
       Z80.InsnExecute,
       Z80.InstructionSet,
       Z80.Processor,
-      Z80.System
+      Z80.System,
+
+      Z80.Tests.Execute.TestData,
+      Z80.Tests.Execute.Utils,
+      Z80.Tests.Execute.LoadStore,
+      Z80.Tests.Execute.IncDec
