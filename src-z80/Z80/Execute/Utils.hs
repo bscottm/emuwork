@@ -1,4 +1,12 @@
-module Z80.Execute.Utils where
+module Z80.Execute.Utils
+  ( make16bit
+  , reg8set
+  , reg8get
+  , reg16get
+  , reg16set
+  , arithFlags
+  )
+where
 
 import Data.Bits
 import Data.Vector.Unboxed (Vector, (!))
@@ -9,9 +17,11 @@ import Z80.InstructionSet
 import Z80.Processor
 import Z80.System
 
+-- | Make a 16-bit word from a vector of two 8-bit bytes.
 make16bit :: Vector Z80word -> Z80addr
 make16bit bytes  = fromIntegral (bytes ! 1) `shiftL` 8 .|. fromIntegral (bytes ! 0)
 
+-- | Set an 8-bit register from a value, returning the updated Z80 system. 
 reg8set :: Z80reg8
         -> (Z80word, Z80system sysType)
         -> Z80system sysType
@@ -34,6 +44,8 @@ reg8set dstReg (val, sys) =
   where
     procRegs = processor . cpu . regs
 
+-- | Get the value of a register, returning the byte and the updated Z80 system (which should not have changed, but makes the
+-- function's signature one that can be used with `state`.)
 reg8get :: Z80system sysType
         -> Z80reg8
         -> (Z80word, Z80system sysType)
@@ -102,3 +114,25 @@ doReg16set val hisetter losetter sys = sys & processor . cpu .~ z80'
     z80 = sys ^. processor . cpu
     z80' = z80 & regs . hisetter .~ (fromIntegral ((val `shiftR` 8) .&. 0xff) :: Z80word)
                & regs . losetter .~ (fromIntegral (val .&. 0xff) :: Z80word)
+
+
+-- | Set the processor's flags on the result of an arithmetic operation. @nflag@ tells us whether the operation
+-- was an addition or subtraction.
+arithFlags
+  :: Z80word
+  -> Z80word
+  -> Bool
+  -> Z80system sysType
+  -> Z80system sysType
+arithFlags oldval newval nFlag sys =
+  sys & processor . cpu .~
+    ( sys ^. processor . cpu 
+     & flagSign .~ (newval >= 0x7f)
+     & flagZero .~ (newval == 0)
+     & flagYFlag .~ (newval .&. 0x20 /= 0)
+     & flagHalfCarry .~ ((((newval .&. 0xf) + (oldval .&. 0xf)) .&. 0x10) /= 0)
+     & flagXFlag .~ (newval .&. 0x08 /= 0)
+     & flagParOv .~ (oldval .&. 0x80 `xor` newval .&. 0x80 /= 0)
+     & flagNFlag .~ nFlag
+     & flagCarry .~ (newval >= 0xff - oldval)
+    )

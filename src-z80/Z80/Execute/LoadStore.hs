@@ -7,8 +7,7 @@ import qualified Control.Arrow as Arrow
 import Control.Monad (sequence)
 import           Control.Monad.Trans.State.Strict (execState)
 import Data.Bits
-import Data.Int
-import           Data.Vector.Unboxed            (Vector, (!))
+import           Data.Vector.Unboxed            ((!))
 import Lens.Micro.Platform
 
 import Machine

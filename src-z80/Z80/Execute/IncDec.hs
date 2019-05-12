@@ -47,7 +47,7 @@ doIncDec
   -> Z80system sysType
   -> Z80system sysType
 doIncDec getLens setLens op nFlag sys =
-  incDecFlags oldval newval nFlag sys & processor . cpu . regs . setLens .~ newval
+  arithFlags oldval newval nFlag sys & processor . cpu . regs . setLens .~ newval
   where
     oldval = z80registers sys ^. getLens
     newval = op oldval
@@ -59,36 +59,15 @@ indirectIncDec
   -> Bool
   -> Z80system sysType
   -> Z80system sysType
-indirectIncDec HL _disp op nFlag sys = incDecFlags oldval newval nFlag $ sysMWrite addr newval readSys
+indirectIncDec HL _disp op nFlag sys = arithFlags oldval newval nFlag $ sysMWrite addr newval readSys
   where
     addr = reg16get HL sys
     (oldval, readSys) = sysMRead addr sys
     newval = op oldval
 indirectIncDec BC _disp _op _nFlag _sys = undefined
 indirectIncDec DE _disp _op _nFlag _sys = undefined
-indirectIncDec reg disp op nFlag sys = incDecFlags oldval newval nFlag $ sysMWrite addr newval readSys
+indirectIncDec reg disp op nFlag sys = arithFlags oldval newval nFlag $ sysMWrite addr newval readSys
   where
     addr = reg16get reg sys + signExtend disp
     (oldval, readSys) = sysMRead addr sys
     newval = op oldval
-
--- | Set the processor's flags on the result of an increment or decrement. @nflag@ tells us whether the operation
--- was an increment or decrement.
-incDecFlags
-  :: Z80word
-  -> Z80word
-  -> Bool
-  -> Z80system sysType
-  -> Z80system sysType
-incDecFlags oldval newval nFlag sys =
-  sys & processor . cpu .~
-    ( sys ^. processor . cpu 
-     & flagSign .~ (newval >= 0x7f)
-     & flagZero .~ (newval == 0)
-     & flagYFlag .~ (newval .&. 0x20 /= 0)
-     & flagHalfCarry .~ ((((newval .&. 0xf) + (oldval .&. 0xf)) .&. 0x10) /= 0)
-     & flagXFlag .~ (newval .&. 0x08 /= 0)
-     & flagParOv .~ (oldval .&. 0x80 `xor` newval .&. 0x80 /= 0)
-     & flagNFlag .~ nFlag
-     & flagCarry .~ (newval >= 0xff - oldval)
-    )
