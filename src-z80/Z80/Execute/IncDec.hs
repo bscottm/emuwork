@@ -42,14 +42,15 @@ insIncDec IYl {-op nFlag sys-} = doIncDec z80iyl z80iyl {-op nFlag sys-}
 insIncDec16
   :: RegPairSP
   -> (Z80word -> Z80word)
+  -> Bool
   -> Z80system sysType
   -> Z80system sysType
-insIncDec16 (RPair16 BC) op sys = doIncDec16 z80breg z80breg z80creg z80creg op sys
-insIncDec16 (RPair16 DE) op sys = doIncDec16 z80dreg z80dreg z80ereg z80ereg op sys
-insIncDec16 (RPair16 HL) op sys = doIncDec16 z80hreg z80hreg z80lreg z80lreg op sys
-insIncDec16 (RPair16 IX) op sys = doIncDec16 z80ixh  z80ixh  z80ixl  z80ixl  op sys
-insIncDec16 (RPair16 IY) op sys = doIncDec16 z80iyh  z80iyh  z80iyl  z80iyl  op sys
-insIncDec16 SP           op sys = sys & processor . cpu . regs . z80sp .~ (spHi .|. (fromIntegral spLo))
+insIncDec16 (RPair16 BC) op nFlag sys = doIncDec16 z80breg z80breg z80creg z80creg op nFlag sys
+insIncDec16 (RPair16 DE) op nFlag sys = doIncDec16 z80dreg z80dreg z80ereg z80ereg op nFlag sys
+insIncDec16 (RPair16 HL) op nFlag sys = doIncDec16 z80hreg z80hreg z80lreg z80lreg op nFlag sys
+insIncDec16 (RPair16 IX) op nFlag sys = doIncDec16 z80ixh  z80ixh  z80ixl  z80ixl  op nFlag sys
+insIncDec16 (RPair16 IY) op nFlag sys = doIncDec16 z80iyh  z80iyh  z80iyl  z80iyl  op nFlag sys
+insIncDec16 SP           op _nFlag sys = sys & processor . cpu . regs . z80sp .~ (spHi .|. (fromIntegral spLo))
   where
     z80regs = z80registers sys
     hi      = (fromIntegral (z80regs ^. z80sp) `shiftR` 8) .&. 0xff :: Z80word
@@ -91,14 +92,15 @@ indirectIncDec reg disp op nFlag sys = incDecFlags oldval newval nFlag $ sysMWri
     newval = op oldval
 
 doIncDec16
-    :: SimpleGetter Z80registers Z80word
-    -> ASetter Z80registers Z80registers Z80word Z80word
-    -> SimpleGetter Z80registers Z80word
-    -> ASetter Z80registers Z80registers Z80word Z80word
-    -> (Z80word -> Z80word)
-    -> Z80system sysType
-    -> Z80system sysType
-doIncDec16 hiGetLens hiSetLens loGetLens loSetLens op sys =
+  :: SimpleGetter Z80registers Z80word
+  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> SimpleGetter Z80registers Z80word
+  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> (Z80word -> Z80word)
+  -> Bool
+  -> Z80system sysType
+  -> Z80system sysType
+doIncDec16 hiGetLens hiSetLens loGetLens loSetLens op nFlag sys =
   sys & processor . cpu . regs .~
     ( sysRegs 
       & loSetLens .~ loval
@@ -109,9 +111,13 @@ doIncDec16 hiGetLens hiSetLens loGetLens loSetLens op sys =
     oldLoVal = sysRegs ^. loGetLens
     oldHiVal = sysRegs ^. hiGetLens
     loval = op oldLoVal
-    hival = if oldLoVal .&. 0x80 `xor` loval .&. 0x80 == 0
+    hival = if not (overflow nFlag)
             then oldHiVal
             else op oldHiVal
+    -- Overflow if increment
+    overflow False = loval < oldLoVal
+    -- Overflow if decrement
+    overflow True  = loval > oldLoVal
 
 
 -- | Set the processor's flags on the result of an increment/decrement operation. @nflag@ tells us whether the operation

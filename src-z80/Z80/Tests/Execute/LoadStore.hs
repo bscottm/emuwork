@@ -16,7 +16,7 @@ import Z80.Tests.Execute.Utils
 
 -- | Test the 8-bit-to-8-bit loads (LD A, B; LD B, (HL); LD H, (IX+3) ...)
 test_ldReg8Reg8
-  :: TestOptions
+  :: TestParams
   -> Assertion
 test_ldReg8Reg8 opts =
   do
@@ -84,7 +84,7 @@ test_ldReg8Reg8 opts =
         expectedVal  = z80registers z80indirectSys ^. srcGetter
 
 test_ldReg8Imm
-  :: TestOptions
+  :: TestParams
   -> Assertion
 test_ldReg8Imm opts =
   do
@@ -99,7 +99,7 @@ test_ldReg8Imm opts =
         z80expected = z80indirectSys & processor . cpu . regs . srcSetter .~ srcVal
 
 test_ldOtherIndirect
-  :: TestOptions
+  :: TestParams
   -> Assertion
 test_ldOtherIndirect opts =
   do
@@ -140,7 +140,7 @@ test_ldOtherIndirect opts =
     immstore = z80instructionExecute (DecodedInsn 0x100e (LD (Imm16IndirectStore (AbsAddr immIndAddr)))) z80testSys
 
 test_ldSpecials
-  :: TestOptions
+  :: TestParams
   -> Assertion
 test_ldSpecials opts =
   assertBool "LD A, (I|R)/LD (I|R), A failed" (resultAI && resultIA && resultAR && resultRA)
@@ -157,7 +157,7 @@ test_ldSpecials opts =
 
 
 test_ldReg16Imm
-  :: TestOptions
+  :: TestParams
   -> Assertion
 test_ldReg16Imm _opts =
   do
@@ -174,7 +174,7 @@ test_ldReg16Imm _opts =
     spImmExpected = z80initialCPU & processor . cpu . regs . z80sp .~ 0x3c4b
 
 test_ldReg16IndLoad
-  :: TestOptions
+  :: TestParams
   -> Assertion
 test_ldReg16IndLoad opts =
   do
@@ -206,7 +206,7 @@ test_ldReg16IndLoad opts =
 
 
 test_ldReg16IndStore
-  :: TestOptions
+  :: TestParams
   -> Assertion
 test_ldReg16IndStore opts =
   do

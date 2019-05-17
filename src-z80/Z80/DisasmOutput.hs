@@ -15,7 +15,7 @@ module Z80.DisasmOutput
   ( z80AnalyticDisassembly
   , z80AnalyticDisassemblyOutput
   , z80FormatSymbolTable
-  -- , formatOperand
+  , z80ShortInsnFormat
   , Z80operand(..)
   ) where
 
@@ -69,7 +69,7 @@ z80AnalyticDisassembly dstate disasmSeq =
 
     formatElt (DisasmInsn addr insVec insn cmnt) seq = formatLinePrefix insVec addr (fmtWithComment fmtInstruction cmnt') >< seq
       where
-        fmtInstruction = T.concat $ [padTo lenMnemonic . insMnemonic, formatOperands] <*> [insn]
+        fmtInstruction = T.concat $ [padTo lenMnemonic . insMnemonic, z80FormatOperands] <*> [insn]
 
         fmtWithComment inp insComment
           | T.null insComment
@@ -95,28 +95,7 @@ z80AnalyticDisassembly dstate disasmSeq =
 
     formatElt pseudo seq = formatPseudo pseudo >< seq
 
-    -- Catch some of the special cases before calling the generic operand formatter.
-    formatOperands insn =
-        case insn of
-          IN port ->
-            case port of
-              PortImm imm -> formatOperand imm
-              CIndIO reg8 -> T.append (formatOperand reg8) ", (C)"
-              CIndIO0     -> "(C)"
-          OUT port ->
-            case port of
-              PortImm imm -> formatOperand imm
-              CIndIO reg8 -> T.append "(C), " (formatOperand reg8)
-              CIndIO0     -> "(C), 0"
-          RST rst  -> asHex rst
-          JPHL     -> "(HL)"
-          JPIX     -> "(IX)"
-          JPIY     -> "(IY)"
-          LDSPHL   -> "SP, HL"
-          LDSPIX   -> "SP, IX"
-          LDSPIY   -> "SP, IY"
-          _        -> gFormatOperands insn
-
+    
 -- | Generate the "analytic" version of the output (opcodes, ASCII representation) and output to an 'IO' handle.
 z80AnalyticDisassemblyOutput :: Handle
                              -> Z80disassembly
@@ -129,6 +108,39 @@ z80AnalyticDisassemblyOutput hOut dstate disasmSeq =
 z80FormatSymbolTable :: Z80disassembly
                      -> Seq T.Text
 z80FormatSymbolTable {-dstate-} = formatSymTab <$> view disasmSymbolTable {-dstate-}
+
+
+-- | Short instruction output formatter, e.g., "INC BC"
+z80ShortInsnFormat
+  :: Z80instruction
+  -> T.Text
+z80ShortInsnFormat ins = T.intercalate " " [insMnemonic ins, z80FormatOperands ins]
+
+-- Catch some of the special cases before calling the generic operand formatter.
+z80FormatOperands
+  :: Z80instruction
+  -> T.Text
+z80FormatOperands insn =
+  case insn of
+    IN port ->
+      case port of
+        PortImm imm -> formatOperand imm
+        CIndIO reg8 -> T.append (formatOperand reg8) ", (C)"
+        CIndIO0     -> "(C)"
+    OUT port ->
+      case port of
+        PortImm imm -> formatOperand imm
+        CIndIO reg8 -> T.append "(C), " (formatOperand reg8)
+        CIndIO0     -> "(C), 0"
+    RST rst  -> asHex rst
+    JPHL     -> "(HL)"
+    JPIX     -> "(IX)"
+    JPIY     -> "(IY)"
+    LDSPHL   -> "SP, HL"
+    LDSPIX   -> "SP, IX"
+    LDSPIY   -> "SP, IY"
+    _        -> gFormatOperands insn
+
 
 -- | Generic formatting traversal over the Z80 instruction operands
 gFormatOperands ::(Generic x, All2 Z80operand (Code x))

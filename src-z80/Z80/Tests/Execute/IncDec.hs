@@ -9,6 +9,7 @@ import           Lens.Micro.Platform
 import System.IO
 import           System.Random                        (getStdGen, randomR, setStdGen)
 import           Test.HUnit                           (Assertion, assertBool)
+import           Test.QuickCheck                      (Property, elements, forAllShow, conjoin)
 import Text.Printf
 
 import Machine
@@ -17,10 +18,84 @@ import Z80
 import Z80.Tests.Execute.TestData
 import Z80.Tests.Execute.Utils
 
-test_incDecReg8
-  :: TestOptions
+-- import Debug.Trace
+
+
+prop_inc8 :: Property
+prop_inc8 = conjoin [ forAllShow (elements ([0..255] :: [Word8]))
+                                 (inc8_diagnose     ins getLens setLens)
+                                 (incDec8Test (+ 1) ins getLens setLens)
+                    | (ins, getLens, setLens) <-
+                      [ (INC A,   z80accum, z80accum)
+                      , (INC B,   z80breg,  z80breg)
+                      , (INC C,   z80creg,  z80creg)
+                      , (INC D,   z80dreg,  z80dreg)
+                      , (INC E,   z80ereg,  z80ereg)
+                      , (INC H,   z80hreg,  z80hreg)
+                      , (INC L,   z80lreg,  z80lreg)
+                      , (INC IXh, z80ixh,   z80ixh)
+                      , (INC IXl, z80ixl,   z80ixl)
+                      , (INC IYh, z80iyh,   z80iyh)
+                      , (INC IYl, z80iyl,   z80iyl)
+                        ]
+                    ]
+  where
+    inc8_diagnose ins getLens setLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
+      where
+        gotVal = incDec8TestSys ins getLens setLens val
+        insn   = z80ShortInsnFormat ins
+
+
+prop_dec8 :: Property
+prop_dec8 = conjoin [ forAllShow (elements ([0..255] :: [Word8]))
+                                 (dec8_diagnose            ins getLens setLens)
+                                 (incDec8Test (subtract 1) ins getLens setLens)
+                    | (ins, getLens, setLens) <-
+                      [ (DEC A,   z80accum, z80accum)
+                      , (DEC B,   z80breg,  z80breg)
+                      , (DEC C,   z80creg,  z80creg)
+                      , (DEC D,   z80dreg,  z80dreg)
+                      , (DEC E,   z80ereg,  z80ereg)
+                      , (DEC H,   z80hreg,  z80hreg)
+                      , (DEC L,   z80lreg,  z80lreg)
+                      , (DEC IXh, z80ixh,   z80ixh)
+                      , (DEC IXl, z80ixl,   z80ixl)
+                      , (DEC IYh, z80iyh,   z80iyh)
+                      , (DEC IYl, z80iyl,   z80iyl)
+                        ]
+                    ]
+  where
+    dec8_diagnose ins getLens setLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
+      where
+        gotVal = incDec8TestSys ins getLens setLens val
+        insn   = z80ShortInsnFormat ins
+
+
+incDec8Test
+  :: (Z80word -> Z80word)
+  -> Z80instruction
+  -> Getting Z80word Z80registers Z80word
+  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> Z80word
+  -> Bool
+incDec8Test op ins getLens setLens val = op val == incDec8TestSys ins getLens setLens val
+
+incDec8TestSys
+  :: Z80instruction
+  -> Getting Z80word Z80registers Z80word
+  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> Z80word
+  -> Z80word
+incDec8TestSys ins getLens setLens val = z80registers testSys ^. getLens
+  where
+    testSys     = z80instructionExecute (DecodedInsn 0x1000 ins) initialSys
+    initialSys  = z80system & processor . cpu . regs .~ (z80registers z80system & setLens .~ val)
+
+
+test_incDecIndReg8
+  :: TestParams
   -> Assertion
-test_incDecReg8 opts =
+test_incDecIndReg8 opts =
   do
     stdGen <- getStdGen
     let (ixOffset, stdGen')  = randomR (-128, 127) stdGen
@@ -29,30 +104,18 @@ test_incDecReg8 opts =
         indirectAddr         = 0x7200 + offset
     setStdGen stdGen'''
 
-    let incResults    = [test_incDec reg (+ 1) INC | reg <- reg8TestData]
-        decResults    = [test_incDec reg (subtract 1) DEC | reg <- reg8TestData]
-        incHLindirect = indirectTest "(HL)" HLindirect indirectAddr (+ 1) INC
+    let incHLindirect = indirectTest "(HL)" HLindirect indirectAddr (+ 1) INC
         decHLindirect = indirectTest "(HL)" HLindirect indirectAddr (subtract 1) DEC
         incIXindirect = indirectTest "(IX+d)" (IXindirect ixOffset) (initialIXAddr + fromIntegral ixOffset) (+ 1) INC
         decIXindirect = indirectTest "(IX+d)" (IXindirect ixOffset) (initialIXAddr + fromIntegral ixOffset) (subtract 1) DEC
         incIYindirect = indirectTest "(IY+d)" (IYindirect iyOffset) (initialIYAddr + fromIntegral iyOffset) (+ 1) INC
         decIYindirect = indirectTest "(IY+d)" (IYindirect iyOffset) (initialIYAddr + fromIntegral iyOffset) (subtract 1) DEC
 
-    assertBoolMessages (incResults ++ decResults ++ [ incHLindirect, decHLindirect
-                                                    , incIXindirect, decIXindirect
-                                                    , incIYindirect, decIYindirect
-                                                    ])
+    assertBoolMessages [ incHLindirect, decHLindirect
+                       , incIXindirect, decIXindirect
+                       , incIYindirect, decIYindirect
+                       ]
   where
-    test_incDec (dstReg, _dstSetter, dstGetter, _dstVal, dstText) op ins =
-      T.pack $
-        if expectedVal == testVal
-        then ""
-        else printf "INC/DEC %s: Expected 0x%02x, got 0x%02x\n" dstText expectedVal testVal
-      where
-        expectedVal = op (z80registers z80initialCPU ^. dstGetter)
-        testSys     = z80instructionExecute (DecodedInsn 0x1000 (ins dstReg)) z80initialCPU
-        testVal     = z80registers testSys ^. dstGetter
-
     indirectTest regStr indirectReg addr op ins =
       T.pack $
         if expectedVal == gotVal
@@ -70,7 +133,7 @@ test_incDecReg8 opts =
 
 
 test_incDecReg8CC
-  :: TestOptions
+  :: TestParams
   -> Assertion
 test_incDecReg8CC _opts =
   do
@@ -87,17 +150,17 @@ test_incDecReg8CC _opts =
                -> IO Bool
     test_flags (ins, val, sign, zero, hcarry, overflow, negval) =
       do
-        let insName = insnName (ins A)
+        let insn = z80ShortInsnFormat (ins A)
             newval  = testCPU ^. regs . z80accum
-        test_result <- sequence [ check flagSign      sign     (printf "%s sign   [val 0x%02x newval 0x%02x]" insName val newval)
-                                , check flagZero      zero     (printf "%s zero   [val 0x%02x newval 0x%02x]" insName val newval)
-                                , check flagHalfCarry hcarry   (printf "%s half   [val 0x%02x newval 0x%02x]" insName val newval)
-                                , check flagParOv     overflow (printf "%s ovf    [val 0x%02x newval 0x%02x]" insName val newval)
-                                , check flagNFlag     negval   (printf "%s negval [val 0x%02x newval 0x%02x]" insName val newval)
+        test_result <- sequence [ check flagSign      sign     (printf "%s sign   [val 0x%02x newval 0x%02x]" insn val newval)
+                                , check flagZero      zero     (printf "%s zero   [val 0x%02x newval 0x%02x]" insn val newval)
+                                , check flagHalfCarry hcarry   (printf "%s half   [val 0x%02x newval 0x%02x]" insn val newval)
+                                , check flagParOv     overflow (printf "%s ovf    [val 0x%02x newval 0x%02x]" insn val newval)
+                                , check flagNFlag     negval   (printf "%s negval [val 0x%02x newval 0x%02x]" insn val newval)
                                 ]
         return (and test_result)
       where
-        check :: SimpleGetter Z80state Bool -> Bool -> String -> IO Bool
+        -- check :: SimpleGetter Z80state Bool -> Bool -> String -> IO Bool
         check getter expected banner =
           do
             let got = testCPU ^. getter
@@ -107,10 +170,6 @@ test_incDecReg8CC _opts =
                 printFlags "initial" (initialSys ^. processor . cpu)  
                 printFlags "testCPU" testCPU
             return (got == expected)
-        insnName :: Z80instruction -> String
-        insnName (INC _) = "INC"
-        insnName (DEC _) = "DEC"
-        insnName _       = "<unknown>"
         testSys = z80instructionExecute (DecodedInsn 0x1002 (ins A)) initialSys
         testCPU = testSys ^. processor . cpu
         initialSys =
@@ -125,62 +184,73 @@ test_incDecReg8CC _opts =
             )
 
 
-test_incDecReg16
-  :: TestOptions
-  -> Assertion
-test_incDecReg16 _opts =
-  do
-    let result = [ test_incdec testVal
-                 | testVal <- [ (INC16 (RPair16 BC), z80breg, z80breg, z80creg, z80creg, 0x12, 0x34, 0x12, 0x35)
-                              , (INC16 (RPair16 BC), z80breg, z80breg, z80creg, z80creg, 0x00, 0xff, 0x01, 0x00)
-                              , (INC16 (RPair16 BC), z80breg, z80breg, z80creg, z80creg, 0x00, 0xfe, 0x00, 0xff)
-                              , (INC16 (RPair16 BC), z80breg, z80breg, z80creg, z80creg, 0xff, 0xff, 0x00, 0x00)
-                              , (DEC16 (RPair16 BC), z80breg, z80breg, z80creg, z80creg, 0x12, 0x33, 0x12, 0x32)
-                              , (DEC16 (RPair16 BC), z80breg, z80breg, z80creg, z80creg, 0x02, 0x00, 0x01, 0xff)
-                              , (DEC16 (RPair16 BC), z80breg, z80breg, z80creg, z80creg, 0x00, 0x00, 0xff, 0xff)
-                              , (INC16 (RPair16 DE), z80dreg, z80dreg, z80ereg, z80ereg, 0x12, 0x34, 0x12, 0x35)
-                              , (INC16 (RPair16 DE), z80dreg, z80dreg, z80ereg, z80ereg, 0x00, 0xff, 0x01, 0x00)
-                              , (INC16 (RPair16 DE), z80dreg, z80dreg, z80ereg, z80ereg, 0x00, 0xfe, 0x00, 0xff)
-                              , (INC16 (RPair16 DE), z80dreg, z80dreg, z80ereg, z80ereg, 0xff, 0xff, 0x00, 0x00)
-                              , (DEC16 (RPair16 DE), z80dreg, z80dreg, z80ereg, z80ereg, 0x12, 0x33, 0x12, 0x32)
-                              , (DEC16 (RPair16 DE), z80dreg, z80dreg, z80ereg, z80ereg, 0x02, 0x00, 0x01, 0xff)
-                              , (DEC16 (RPair16 DE), z80dreg, z80dreg, z80ereg, z80ereg, 0x00, 0x00, 0xff, 0xff)
-                              , (INC16 (RPair16 HL), z80hreg, z80hreg, z80lreg, z80lreg, 0x12, 0x34, 0x12, 0x35)
-                              , (INC16 (RPair16 HL), z80hreg, z80hreg, z80lreg, z80lreg, 0x00, 0xff, 0x01, 0x00)
-                              , (INC16 (RPair16 HL), z80hreg, z80hreg, z80lreg, z80lreg, 0x00, 0xfe, 0x00, 0xff)
-                              , (INC16 (RPair16 HL), z80hreg, z80hreg, z80lreg, z80lreg, 0xff, 0xff, 0x00, 0x00)
-                              , (DEC16 (RPair16 HL), z80hreg, z80hreg, z80lreg, z80lreg, 0x12, 0x33, 0x12, 0x32)
-                              , (DEC16 (RPair16 HL), z80hreg, z80hreg, z80lreg, z80lreg, 0x02, 0x00, 0x01, 0xff)
-                              , (DEC16 (RPair16 HL), z80hreg, z80hreg, z80lreg, z80lreg, 0x00, 0x00, 0xff, 0xff)
-                              , (INC16 (RPair16 IX), z80ixh, z80ixh, z80ixl, z80ixl, 0x12, 0x34, 0x12, 0x35)
-                              , (INC16 (RPair16 IX), z80ixh, z80ixh, z80ixl, z80ixl, 0x00, 0xff, 0x01, 0x00)
-                              , (INC16 (RPair16 IX), z80ixh, z80ixh, z80ixl, z80ixl, 0x00, 0xfe, 0x00, 0xff)
-                              , (INC16 (RPair16 IX), z80ixh, z80ixh, z80ixl, z80ixl, 0xff, 0xff, 0x00, 0x00)
-                              , (DEC16 (RPair16 IX), z80ixh, z80ixh, z80ixl, z80ixl, 0x12, 0x33, 0x12, 0x32)
-                              , (DEC16 (RPair16 IX), z80ixh, z80ixh, z80ixl, z80ixl, 0x02, 0x00, 0x01, 0xff)
-                              , (DEC16 (RPair16 IX), z80ixh, z80ixh, z80ixl, z80ixl, 0x00, 0x00, 0xff, 0xff)
-                              , (INC16 (RPair16 IY), z80iyh, z80iyh, z80iyl, z80iyl, 0x12, 0x34, 0x12, 0x35)
-                              , (INC16 (RPair16 IY), z80iyh, z80iyh, z80iyl, z80iyl, 0x00, 0xff, 0x01, 0x00)
-                              , (INC16 (RPair16 IY), z80iyh, z80iyh, z80iyl, z80iyl, 0x00, 0xfe, 0x00, 0xff)
-                              , (INC16 (RPair16 IY), z80iyh, z80iyh, z80iyl, z80iyl, 0xff, 0xff, 0x00, 0x00)
-                              , (DEC16 (RPair16 IY), z80iyh, z80iyh, z80iyl, z80iyl, 0x12, 0x33, 0x12, 0x32)
-                              , (DEC16 (RPair16 IY), z80iyh, z80iyh, z80iyl, z80iyl, 0x02, 0x00, 0x01, 0xff)
-                              , (DEC16 (RPair16 IY), z80iyh, z80iyh, z80iyl, z80iyl, 0x00, 0x00, 0xff, 0xff)
-                              ]
-                  ]
-    assertBoolMessages result
+prop_inc16 :: Property
+prop_inc16 = conjoin [ forAllShow (elements ([0..65535] :: [Word16]))
+                                  (inc16_diagnose     ins hiGetLens hiSetLens loGetLens loSetLens)
+                                  (incDec16Test (+ 1) ins hiGetLens hiSetLens loGetLens loSetLens)
+                     | (ins, hiGetLens, hiSetLens, loGetLens, loSetLens) <-
+                         [ (INC16 (RPair16 BC), z80breg, z80breg, z80creg, z80creg)
+                         , (INC16 (RPair16 DE), z80dreg, z80dreg, z80ereg, z80ereg)
+                         , (INC16 (RPair16 HL), z80hreg, z80hreg, z80lreg, z80lreg)
+                         , (INC16 (RPair16 IX), z80ixh,  z80ixh,  z80ixl,  z80ixl)
+                         , (INC16 (RPair16 IY), z80iyh,  z80iyh,  z80iyl,  z80iyl)
+                         ]
+                     ]
   where
-    test_incdec (ins, hiGetLens, hiSetLens, loGetLens, loSetLens, hiVal, loVal, hiExpected, loExpected) =
-      T.pack $
-        if gotHi == hiExpected && gotLo == loExpected
-        then ""
-        else printf "INC/DEC Reg16: Expected 0x%02x%02x, got 0x%02x%02x" hiExpected loExpected gotHi gotLo
+    inc16_diagnose ins hiGetLens hiSetLens loGetLens loSetLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
       where
-        gotHi = z80registers testSys ^. hiGetLens
-        gotLo = z80registers testSys ^. loGetLens
-        testSys = z80instructionExecute (DecodedInsn 0x1022 ins) initialSys
-        initialSys = z80system & processor . cpu . regs .~
-                      ( z80registers z80system
-                        & hiSetLens .~ hiVal
-                        & loSetLens .~ loVal
-                      )
+        gotVal = incDec16TestSys ins hiGetLens hiSetLens loGetLens loSetLens val
+        insn   = z80ShortInsnFormat ins
+
+
+prop_dec16 :: Property
+prop_dec16 = conjoin [ forAllShow (elements ([0..65535] :: [Word16]))
+                                  (dec16_diagnose            ins hiGetLens hiSetLens loGetLens loSetLens)
+                                  (incDec16Test (subtract 1) ins hiGetLens hiSetLens loGetLens loSetLens)
+                     | (ins, hiGetLens, hiSetLens, loGetLens, loSetLens) <-
+                         [ (DEC16 (RPair16 BC), z80breg, z80breg, z80creg, z80creg)
+                         , (DEC16 (RPair16 DE), z80dreg, z80dreg, z80ereg, z80ereg)
+                         , (DEC16 (RPair16 HL), z80hreg, z80hreg, z80lreg, z80lreg)
+                         , (DEC16 (RPair16 IX), z80ixh,  z80ixh,  z80ixl,  z80ixl)
+                         , (DEC16 (RPair16 IY), z80iyh,  z80iyh,  z80iyl,  z80iyl)
+                         ]
+                     ]
+  where
+    dec16_diagnose ins hiGetLens hiSetLens loGetLens loSetLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
+      where
+        gotVal = incDec16TestSys ins hiGetLens hiSetLens loGetLens loSetLens val
+        insn   = z80ShortInsnFormat ins
+
+incDec16Test
+  :: (Z80addr -> Z80addr)
+  -> Z80instruction
+  -> Getting Z80word Z80registers Z80word
+  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> Getting Z80word Z80registers Z80word
+  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> Z80addr
+  -> Bool
+incDec16Test op ins hiGetLens hiSetLens loGetLens loSetLens val = op val == testVal
+  where
+    testVal = incDec16TestSys ins hiGetLens hiSetLens loGetLens loSetLens val
+
+incDec16TestSys
+  :: Z80instruction
+  -> Getting Z80word Z80registers Z80word
+  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> Getting Z80word Z80registers Z80word
+  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> Z80addr
+  -> Z80addr
+incDec16TestSys ins hiGetLens hiSetLens loGetLens loSetLens val = testHiVal .|. testLoVal
+  where
+    testHiVal   = (fromIntegral (z80registers testSys ^. hiGetLens) :: Z80addr) `shiftL` 8
+    testLoVal   = fromIntegral (z80registers testSys ^. loGetLens) :: Z80addr
+    testSys     = z80instructionExecute (DecodedInsn 0x1000 ins) initialSys
+    initialSys  = z80system & processor . cpu . regs .~
+                  (z80registers z80system
+                   & hiSetLens .~ hiVal
+                   & loSetLens .~ loVal
+                  )
+    loVal = fromIntegral (val .&. 0xff) :: Word8
+    hiVal = fromIntegral (val `shiftR` 8) :: Word8

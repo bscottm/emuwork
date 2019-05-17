@@ -7,8 +7,8 @@ import Lens.Micro.Platform
 import Machine
 import Z80
 
-newtype TestOptions =
-  TestOptions
+newtype TestParams =
+  TestParams
     { z80randMem :: Z80system Z80BaseSystem
     }
 

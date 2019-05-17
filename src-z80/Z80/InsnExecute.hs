@@ -27,8 +27,8 @@ z80instructionExecute insn sys =
     LD opnd    -> nextInsnPC $ insLoad opnd sys
     INC opnd   -> nextInsnPC $ insIncDec opnd (+ 1)      False sys
     DEC opnd   -> nextInsnPC $ insIncDec opnd (+ 0xff)   True  sys
-    INC16 opnd -> nextInsnPC $ insIncDec16 opnd (+ 1)    sys
-    DEC16 opnd -> nextInsnPC $ insIncDec16 opnd (+ 0xff) sys
+    INC16 opnd -> nextInsnPC $ insIncDec16 opnd (+ 1)    False sys
+    DEC16 opnd -> nextInsnPC $ insIncDec16 opnd (+ 0xff) True  sys
     -- Back up the PC by one: HALT is basically an infinite loop until an interrupt occurs
     HALT       -> updatePC (insnPC - 1) sys
     NOP        -> nextInsnPC sys
