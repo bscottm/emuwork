@@ -22,6 +22,7 @@ import          Z80
 import          Z80.Tests.Execute.TestData
 import          Z80.Tests.Execute.LoadStore
 import          Z80.Tests.Execute.IncDec
+import          Z80.Tests.Execute.ALUops
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Driver...
@@ -67,16 +68,24 @@ z80ExecTests opts =
     , testCase "Reg16 indirect stores         " (test_ldReg16IndStore opts)
     ],
     testGroup "INC/DEC"
-    [ plusTestOptions (mkLargeTests (256 * 2))
+    [ plusTestOptions (mkLargeTests 256)
                       (testProperty "8-bit Increment               " prop_inc8)
-    , plusTestOptions (mkLargeTests (256 * 2))
+    , plusTestOptions (mkLargeTests 256)
                       (testProperty "8-bit Decrement               " prop_dec8)
     , testCase "Indirect Reg8 inc/dec         " (test_incDecIndReg8   opts)
     , testCase "Increment/Decrement Reg8 flags" (test_incDecReg8CC    opts)
-    , plusTestOptions (mkLargeTests (65536 * 2))
+    {- , plusTestOptions (mkLargeTests 65536)
                       (testProperty "16-bit Increment              " prop_inc16)
-    , plusTestOptions (mkLargeTests (65536 * 2))
-                      (testProperty "16-bit Decrement              " prop_dec16)
+    , plusTestOptions (mkLargeTests 65536)
+                      (testProperty "16-bit Decrement              " prop_dec16) -}
+    , plusTestOptions (mkLargeTests 4096)
+                      (testProperty "8-bit register SUB            " prop_subReg8)
+    , plusTestOptions (mkLargeTests 4096)
+                      (testProperty "8-bit register AND            " prop_andReg8)
+    , plusTestOptions (mkLargeTests 4096)
+                      (testProperty "8-bit register XOR            " prop_xorReg8)
+    , plusTestOptions (mkLargeTests 4096)
+                      (testProperty "8-bit register OR             " prop_orReg8)
     ]
   ]
   where

@@ -62,6 +62,7 @@ library
     Z80.ParseAnalytic,
     Z80.System,
 
+    Z80.Execute.ALUops,
     Z80.Execute.LoadStore,
     Z80.Execute.IncDec,
     Z80.Execute.Utils
@@ -191,11 +192,14 @@ test-suite z80execute
       Z80.InstructionSet,
       Z80.Processor,
       Z80.System,
+      Z80.Execute.ALUops,
       Z80.Execute.LoadStore,
       Z80.Execute.IncDec,
       Z80.Execute.Utils,
 
-      Z80.Tests.Execute.TestData,
-      Z80.Tests.Execute.Utils,
+      Z80.Tests.Execute.ALUops,
+      Z80.Tests.Execute.IncDec,
       Z80.Tests.Execute.LoadStore,
-      Z80.Tests.Execute.IncDec
+      Z80.Tests.Execute.QuickInstances,
+      Z80.Tests.Execute.TestData,
+      Z80.Tests.Execute.Utils
