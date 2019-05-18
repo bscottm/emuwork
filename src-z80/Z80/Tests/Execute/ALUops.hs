@@ -7,9 +7,10 @@ import           Lens.Micro.Platform
 import Machine
 import Z80
 
+import Z80.Execute.Utils
+
 import Z80.Tests.Execute.TestData
 import Z80.Tests.Execute.QuickInstances()
-import Z80.Tests.Execute.Utils
 
 -- import Debug.Trace
 

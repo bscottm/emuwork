@@ -24,20 +24,20 @@ insIncDec
   -> Bool
   -> Z80system sysType
   -> Z80system sysType
-insIncDec A {-op nFlag sys-} = doIncDec z80accum z80accum {-op nFlag sys-}
-insIncDec B {-op nFlag sys-} = doIncDec z80breg z80breg {-op nFlag sys-}
-insIncDec C {-op nFlag sys-} = doIncDec z80creg z80creg {-op nFlag sys-}
-insIncDec D {-op nFlag sys-} = doIncDec z80dreg z80dreg {-op nFlag sys-}
-insIncDec E {-op nFlag sys-} = doIncDec z80ereg z80ereg {-op nFlag sys-}
-insIncDec H {-op nFlag sys-} = doIncDec z80hreg z80hreg {-op nFlag sys-}
-insIncDec L {-op nFlag sys-} = doIncDec z80lreg z80lreg {-op nFlag sys-}
+insIncDec A {-op nFlag sys-} = doIncDec z80accum {-op nFlag sys-}
+insIncDec B {-op nFlag sys-} = doIncDec z80breg {-op nFlag sys-}
+insIncDec C {-op nFlag sys-} = doIncDec z80creg {-op nFlag sys-}
+insIncDec D {-op nFlag sys-} = doIncDec z80dreg {-op nFlag sys-}
+insIncDec E {-op nFlag sys-} = doIncDec z80ereg {-op nFlag sys-}
+insIncDec H {-op nFlag sys-} = doIncDec z80hreg {-op nFlag sys-}
+insIncDec L {-op nFlag sys-} = doIncDec z80lreg {-op nFlag sys-}
 insIncDec HLindirect {-op nFlag sys-} = indirectIncDec HL 0 {-op nFlag sys-}
 insIncDec (IXindirect disp) {-op nFlag sys-} = indirectIncDec IX disp {-op nFlag sys-}
 insIncDec (IYindirect disp) {-op nFlag sys-} = indirectIncDec IY disp {-op nFlag sys-}
-insIncDec IXh {-op nFlag sys-} = doIncDec z80ixh z80ixh {-op nFlag sys-}
-insIncDec IXl {-op nFlag sys-} = doIncDec z80ixl z80ixl {-op nFlag sys-}
-insIncDec IYh {-op nFlag sys-} = doIncDec z80iyh z80iyh {-op nFlag sys-}
-insIncDec IYl {-op nFlag sys-} = doIncDec z80iyl z80iyl {-op nFlag sys-}
+insIncDec IXh {-op nFlag sys-} = doIncDec z80ixh {-op nFlag sys-}
+insIncDec IXl {-op nFlag sys-} = doIncDec z80ixl {-op nFlag sys-}
+insIncDec IYh {-op nFlag sys-} = doIncDec z80iyh {-op nFlag sys-}
+insIncDec IYl {-op nFlag sys-} = doIncDec z80iyl {-op nFlag sys-}
 
 insIncDec16
   :: RegPairSP
@@ -45,11 +45,11 @@ insIncDec16
   -> Bool
   -> Z80system sysType
   -> Z80system sysType
-insIncDec16 (RPair16 BC) op nFlag sys = doIncDec16 z80breg z80breg z80creg z80creg op nFlag sys
-insIncDec16 (RPair16 DE) op nFlag sys = doIncDec16 z80dreg z80dreg z80ereg z80ereg op nFlag sys
-insIncDec16 (RPair16 HL) op nFlag sys = doIncDec16 z80hreg z80hreg z80lreg z80lreg op nFlag sys
-insIncDec16 (RPair16 IX) op nFlag sys = doIncDec16 z80ixh  z80ixh  z80ixl  z80ixl  op nFlag sys
-insIncDec16 (RPair16 IY) op nFlag sys = doIncDec16 z80iyh  z80iyh  z80iyl  z80iyl  op nFlag sys
+insIncDec16 (RPair16 BC) op nFlag sys = doIncDec16 z80breg z80creg op nFlag sys
+insIncDec16 (RPair16 DE) op nFlag sys = doIncDec16 z80dreg z80ereg op nFlag sys
+insIncDec16 (RPair16 HL) op nFlag sys = doIncDec16 z80hreg z80lreg op nFlag sys
+insIncDec16 (RPair16 IX) op nFlag sys = doIncDec16 z80ixh  z80ixl  op nFlag sys
+insIncDec16 (RPair16 IY) op nFlag sys = doIncDec16 z80iyh  z80iyl  op nFlag sys
 insIncDec16 SP           op _nFlag sys = sys & processor . cpu . regs . z80sp .~ (spHi .|. (fromIntegral spLo))
   where
     z80regs = z80registers sys
@@ -59,16 +59,15 @@ insIncDec16 SP           op _nFlag sys = sys & processor . cpu . regs . z80sp .~
     spHi    = (fromIntegral (if spLo <= 0xff - lo then hi else op hi) :: Z80addr) `shiftL` 8
 
 doIncDec
-  :: SimpleGetter Z80registers Z80word
-  -> ASetter Z80registers Z80registers Z80word Z80word
+  :: Lens Z80registers Z80registers Z80word Z80word
   -> (Z80word -> Z80word)
   -> Bool
   -> Z80system sysType
   -> Z80system sysType
-doIncDec getLens setLens op nFlag sys =
-  incDecFlags oldval newval nFlag sys & processor . cpu . regs . setLens .~ newval
+doIncDec regLens op nFlag sys =
+  incDecFlags oldval newval nFlag sys & processor . cpu . regs . regLens .~ newval
   where
-    oldval = z80registers sys ^. getLens
+    oldval = z80registers sys ^. regLens
     newval = op oldval
 
 indirectIncDec
@@ -92,24 +91,22 @@ indirectIncDec reg disp op nFlag sys = incDecFlags oldval newval nFlag $ sysMWri
     newval = op oldval
 
 doIncDec16
-  :: SimpleGetter Z80registers Z80word
-  -> ASetter Z80registers Z80registers Z80word Z80word
-  -> SimpleGetter Z80registers Z80word
-  -> ASetter Z80registers Z80registers Z80word Z80word
+  :: Lens Z80registers Z80registers Z80word Z80word
+  -> Lens Z80registers Z80registers Z80word Z80word
   -> (Z80word -> Z80word)
   -> Bool
   -> Z80system sysType
   -> Z80system sysType
-doIncDec16 hiGetLens hiSetLens loGetLens loSetLens op nFlag sys =
+doIncDec16 hiLens loLens op nFlag sys =
   sys & processor . cpu . regs .~
     ( sysRegs 
-      & loSetLens .~ loval
-      & hiSetLens .~ hival
+      & loLens .~ loval
+      & hiLens .~ hival
     )
   where
     sysRegs = z80registers sys
-    oldLoVal = sysRegs ^. loGetLens
-    oldHiVal = sysRegs ^. hiGetLens
+    oldLoVal = sysRegs ^. loLens
+    oldHiVal = sysRegs ^. hiLens
     loval = op oldLoVal
     hival = if not (overflow nFlag)
             then oldHiVal
