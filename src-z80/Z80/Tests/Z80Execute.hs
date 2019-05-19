@@ -6,10 +6,10 @@ import           Control.Monad                        (replicateM, sequence)
 import           Control.Monad.Trans.State.Strict     (execState, runState, state)
 import qualified Data.Vector.Unboxed                  as DVU
 import           System.Random                        (Random, StdGen, getStdGen, randomR, setStdGen)
-import           Test.Framework                       (Test, defaultMain, testGroup, plusTestOptions)
-import           Test.Framework.Options               (TestOptions'(..))
+import           Test.Framework                       (Test, defaultMain, testGroup {-, plusTestOptions-})
+-- import           Test.Framework.Options               (TestOptions'(..))
 import           Test.Framework.Providers.HUnit       (testCase)
-import           Test.Framework.Providers.QuickCheck2 (testProperty)
+-- import           Test.Framework.Providers.QuickCheck2 (testProperty)
 
 #if defined(TEST_DEBUG)
 import           Debug.Trace
@@ -68,32 +68,25 @@ z80ExecTests opts =
     , testCase "Reg16 indirect stores         " (test_ldReg16IndStore opts)
     ],
     testGroup "INC/DEC"
-    [ plusTestOptions (mkLargeTests 256)
-                      (testProperty "8-bit Increment               " prop_inc8)
-    , plusTestOptions (mkLargeTests 256)
-                      (testProperty "8-bit Decrement               " prop_dec8)
+    [ testCase "8-bit register increment      " test_incReg8
+    , testCase "8-bit register decrement      " test_decReg8
     , testCase "Indirect Reg8 inc/dec         " (test_incDecIndReg8   opts)
     , testCase "Increment/Decrement Reg8 flags" (test_incDecReg8CC    opts)
-    , plusTestOptions (mkLargeTests 65536)
-                      (testProperty "16-bit Increment              " prop_inc16)
-    , plusTestOptions (mkLargeTests 65536)
-                      (testProperty "16-bit Decrement              " prop_dec16)
-    , plusTestOptions (mkLargeTests 4096)
-                      (testProperty "8-bit register SUB            " prop_subReg8)
-    , plusTestOptions (mkLargeTests 4096)
-                      (testProperty "8-bit register AND            " prop_andReg8)
-    , plusTestOptions (mkLargeTests 4096)
-                      (testProperty "8-bit register XOR            " prop_xorReg8)
-    , plusTestOptions (mkLargeTests 4096)
-                      (testProperty "8-bit register OR             " prop_orReg8)
+    , testCase "16-bit register increment     " test_incReg16
+    , testCase "16-bit register decrement     " test_decReg16
+    , testCase "8-bit register SUB            " test_subReg8
+    , testCase "8-bit register AND            " test_andReg8
+    , testCase "8-bit register XOR            " test_xorReg8
+    , testCase "8-bit register OR             " test_orReg8
     ]
   ]
-  where
+{-  where
     -- 'mempty' is really the TestOptions record instantiated with all of the
     -- members set to Nothing.
     mkLargeTests nTests = mempty { topt_maximum_generated_tests = Just nTests
                                  , topt_maximum_unsuitable_generated_tests = Just (nTests * 5)
                                  }
+-}
 
 -- | Generate finite sized random lists.
 finiteRandList :: (Random a, Num a) => (a, a) -> Int -> StdGen -> ([a], StdGen)

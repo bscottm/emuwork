@@ -9,7 +9,6 @@ import           Lens.Micro.Platform
 import System.IO
 import           System.Random                        (getStdGen, randomR, setStdGen)
 import           Test.HUnit                           (Assertion, assertBool)
-import           Test.QuickCheck                      (Property, elements, forAllShow, conjoin)
 import Text.Printf
 
 import Machine
@@ -20,35 +19,36 @@ import Z80.Tests.Execute.Utils
 
 -- import Debug.Trace
 
-
-prop_inc8 :: Property
-prop_inc8 = conjoin [ forAllShow (elements ([0..255] :: [Word8]))
-                                 (inc8_diagnose     ins (z80Reg8Lens reg8))
-                                 (incDec8Test (+ 1) ins (z80Reg8Lens reg8))
-                    | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
-                    , let ins = INC reg8
-                    ]
+test_incReg8 :: Assertion
+test_incReg8 = assertBoolMessages [ runTest reg8 elt
+                                  | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
+                                  , elt  <- [0..0xff] :: [Z80word]
+                                  ]
   where
-    inc8_diagnose :: Z80instruction -> Lens Z80registers Z80registers Z80word Z80word -> Z80word -> String
-    inc8_diagnose ins regLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
+    runTest reg8 val
+      | incDec8Test (+ 1) ins (z80Reg8Lens reg8) val
+      = T.empty
+      | otherwise
+      = T.pack $ printf "%s: Expected 0x%04x, got 0x%04x" (z80ShortInsnFormat ins) val gotVal
       where
-        gotVal = incDec8TestSys ins regLens val
-        insn   = z80ShortInsnFormat ins
+        ins = INC reg8
+        gotVal = incDec8TestSys ins (z80Reg8Lens reg8) val
 
 
-prop_dec8 :: Property
-prop_dec8 = conjoin [ forAllShow (elements ([0..255] :: [Word8]))
-                                 (dec8_diagnose            ins (z80Reg8Lens reg8))
-                                 (incDec8Test (subtract 1) ins (z80Reg8Lens reg8))
-                    | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
-                    , let ins = DEC reg8
-                    ]
+test_decReg8 :: Assertion
+test_decReg8 = assertBoolMessages [ runTest reg8 elt
+                                  | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
+                                  , elt  <- [0..0xff] :: [Z80word]
+                                  ]
   where
-    dec8_diagnose :: Z80instruction -> Lens Z80registers Z80registers Z80word Z80word -> Z80word -> String
-    dec8_diagnose ins regLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
+    runTest reg8 val
+      | incDec8Test (subtract 1) ins (z80Reg8Lens reg8) val
+      = T.empty
+      | otherwise
+      = T.pack $ printf "%s: Expected 0x%04x, got 0x%04x" (z80ShortInsnFormat ins) val gotVal
       where
-        gotVal = incDec8TestSys ins regLens val
-        insn   = z80ShortInsnFormat ins
+        ins = DEC reg8
+        gotVal = incDec8TestSys ins (z80Reg8Lens reg8) val
 
 
 incDec8Test
@@ -163,30 +163,37 @@ test_incDecReg8CC _opts =
             )
 
 
-prop_inc16 :: Property
-prop_inc16 = conjoin [ forAllShow (elements ([0..65535] :: [Word16]))
-                                  (inc16_diagnose     INC16 reg16)
-                                  (incDec16Test (+ 1) INC16 reg16)
-                     | reg16 <- [ BC, DE, HL, IX, IY ]
-                     ]
+test_incReg16 :: Assertion
+test_incReg16 = assertBoolMessages [ runTest reg16 elt
+                                   | reg16 <- [ BC, DE, HL, IX, IY ]
+                                   , elt   <- [0..65535] :: [Word16]
+                                   ]
   where
-    inc16_diagnose ins reg16 val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
+    runTest reg16 val
+      | incDec16Test (+ 1) INC16 reg16 val
+      = T.empty
+      | otherwise
+      = T.pack $ printf "%s: Expected 0x%04x, got 0x%04x" (z80ShortInsnFormat ins) val gotVal
       where
-        gotVal = incDec16TestSys ins reg16 val
-        insn   = z80ShortInsnFormat (ins . RPair16 $ reg16)
+        ins = INC16 . RPair16 $ reg16
+        gotVal = incDec16TestSys INC16 reg16 val
 
 
-prop_dec16 :: Property
-prop_dec16 = conjoin [ forAllShow (elements ([0..65535] :: [Word16]))
-                                  (dec16_diagnose            DEC16 reg16)
-                                  (incDec16Test (subtract 1) DEC16 reg16)
-                     | reg16 <- [ BC, DE, HL, IX, IY ]
-                     ]
+test_decReg16 :: Assertion
+test_decReg16 = assertBoolMessages [ runTest reg16 elt
+                                    | reg16 <- [ BC, DE, HL, IX, IY ]
+                                    , elt   <- [0..65535] :: [Word16]
+                                    ]
   where
-    dec16_diagnose ins reg16 val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
+    runTest reg16 val
+      | incDec16Test (subtract 1) DEC16 reg16 val
+      = T.empty
+      | otherwise
+      = T.pack $ printf "%s: Expected 0x%04x, got 0x%04x" (z80ShortInsnFormat ins) val gotVal
       where
-        gotVal = incDec16TestSys ins reg16 val
-        insn   = z80ShortInsnFormat (ins . RPair16 $ reg16)
+        ins = DEC16 . RPair16 $ reg16
+        gotVal = incDec16TestSys INC16 reg16 val
+
 
 incDec16Test
   :: (Z80addr -> Z80addr)
