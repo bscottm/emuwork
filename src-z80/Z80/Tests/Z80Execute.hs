@@ -74,10 +74,10 @@ z80ExecTests opts =
                       (testProperty "8-bit Decrement               " prop_dec8)
     , testCase "Indirect Reg8 inc/dec         " (test_incDecIndReg8   opts)
     , testCase "Increment/Decrement Reg8 flags" (test_incDecReg8CC    opts)
-    {- , plusTestOptions (mkLargeTests 65536)
+    , plusTestOptions (mkLargeTests 65536)
                       (testProperty "16-bit Increment              " prop_inc16)
     , plusTestOptions (mkLargeTests 65536)
-                      (testProperty "16-bit Decrement              " prop_dec16) -}
+                      (testProperty "16-bit Decrement              " prop_dec16)
     , plusTestOptions (mkLargeTests 4096)
                       (testProperty "8-bit register SUB            " prop_subReg8)
     , plusTestOptions (mkLargeTests 4096)

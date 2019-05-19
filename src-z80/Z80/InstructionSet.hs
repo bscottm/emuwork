@@ -30,6 +30,7 @@ module Z80.InstructionSet
   , idxRegNameMap
   , idxRegNameToReg
   , specialRegNames
+  , z80Reg8Lens
   )
 where
 
@@ -347,3 +348,22 @@ idxRegNameToReg reg = idxRegNameMap ! reg
 
 specialRegNames :: [T.Text]
 specialRegNames = ["sp", "af", "i", "r"]
+
+
+-- | 8-bit register to `Lens` translation. @note@: This does not include the indirect
+-- memory references. It just can't.
+z80Reg8Lens
+  :: Z80reg8
+  -> Lens Z80registers Z80registers Z80word Z80word
+z80Reg8Lens A    = z80accum
+z80Reg8Lens B    = z80breg
+z80Reg8Lens C    = z80creg
+z80Reg8Lens D    = z80dreg
+z80Reg8Lens E    = z80ereg
+z80Reg8Lens H    = z80hreg
+z80Reg8Lens L    = z80lreg
+z80Reg8Lens IXh  = z80ixh
+z80Reg8Lens IXl  = z80ixl
+z80Reg8Lens IYh  = z80iyh
+z80Reg8Lens IYl  = z80iyl
+z80Reg8Lens _    = undefined

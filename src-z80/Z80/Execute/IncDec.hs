@@ -24,20 +24,11 @@ insIncDec
   -> Bool
   -> Z80system sysType
   -> Z80system sysType
-insIncDec A {-op nFlag sys-} = doIncDec z80accum {-op nFlag sys-}
-insIncDec B {-op nFlag sys-} = doIncDec z80breg {-op nFlag sys-}
-insIncDec C {-op nFlag sys-} = doIncDec z80creg {-op nFlag sys-}
-insIncDec D {-op nFlag sys-} = doIncDec z80dreg {-op nFlag sys-}
-insIncDec E {-op nFlag sys-} = doIncDec z80ereg {-op nFlag sys-}
-insIncDec H {-op nFlag sys-} = doIncDec z80hreg {-op nFlag sys-}
-insIncDec L {-op nFlag sys-} = doIncDec z80lreg {-op nFlag sys-}
 insIncDec HLindirect {-op nFlag sys-} = indirectIncDec HL 0 {-op nFlag sys-}
 insIncDec (IXindirect disp) {-op nFlag sys-} = indirectIncDec IX disp {-op nFlag sys-}
 insIncDec (IYindirect disp) {-op nFlag sys-} = indirectIncDec IY disp {-op nFlag sys-}
-insIncDec IXh {-op nFlag sys-} = doIncDec z80ixh {-op nFlag sys-}
-insIncDec IXl {-op nFlag sys-} = doIncDec z80ixl {-op nFlag sys-}
-insIncDec IYh {-op nFlag sys-} = doIncDec z80iyh {-op nFlag sys-}
-insIncDec IYl {-op nFlag sys-} = doIncDec z80iyl {-op nFlag sys-}
+insIncDec reg = doIncDec (z80Reg8Lens reg) {-op nFlag sys-}
+
 
 insIncDec16
   :: RegPairSP

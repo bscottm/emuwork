@@ -72,8 +72,8 @@ insLoad (RPIndirectLoad  _            (SymAddr _   )) _   = error "insLoad/HLInd
 
 doIndirectStoreReg16
   :: Z80addr
-  -> Getting Z80word Z80registers Z80word
-  -> Getting Z80word Z80registers Z80word
+  -> Lens Z80registers Z80registers Z80word Z80word
+  -> Lens Z80registers Z80registers Z80word Z80word
   -> Z80system sysType
   -> Z80system sysType
 doIndirectStoreReg16 addr higetter logetter sys =
@@ -85,8 +85,8 @@ doIndirectStoreReg16 addr higetter logetter sys =
 
 doIndirectLoadReg16
   :: Z80addr
-  -> ASetter Z80registers Z80registers Z80word Z80word
-  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> Lens Z80registers Z80registers Z80word Z80word
+  -> Lens Z80registers Z80registers Z80word Z80word
   -> Z80system sysType
   -> Z80system sysType
 doIndirectLoadReg16 addr hisetter losetter sys = sys' & processor . cpu . regs .~ z80regs'

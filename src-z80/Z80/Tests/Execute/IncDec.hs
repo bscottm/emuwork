@@ -23,73 +23,52 @@ import Z80.Tests.Execute.Utils
 
 prop_inc8 :: Property
 prop_inc8 = conjoin [ forAllShow (elements ([0..255] :: [Word8]))
-                                 (inc8_diagnose     ins getLens setLens)
-                                 (incDec8Test (+ 1) ins getLens setLens)
-                    | (ins, getLens, setLens) <-
-                      [ (INC A,   z80accum, z80accum)
-                      , (INC B,   z80breg,  z80breg)
-                      , (INC C,   z80creg,  z80creg)
-                      , (INC D,   z80dreg,  z80dreg)
-                      , (INC E,   z80ereg,  z80ereg)
-                      , (INC H,   z80hreg,  z80hreg)
-                      , (INC L,   z80lreg,  z80lreg)
-                      , (INC IXh, z80ixh,   z80ixh)
-                      , (INC IXl, z80ixl,   z80ixl)
-                      , (INC IYh, z80iyh,   z80iyh)
-                      , (INC IYl, z80iyl,   z80iyl)
-                        ]
+                                 (inc8_diagnose     ins (z80Reg8Lens reg8))
+                                 (incDec8Test (+ 1) ins (z80Reg8Lens reg8))
+                    | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
+                    , let ins = INC reg8
                     ]
   where
-    inc8_diagnose ins getLens setLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
+    inc8_diagnose :: Z80instruction -> Lens Z80registers Z80registers Z80word Z80word -> Z80word -> String
+    inc8_diagnose ins regLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
       where
-        gotVal = incDec8TestSys ins getLens setLens val
+        gotVal = incDec8TestSys ins regLens val
         insn   = z80ShortInsnFormat ins
 
 
 prop_dec8 :: Property
 prop_dec8 = conjoin [ forAllShow (elements ([0..255] :: [Word8]))
-                                 (dec8_diagnose            ins getLens setLens)
-                                 (incDec8Test (subtract 1) ins getLens setLens)
-                    | (ins, getLens, setLens) <-
-                      [ (DEC A,   z80accum, z80accum)
-                      , (DEC B,   z80breg,  z80breg)
-                      , (DEC C,   z80creg,  z80creg)
-                      , (DEC D,   z80dreg,  z80dreg)
-                      , (DEC E,   z80ereg,  z80ereg)
-                      , (DEC H,   z80hreg,  z80hreg)
-                      , (DEC L,   z80lreg,  z80lreg)
-                      , (DEC IXh, z80ixh,   z80ixh)
-                      , (DEC IXl, z80ixl,   z80ixl)
-                      , (DEC IYh, z80iyh,   z80iyh)
-                      , (DEC IYl, z80iyl,   z80iyl)
-                        ]
+                                 (dec8_diagnose            ins (z80Reg8Lens reg8))
+                                 (incDec8Test (subtract 1) ins (z80Reg8Lens reg8))
+                    | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
+                    , let ins = DEC reg8
                     ]
   where
-    dec8_diagnose ins getLens setLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
+    dec8_diagnose :: Z80instruction -> Lens Z80registers Z80registers Z80word Z80word -> Z80word -> String
+    dec8_diagnose ins regLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
       where
-        gotVal = incDec8TestSys ins getLens setLens val
+        gotVal = incDec8TestSys ins regLens val
         insn   = z80ShortInsnFormat ins
 
 
 incDec8Test
   :: (Z80word -> Z80word)
   -> Z80instruction
-  -> Getting Z80word Z80registers Z80word
-  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> Lens Z80registers Z80registers Z80word Z80word
   -> Z80word
   -> Bool
-incDec8Test op ins getLens setLens val = op val == incDec8TestSys ins getLens setLens val
+incDec8Test op ins regLens val = op val == incDec8TestSys ins regLens val
+
 
 incDec8TestSys
   :: Z80instruction
-  -> Getting Z80word Z80registers Z80word
-  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> Lens Z80registers Z80registers Z80word Z80word
   -> Z80word
   -> Z80word
-incDec8TestSys ins getLens setLens val = z80registers testSys ^. getLens
+incDec8TestSys ins regLens val = z80registers testSys ^. regLens
   where
     testSys     = z80instructionExecute (DecodedInsn 0x1000 ins) initialSys
-    initialSys  = z80system & processor . cpu . regs .~ (z80registers z80system & setLens .~ val)
+    initialSys  = z80system & processor . cpu . regs .~ (z80registers z80system & regLens .~ val)
 
 
 test_incDecIndReg8
@@ -186,71 +165,45 @@ test_incDecReg8CC _opts =
 
 prop_inc16 :: Property
 prop_inc16 = conjoin [ forAllShow (elements ([0..65535] :: [Word16]))
-                                  (inc16_diagnose     ins hiGetLens hiSetLens loGetLens loSetLens)
-                                  (incDec16Test (+ 1) ins hiGetLens hiSetLens loGetLens loSetLens)
-                     | (ins, hiGetLens, hiSetLens, loGetLens, loSetLens) <-
-                         [ (INC16 (RPair16 BC), z80breg, z80breg, z80creg, z80creg)
-                         , (INC16 (RPair16 DE), z80dreg, z80dreg, z80ereg, z80ereg)
-                         , (INC16 (RPair16 HL), z80hreg, z80hreg, z80lreg, z80lreg)
-                         , (INC16 (RPair16 IX), z80ixh,  z80ixh,  z80ixl,  z80ixl)
-                         , (INC16 (RPair16 IY), z80iyh,  z80iyh,  z80iyl,  z80iyl)
-                         ]
+                                  (inc16_diagnose     INC16 reg16)
+                                  (incDec16Test (+ 1) INC16 reg16)
+                     | reg16 <- [ BC, DE, HL, IX, IY ]
                      ]
   where
-    inc16_diagnose ins hiGetLens hiSetLens loGetLens loSetLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
+    inc16_diagnose ins reg16 val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
       where
-        gotVal = incDec16TestSys ins hiGetLens hiSetLens loGetLens loSetLens val
-        insn   = z80ShortInsnFormat ins
+        gotVal = incDec16TestSys ins reg16 val
+        insn   = z80ShortInsnFormat (ins . RPair16 $ reg16)
 
 
 prop_dec16 :: Property
 prop_dec16 = conjoin [ forAllShow (elements ([0..65535] :: [Word16]))
-                                  (dec16_diagnose            ins hiGetLens hiSetLens loGetLens loSetLens)
-                                  (incDec16Test (subtract 1) ins hiGetLens hiSetLens loGetLens loSetLens)
-                     | (ins, hiGetLens, hiSetLens, loGetLens, loSetLens) <-
-                         [ (DEC16 (RPair16 BC), z80breg, z80breg, z80creg, z80creg)
-                         , (DEC16 (RPair16 DE), z80dreg, z80dreg, z80ereg, z80ereg)
-                         , (DEC16 (RPair16 HL), z80hreg, z80hreg, z80lreg, z80lreg)
-                         , (DEC16 (RPair16 IX), z80ixh,  z80ixh,  z80ixl,  z80ixl)
-                         , (DEC16 (RPair16 IY), z80iyh,  z80iyh,  z80iyl,  z80iyl)
-                         ]
+                                  (dec16_diagnose            DEC16 reg16)
+                                  (incDec16Test (subtract 1) DEC16 reg16)
+                     | reg16 <- [ BC, DE, HL, IX, IY ]
                      ]
   where
-    dec16_diagnose ins hiGetLens hiSetLens loGetLens loSetLens val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
+    dec16_diagnose ins reg16 val = printf "%s: Expected 0x%04x, got 0x%04x" insn val gotVal
       where
-        gotVal = incDec16TestSys ins hiGetLens hiSetLens loGetLens loSetLens val
-        insn   = z80ShortInsnFormat ins
+        gotVal = incDec16TestSys ins reg16 val
+        insn   = z80ShortInsnFormat (ins . RPair16 $ reg16)
 
 incDec16Test
   :: (Z80addr -> Z80addr)
-  -> Z80instruction
-  -> Getting Z80word Z80registers Z80word
-  -> ASetter Z80registers Z80registers Z80word Z80word
-  -> Getting Z80word Z80registers Z80word
-  -> ASetter Z80registers Z80registers Z80word Z80word
+  -> (RegPairSP -> Z80instruction)
+  -> Z80reg16
   -> Z80addr
   -> Bool
-incDec16Test op ins hiGetLens hiSetLens loGetLens loSetLens val = op val == testVal
+incDec16Test op ins reg16 val = op val == testVal
   where
-    testVal = incDec16TestSys ins hiGetLens hiSetLens loGetLens loSetLens val
+    testVal = incDec16TestSys ins reg16 val
 
 incDec16TestSys
-  :: Z80instruction
-  -> Getting Z80word Z80registers Z80word
-  -> ASetter Z80registers Z80registers Z80word Z80word
-  -> Getting Z80word Z80registers Z80word
-  -> ASetter Z80registers Z80registers Z80word Z80word
+  :: (RegPairSP -> Z80instruction)
+  -> Z80reg16
   -> Z80addr
   -> Z80addr
-incDec16TestSys ins hiGetLens hiSetLens loGetLens loSetLens val = testHiVal .|. testLoVal
+incDec16TestSys ins reg16 val = reg16get reg16 testSys
   where
-    testHiVal   = (fromIntegral (z80registers testSys ^. hiGetLens) :: Z80addr) `shiftL` 8
-    testLoVal   = fromIntegral (z80registers testSys ^. loGetLens) :: Z80addr
-    testSys     = z80instructionExecute (DecodedInsn 0x1000 ins) initialSys
-    initialSys  = z80system & processor . cpu . regs .~
-                  (z80registers z80system
-                   & hiSetLens .~ hiVal
-                   & loSetLens .~ loVal
-                  )
-    loVal = fromIntegral (val .&. 0xff) :: Word8
-    hiVal = fromIntegral (val `shiftR` 8) :: Word8
+    testSys     = z80instructionExecute (DecodedInsn 0x1000 (ins . RPair16 $ reg16)) initialSys
+    initialSys  = reg16set val reg16 z80system
