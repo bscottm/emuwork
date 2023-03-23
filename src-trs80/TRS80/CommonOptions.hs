@@ -72,18 +72,23 @@ commonOptions =
  , Option [] ["mem"]    (ReqArg setMemSize     "[16|32|48]") "Set the TRS-80's memory size (16/32/48)"
  ]
  where
-  setImageReader fmt flags =
+  setImageReader fmt flags@CommonOptions{} =
     case fmt of
       "ihex"     -> flags { imageReader = readIntelHexVector }
       "intelhex" -> flags { imageReader = readIntelHexVector }
       "raw"      -> flags { imageReader = readRawWord8Vector }
       unknown    -> InvalidReader unknown
+  setImageReader _fmt flags = flags
 
-  setROMImage fpath flags = flags { romPath = fpath }
-  setMemSize  msize flags = let msize' = (read msize :: Int)
-                            in  if msize' `elem` [16, 32, 48]
-                                then flags { memSize = msize' }
-                                else InvalidMemSize msize
+  setROMImage fpath flags@CommonOptions{} = flags { romPath = fpath }
+  setROMImage _     flags                 = flags
+  
+  setMemSize  msize flags@CommonOptions{} =
+    let msize' = (read msize :: Int)
+    in  if msize' `elem` [16, 32, 48]
+        then flags { memSize = msize' }
+        else InvalidMemSize msize
+  setMemSize _ flags                      = flags
 
 validateOptions :: CommonOptions
                 -> IO CommonOptions

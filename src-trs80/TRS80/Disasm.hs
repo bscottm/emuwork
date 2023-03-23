@@ -103,12 +103,15 @@ mkDisasmOptions = DisasmOptions { guidanceFile = "" }
 
 disasmOptions :: [OptDescr (DisasmOptions -> DisasmOptions)]
 disasmOptions =
-  [ Option [] ["guidance"] (ReqArg (\arg _ -> DisasmOptions { guidanceFile = arg }) "FILE")
-                           "Disassembler guidance file"
+  [ Option [] ["guidance"] (ReqArg setGuidanceFile "FILE") "Disassembler guidance file"
   ]
 
 disasmUsage :: IO ()
 disasmUsage = hPutStrLn stderr (usageInfo "Disassembler options" disasmOptions)
+
+setGuidanceFile :: FilePath -> DisasmOptions -> DisasmOptions
+setGuidanceFile arg flags@DisasmOptions{} = flags { guidanceFile = arg }
+setGuidanceFile _   flags = flags
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 

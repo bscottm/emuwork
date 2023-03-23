@@ -44,7 +44,7 @@ main =
           else exitFailure
         }
   
-    reportStart ss _us = putStrLn (showPath (path ss))
+    reportStart ss _us = putStrLn . T.unpack . showPath . path $ ss
     reportError   = reportProblem "Error:"   "Error in:   "
     reportFailure = reportProblem "Failure:" "Failure in: "
     reportProblem p0 p1 _loc msg ss _us = putStrLn line
@@ -55,8 +55,7 @@ main =
                        , "\n"
                        , msg
                        ]
-        path' = showPath (path ss)
-{-
+        path' = T.unpack. showPath . path $ ss
     showPath [] = T.empty
     showPath nodes = T.concat ["++ ", T.intercalate ":" (map showNode (reverse (filter onlyLabels nodes)))]
      where onlyLabels (Label _)   = True
@@ -64,7 +63,6 @@ main =
            showNode (ListItem _n) = T.empty
            showNode (Label label) = T.justifyLeft 15 ' ' (T.pack $ safe label (show label))
            safe s ss = if ':' `elem` s || "\"" ++ s ++ "\"" /= ss then ss else s
--}
 
 data TestArgs =
   TestArgs
