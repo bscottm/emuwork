@@ -1,2 +1,16 @@
 cradle:
   stack:
+    - path: "./src-emubase"
+      component: "emubase:lib"
+    - path: "./src-emubase/Machine/Tests/MsysTests.hs"
+      component: "emubase:test:msystest"
+    - path: "./src-main"
+      component: "emuwork:exe:emuwork"
+    - path: "./src-trs80"
+      component: "trs80:lib"
+    - path: "./src-trs80/TRS80/Disasm/YamlTest.hs"
+      component: "trs80:test:yamltest"
+    - path: "./src-z80"
+      component: "z80:lib"
+    - path: "./src-z80/Z80/Tests/Z80Execute.hs"
+      component: "z80:test:z80execute"

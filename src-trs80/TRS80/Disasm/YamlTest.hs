@@ -24,26 +24,26 @@ import           TRS80.Disasm.Guidance
 
 main :: IO ()
 main =
-  getOpt RequireOrder testOptions getArgs
-  >>= (\(optsActions, rest, errs) ->
-         unless (null errs) (mapM_ (hPutStrLn stderr) errs >> showUsage >> exitFailure)
-         >> Foldable.foldl (>>=) (return mkTestArgs) optsActions
-         >>= (\options ->
-                if null rest
-                then
-                  mkYAMLTests options
-                  >>= (\tests ->
-                         do { (counts', _) <- performTest reportStart reportError reportFailure () tests
-                            ; putStrLn ""
-                            ; putStrLn "Summary:"
-                            ; putStrLn (showCounts counts')
-                            ; if errors counts' == 0 || failures counts' == 0
-                              then exitSuccess
-                              else exitFailure
-                            })
-                else
-                  showUsage))
+  (getArgs >>= combineArgs . getOpt RequireOrder testOptions)
+    >>= mkYAMLTests
+    >>= runYAMLTests
   where
+    -- We get a triple, not three separate arguments:
+    combineArgs (optsActions, rest, errs) =
+          unless (null errs) (mapM_ (hPutStrLn stderr) errs >> showUsage >> exitFailure)
+          >> unless (null rest) showUsage
+          >> Foldable.foldl (>>=) (return mkTestArgs) optsActions
+
+    runYAMLTests tests =
+      do { (counts', _) <- performTest reportStart reportError reportFailure () tests
+        ; putStrLn ""
+        ; putStrLn "Summary:"
+        ; putStrLn (showCounts counts')
+        ; if errors counts' == 0 || failures counts' == 0
+          then exitSuccess
+          else exitFailure
+        }
+  
     reportStart ss _us = putStrLn (showPath (path ss))
     reportError   = reportProblem "Error:"   "Error in:   "
     reportFailure = reportProblem "Failure:" "Failure in: "
