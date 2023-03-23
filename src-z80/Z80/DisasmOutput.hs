@@ -21,53 +21,37 @@ module Z80.DisasmOutput
 
 -- import Debug.Trace
 
-import           Prelude               hiding (seq)
-import           Lens.Micro.Platform  ((^.), view)
-import           Data.Char             (chr)
-import qualified Data.Foldable         as Foldable
-import           Data.Generics.Aliases (mkT)
-import           Data.Generics.Schemes (everywhere)
-import           Data.HashMap.Strict   (HashMap)
-import qualified Data.HashMap.Strict   as H
-import           Data.List             (sortBy)
-import           Data.Sequence         (Seq, (<|), (><), (|>))
-import qualified Data.Sequence         as Seq
-import qualified Data.Text             as T
-import qualified Data.Text.IO          as TIO
-import           Data.Tuple            ()
-import           Data.Vector.Unboxed   (Vector)
-import qualified Data.Vector.Unboxed   as DVU
-import Generics.SOP
-    ( Proxy(..),
-      Generic(from, Code),
-      HCollapse(hcollapse),
-      All2,
-      mapIK,
-      hcmap )
-import System.IO                       (Handle)
+import           Data.Char                 (chr)
+import qualified Data.Foldable             as Foldable
+import           Data.Generics.Aliases     (mkT)
+import           Data.Generics.Schemes     (everywhere)
+import qualified Data.HashMap.Strict as H  (HashMap, lookup, foldr, toList)
+import           Data.List                 (sortBy)
+import           Data.Sequence             (Seq, (<|), (><), (|>))
+import qualified Data.Sequence             as Seq
+import qualified Data.Text                 as T
+import qualified Data.Text.IO              as TIO
+import           Data.Tuple                ()
+import           Data.Vector.Unboxed       (Vector)
+import qualified Data.Vector.Unboxed       as DVU
 
-import Machine
-    ( disEltAddress,
-      disEltLabel,
-      disasmSymbolTable,
-      mkPlainAddress,
-      makeUpper,
-      padTo,
-      textSpace,
-      DisElement(LineComment, DisasmInsn, ByteRange, ExtPseudo, Addr,
-                 AsciiZ, Ascii, DisOrigin, Equate),
-      DisEltAddress(..),
-      SymAbsAddr(..),
-      ShowHex(asHex) )
-import Z80.Disassembler
-    ( Z80PseudoOps(ByteExpression),
-      Z80DisasmElt,
-      Z80disassembly,
-      z80AddrInDisasmRange )
--- Minor conflicts with Generics.SOP... <sigh!>
-import           Z80.InstructionSet hiding (POP, Z)
-import qualified Z80.InstructionSet as Z80
-import Z80.Processor (Z80addr, Z80word)
+import           Generics.SOP              (All2, Generic (Code, from), HCollapse (hcollapse), Proxy (..), hcmap, mapIK)
+
+import           Lens.Micro.Platform       (view, (^.))
+
+import           Machine.DisassemblerTypes (DisElement (Addr, Ascii, AsciiZ, ByteRange, DisOrigin, DisasmInsn, Equate, ExtPseudo, LineComment),
+                                            DisEltAddress (..), disEltAddress, disEltLabel, disasmSymbolTable, mkPlainAddress)
+import           Machine.System            (SymAbsAddr (..))
+import           Machine.Utils             (ShowHex (asHex), makeUpper, padTo, textSpace)
+
+import           Prelude                   hiding (seq)
+
+import           System.IO                 (Handle)
+
+import           Z80.Disassembler          (Z80DisasmElt, Z80PseudoOps (ByteExpression), Z80disassembly, z80AddrInDisasmRange)
+import qualified Z80.InstructionSet        as Z80
+import           Z80.InstructionSet        hiding (POP, Z)
+import           Z80.Processor             (Z80addr, Z80word)
 
 -- | Format the "analytic" version of the disassembled Z80 sequence as a 'Text'
 -- sequence. This outputs the address, opcode bytes, the opcodes as ASCII,
@@ -173,7 +157,7 @@ gFormatOperands {-elt-} =
     disOperandProxy = Proxy :: Proxy Z80operand
 
 -- | Format the accumulated symbol table as a sequence of 'T.Text's, in columnar format
-formatSymTab :: HashMap Z80addr T.Text
+formatSymTab :: H.HashMap Z80addr T.Text
              -> Seq T.Text
 formatSymTab symTab =
   let !maxsym     = H.foldr (\str len -> max len (T.length str)) 0 symTab

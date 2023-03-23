@@ -24,7 +24,7 @@ import           TRS80.Disasm.Guidance
 
 main :: IO ()
 main =
-  getOpt RequireOrder testOptions <$> getArgs
+  getOpt RequireOrder testOptions getArgs
   >>= (\(optsActions, rest, errs) ->
          unless (null errs) (mapM_ (hPutStrLn stderr) errs >> showUsage >> exitFailure)
          >> Foldable.foldl (>>=) (return mkTestArgs) optsActions

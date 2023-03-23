@@ -1,15 +1,20 @@
 module Z80.Tests.Execute.IncDec where
 
-import           Control.Monad                        (sequence, when)
-import Data.Bits
-import Data.Foldable as Fold
-import Data.Word
-import Data.Text as T
+import           Control.Monad       (when)
+
+import           Data.Bits
+import           Data.Foldable       as Fold
+import           Data.Text           as T
+import           Data.Word
+
 import           Lens.Micro.Platform
-import System.IO
-import           System.Random                        (getStdGen, randomR, setStdGen)
-import           Test.HUnit                           (Assertion, assertBool)
-import Text.Printf
+
+import           System.IO
+import           System.Random       (getStdGen, randomR, setStdGen)
+
+import           Test.HUnit          (Assertion, assertBool)
+
+import           Text.Printf
 
 import Machine
 import Z80
@@ -145,7 +150,7 @@ test_incDecReg8CC _opts =
             let got = testCPU ^. getter
             when (got /= expected) $
               do
-                hPutStrLn stderr $ Fold.concat [banner, " -> got " , (show expected), ", expected ", (show got)]
+                hPutStrLn stderr $ Fold.concat [banner, " -> got " , show expected, ", expected ", show got]
                 printFlags "initial" (initialSys ^. processor . cpu)  
                 printFlags "testCPU" testCPU
             return (got == expected)

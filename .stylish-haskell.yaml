@@ -27,6 +27,9 @@ steps:
       long_list_align: inline
       list_padding: 4
       separate_lists: true
+      post_qualify: false
+      group_imports: true
+      empty_list_align: inherit
 
   # Language pragmas
   - language_pragmas:

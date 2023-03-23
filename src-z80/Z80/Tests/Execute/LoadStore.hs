@@ -1,5 +1,6 @@
 module Z80.Tests.Execute.LoadStore where
 
+import Control.Monad (when)
 import           Data.Bits
 import           Data.Text as T
 import           Lens.Micro.Platform

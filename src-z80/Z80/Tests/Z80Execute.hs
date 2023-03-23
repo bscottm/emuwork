@@ -3,15 +3,12 @@
 
 module Main where
 
-import           Control.Monad                    (replicateM, sequence)
+import           Control.Monad                    (replicateM)
 import           Control.Monad.Trans.State.Strict (execState, runState, state)
-import qualified Data.Text                        as T
 import qualified Data.Vector.Unboxed              as DVU
 import           System.Random                    (Random, StdGen, getStdGen, randomR, setStdGen)
 import           Test.Framework                   (Test, defaultMain, testGroup)
--- import           Test.Framework.Options               (TestOptions'(..))
 import           Test.Framework.Providers.HUnit   (testCase)
--- import           Test.Framework.Providers.QuickCheck2 (testProperty)
 
 #if defined(TEST_DEBUG)
 import           Debug.Trace
@@ -93,3 +90,15 @@ z80ExecTests opts =
 -- | Generate finite sized random lists.
 finiteRandList :: (Random a, Num a) => (a, a) -> Int -> StdGen -> ([a], StdGen)
 finiteRandList range lim = runState (replicateM lim (state (randomR range)))
+
+{-
+-- | The ordinary 8-bit registers (does not include the indirect (HL), (IX|IY+d) memory references)
+ordinaryReg8 :: [(Z80reg8, ASetter Z80registers Z80registers Z80word Z80word, Z80word, Text)]
+ordinaryReg8 = [ (A, z80accum, 0x5a, "A")
+               , (B, z80breg,  0x3b, "B")
+               , (C, z80creg,  0x0c, "B")
+               , (D, z80dreg,  0x8d, "D")
+               , (E, z80ereg,  0x2e, "E")
+               , (H, z80hreg,  0x72, "H")
+               , (L, z80lreg,  0xc2, "L")
+               ] -}
