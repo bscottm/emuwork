@@ -164,9 +164,3 @@ z80AddrInDisasmRange :: Z80addr
                      -> Z80disassembly
                      -> Bool
 z80AddrInDisasmRange addr dstate = unPC (dstate ^. disasmOriginAddr) <= addr && addr <= unPC (dstate ^. disasmEndAddr)
-
-{- #if !MIN_VERSION_microlens_platform(0,4,10)
-(+~) :: Num a => ASetter s t a a -> a -> s -> t
-l +~ n = over l (+ n)
-{-# INLINE (+~) #-}
-   #endif -}

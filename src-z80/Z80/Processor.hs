@@ -49,8 +49,8 @@ module Z80.Processor
   ) where
 
 import           Lens.Micro.Platform (makeLenses)
-import           Data.Int
-import           Data.Word
+import Data.Int  (Int16)
+import Data.Word (Word8, Word16)
 
 import Machine   (ProgramCounter)
 

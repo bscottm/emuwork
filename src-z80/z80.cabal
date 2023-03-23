@@ -30,6 +30,7 @@ library
     parsec,
     primitive,
     psqueues,
+    random,
     syb,
     text,
     time,

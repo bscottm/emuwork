@@ -4,11 +4,10 @@ module Z80.Execute.LoadStore
 where
 
 import qualified Control.Arrow as Arrow
-import Control.Monad (sequence)
 import           Control.Monad.Trans.State.Strict (execState)
-import Data.Bits
+import Data.Bits ( Bits((.&.), xor, shiftR) )
 import           Data.Vector.Unboxed            ((!))
-import Lens.Micro.Platform
+import Lens.Micro.Platform ( (&), (.~), (^.), Lens )
 
 import Machine
 import Z80.Execute.Utils

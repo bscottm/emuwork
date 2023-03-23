@@ -1,28 +1,30 @@
+{-# LANGUAGE CPP #-}
 {- | Z80 instruction execution exercise module -}
 
 module Main where
 
-import           Control.Monad                        (replicateM, sequence)
-import           Control.Monad.Trans.State.Strict     (execState, runState, state)
-import qualified Data.Vector.Unboxed                  as DVU
-import           System.Random                        (Random, StdGen, getStdGen, randomR, setStdGen)
-import           Test.Framework                       (Test, defaultMain, testGroup {-, plusTestOptions-})
+import           Control.Monad                    (replicateM, sequence)
+import           Control.Monad.Trans.State.Strict (execState, runState, state)
+import qualified Data.Text                        as T
+import qualified Data.Vector.Unboxed              as DVU
+import           System.Random                    (Random, StdGen, getStdGen, randomR, setStdGen)
+import           Test.Framework                   (Test, defaultMain, testGroup)
 -- import           Test.Framework.Options               (TestOptions'(..))
-import           Test.Framework.Providers.HUnit       (testCase)
+import           Test.Framework.Providers.HUnit   (testCase)
 -- import           Test.Framework.Providers.QuickCheck2 (testProperty)
 
 #if defined(TEST_DEBUG)
 import           Debug.Trace
 #endif
 
-import          Machine
-import          Z80
+import           Machine
+import           Z80
 
 -- Internal test modules:
-import          Z80.Tests.Execute.TestData
-import          Z80.Tests.Execute.LoadStore
-import          Z80.Tests.Execute.IncDec
-import          Z80.Tests.Execute.ALUops
+import           Z80.Tests.Execute.ALUops
+import           Z80.Tests.Execute.IncDec
+import           Z80.Tests.Execute.LoadStore
+import           Z80.Tests.Execute.TestData
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Driver...

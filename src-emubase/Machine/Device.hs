@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE CPP #-}
 
 module Machine.Device
   ( Device(..)
@@ -12,7 +13,6 @@ module Machine.Device
 import           Prelude                           hiding (words)
 import           Control.Arrow                     ((***))
 import           Control.Monad.Trans.State.Strict  (state, runState, execState)
-import           Control.Monad                     (sequence)
 import qualified Data.Vector.Unboxed               as DVU
 
 #if defined(TEST_DEBUG)

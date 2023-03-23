@@ -62,9 +62,9 @@ import           Lens.Micro.Platform              (Lens', over, to, (&), (.~), (
 import           Lens.Micro.Platform              (Lens', over, to, (&), (.~), (%~), (^.), ASetter, view)
 #endif
 import           Control.Monad.Trans.State.Strict (state, execState)
-import           Control.Monad                    (sequence)
+import           Control.Monad                    ()
 import           Data.List                        (intercalate)
-import           Data.Semigroup                   (Semigroup)
+import           Data.Semigroup                   ()
 import qualified Data.Foldable                    as Fold
 import qualified Data.IntervalMap.Strict          as IM
 import qualified Data.IntervalMap.Interval        as I

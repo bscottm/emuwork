@@ -22,15 +22,14 @@ module Z80.DisasmOutput
 -- import Debug.Trace
 
 import           Prelude               hiding (seq)
-import           Lens.Micro.Platform
-import           Data.Char
+import           Lens.Micro.Platform  ((^.), view)
+import           Data.Char             (chr)
 import qualified Data.Foldable         as Foldable
 import           Data.Generics.Aliases (mkT)
 import           Data.Generics.Schemes (everywhere)
 import           Data.HashMap.Strict   (HashMap)
 import qualified Data.HashMap.Strict   as H
 import           Data.List             (sortBy)
--- import           Data.Maybe            (maybe)
 import           Data.Sequence         (Seq, (<|), (><), (|>))
 import qualified Data.Sequence         as Seq
 import qualified Data.Text             as T

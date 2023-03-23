@@ -7,9 +7,8 @@ module Reader.IntelHex
 
 -- import Debug.Trace
 
-import           Control.Applicative         ((*>))
 import           Control.Exception           hiding (try)
-import           Control.Monad               (liftM, zipWithM_)
+import           Control.Monad               (zipWithM_)
 import           Control.Monad.Primitive     (PrimMonad (..))
 import           Control.Monad.ST
 import           Data.Bits                   (shiftR, xor, (.&.))
@@ -35,7 +34,7 @@ readIntelHexVector :: FilePath
 readIntelHexVector path =
   if (not . null) path then
     (TIO.readFile path
-     >>= (\hexStr -> intelHexReader path hexStr)) `catches` [ Handler (genericIOErrors "readIntelHexVector")
+     >>= intelHexReader path) `catches` [ Handler (genericIOErrors "readIntelHexVector")
                                                             -- Add more handlers here, as needed
                                                             ]
   else
@@ -48,12 +47,12 @@ intelHexReader :: FilePath
                -> IO (Vector Word8)
 intelHexReader path input =
   case parse intelHexParser path input of
-    Left errMsg -> hPutStrLn stderr ("Error parsing Intel hex format: " ++ (show errMsg))
+    Left errMsg -> hPutStrLn stderr ("Error parsing Intel hex format: " ++ show errMsg)
                    >> invalidVector
     Right ihex  -> let ihex'                = (Seq.sort . trimEOF) ihex
                        maxAddr              = getLastAddr ihex'
                        tempVec              = DVU.create (M.new (fromIntegral maxAddr) >>= fillVector ihex')
-                   in  return $ tempVec
+                   in  return tempVec
 
 -- | Fill the mutable vector from the sequence of 'IHexLine' records
 
@@ -86,7 +85,7 @@ data IHexLine =
 
 -- | Instance of 'Eq' for 'IHexLine'
 instance Eq IHexLine where
-  a@(IHexType0 {}) == b@(IHexType0 {})   = (addr a) == (addr b) && (bytes a) == (bytes b)
+  a@(IHexType0 {}) == b@(IHexType0 {})   = addr a == addr b && bytes a == bytes b
   (IHexType1 {})   == (IHexType1 {})     = True
   _a               == _b                 = False
 
@@ -113,12 +112,12 @@ type1eof = IHexType1 0x0
 -- | The actual Intel hex-format parser: read data line, ended by a newline. Wash. Rinse. Repeat. Convert to 'Seq' sequence
 -- when complete.
 intelHexParser :: Parser (Seq IHexLine)
-intelHexParser = liftM Seq.fromList (readIHexLine `endBy` newline)
+intelHexParser = fmap Seq.fromList (readIHexLine `endBy` newline)
 
 -- | Parse a line of Intel hex input.
 readIHexLine :: Parser IHexLine
 readIHexLine =
-  (string ":" <?> ("Missing ':' at start of line"))
+  (string ":" <?> "Missing ':' at start of line")
   *> do
       r_nBytes  <- readByte <?> "byte count"
       r_addr    <- readAddr <?> "16-bit address"
@@ -131,9 +130,9 @@ readIHexLine =
         case r_recType of
           0          -> return $ IHexType0 { addr = r_addr, bytes = r_bytes }
           1          -> return $ IHexType1 { startAddr = r_addr }
-          _otherwise -> fail ("Extended record type " ++ (show r_recType) ++ " not supported.")
+          _otherwise -> fail ("Extended record type " ++ show r_recType ++ " not supported.")
       else
-        fail ("Invalid checksum: Got 0x" ++ (showHex csum "") ++ ", expecting 0x" ++ (showHex seenCSum ""))
+        fail ("Invalid checksum: Got 0x" ++ showHex csum "" ++ ", expecting 0x" ++ showHex seenCSum "")
 
 -- | Compute the checksum over all of the read fields. The checksum is the 2's complement sum of the data bytes,
 -- record type, data byte count and the address bytes
@@ -143,24 +142,24 @@ computedCheckSum :: Word16
                  -> Word8
 computedCheckSum theAddr rType theBytes =
   ((sum theBytes
-   + ((fromIntegral . length) $ theBytes)
+   + (fromIntegral . length) theBytes
    + rType
-   + (fromIntegral (theAddr `shiftR` 8))
-   + (fromIntegral (theAddr .&. 0xff))) `xor` 0xff) + 1
+   + fromIntegral (theAddr `shiftR` 8)
+   + fromIntegral (theAddr .&. 0xff)) `xor` 0xff) + 1
 
 -- | Parse a byte (two hex digits) from the 'Parser' stream, returning the byte\'s value.
 readByte :: Parser Word8
 readByte =
   hexDigit
   >>= (\hi -> hexDigit
-              >>= (\lo -> (return . fromIntegral) $ (digitToInt hi) * 16 + (digitToInt lo)))
+              >>= (\lo -> (return . fromIntegral) $ digitToInt hi * 16 + digitToInt lo))
 
 -- | Parse a big-endian 16-bit address from the 'Parser' stream, returning the address\' value.
 readAddr :: Parser Word16
 readAddr = do
   hiAddr <- readByte
   loAddr <- readByte
-  return ((fromIntegral hiAddr) * 256 + (fromIntegral loAddr))
+  return (fromIntegral hiAddr * 256 + fromIntegral loAddr)
 
 -- | Trim end-of-file records off the end of the sequence, if present
 trimEOF :: Seq IHexLine
@@ -177,5 +176,5 @@ getLastAddr :: Seq IHexLine
             -> Word16
 getLastAddr ihex = let lastRec = ihex `Seq.index` (Seq.length ihex - 1)
                    in  case lastRec of
-                         a@(IHexType0 {}) -> (addr a) + (fromIntegral . length . bytes) a
+                         a@(IHexType0 {}) -> addr a + (fromIntegral . length . bytes) a
                          _otherwise       -> error "Reader.IntelHex.getLastAddr -- last record not IHexType0?"

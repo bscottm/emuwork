@@ -1,18 +1,17 @@
 module Z80.Tests.Execute.LoadStore where
 
-import           Control.Monad                        (sequence, when)
-import Data.Bits
-import Data.Text as T
+import           Data.Bits
+import           Data.Text as T
 import           Lens.Micro.Platform
-import           System.Random                        (StdGen, getStdGen, randomR, setStdGen)
-import           Test.HUnit                           (Assertion, assertBool)
-import Text.Printf
+import           System.Random           (StdGen, getStdGen, randomR, setStdGen)
+import           Test.HUnit              (Assertion, assertBool)
+import           Text.Printf
 
-import Machine
-import Z80
+import           Machine
+import           Z80
 
-import Z80.Tests.Execute.TestData
-import Z80.Tests.Execute.Utils
+import           Z80.Tests.Execute.TestData
+import           Z80.Tests.Execute.Utils
 
 -- | Test the 8-bit-to-8-bit loads (LD A, B; LD B, (HL); LD H, (IX+3) ...)
 test_ldReg8Reg8
