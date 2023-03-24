@@ -249,17 +249,17 @@ repackResult :: Either T.Text a -> Parser a
 repackResult = either (fail <$> T.unpack) pure
 
 guidanceFields :: JsonOptions
-guidanceFields = defaultJsonOptions { jsonFieldName = renameFields, jsonTagName = renameDirective }
+guidanceFields = defaultJsonOptions { jsonFieldName = guidanceJSONMap, jsonTagName = directiveJSONMap }
 
-renameFields :: DatatypeName -> FieldName -> JsonFieldName
-renameFields "Guidance"  "endAddr"  = "end"
-renameFields "Guidance"  "sections" = "section"
-renameFields "Guidance"  "origin"   = "origin"
-renameFields "Directive" fname      = renameDirective fname
-renameFields dtName      fname      = dtName ++ ":" ++ fname
+guidanceJSONMap :: DatatypeName -> FieldName -> JsonFieldName
+guidanceJSONMap "Guidance"  "endAddr"  = "end"
+guidanceJSONMap "Guidance"  "sections" = "section"
+guidanceJSONMap "Guidance"  "origin"   = "origin"
+guidanceJSONMap "Directive" fname      = directiveJSONMap fname
+guidanceJSONMap dtName      fname      = dtName ++ ":" ++ fname
 
-renameDirective :: ConstructorName -> JsonTagName
-renameDirective tag = fromMaybe ("unknown Directive tag: " ++ tag) $ H.lookup tag directiveRenameTable
+directiveJSONMap :: ConstructorName -> JsonTagName
+directiveJSONMap tag = fromMaybe ("unknown Directive tag: " ++ tag) $ H.lookup tag directiveRenameTable
 
 -- | Translation table mapping 'Directive' constructor names to tags in the YAML/JSON source
 directiveRenameTable :: H.HashMap String String
