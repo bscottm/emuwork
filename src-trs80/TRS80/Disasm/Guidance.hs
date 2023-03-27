@@ -10,6 +10,7 @@
 
 module TRS80.Disasm.Guidance
   ( Guidance(..)
+  , yamlStringGuidance
   , Directive(..)
   , Z80guidanceAddr(..)
   , Z80guidanceDisp(..)
@@ -25,10 +26,11 @@ module TRS80.Disasm.Guidance
 where
 
 import           Control.Applicative            ( (<|>) )
-import           Data.Aeson.Types               ( (.=) )
+import           Data.Aeson.Types               ( (.=), (.:?) )
 import qualified Data.Aeson.KeyMap as AKM       ( lookup )
 import           Data.Bits
 import qualified Data.ByteString.Lazy          as B
+import qualified Data.ByteString               as S
 import qualified Data.Char                     as C
 import           Data.Either                    ( lefts
                                                 , rights
@@ -68,7 +70,7 @@ import           Machine.Utils                  ( ShowHex(..)
                                                 , asHex
                                                 )
 import           Z80                            ( Z80addr
-                                                , Z80disp
+                                                , Z80disp, z80MinAddr, z80MaxAddr
                                                 )
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -122,16 +124,27 @@ newtype Z80guidanceMD5Sig =
 
 -- | Disassembler guidance: When to disassemble, when to dump bytes, ... basically guidance to the drive
 -- the disassembly process (could be made more generic as part of a 'Machine' module.)
-data Guidance =
-  Guidance
+data Guidance where
+  Guidance ::
     { origin   :: Z80guidanceAddr
       -- Disassembly origin address (where to start disassembling)
     , endAddr  :: Z80guidanceAddr
       -- End disassembly address
     , sections :: H.HashMap T.Text (V.Vector Directive)
       -- Map of section names to a list of directives to apply
-    }
+    } -> Guidance
   deriving (Eq, Show)
+
+data YAMLGuidance where
+  YAMLGuidance ::
+    { yamlOrigin   :: Maybe Z80guidanceAddr
+      -- Disassembly origin address (where to start disassembling)
+    , yamlEndAddr  :: Maybe Z80guidanceAddr
+      -- End disassembly address
+    , yamlSections :: Maybe (H.HashMap T.Text (V.Vector Directive))
+      -- Map of section names to a list of directives to apply
+    } -> YAMLGuidance
+  -- deriving (Eq, Show)
 
 data Directive =
     MD5Sum Z80guidanceMD5Sig
@@ -157,22 +170,44 @@ data Directive =
   deriving (Eq, Show)
 
 deriveGeneric ''Directive
-deriveGeneric ''Guidance
+-- deriveGeneric ''YAMLGuidance
 
-instance FromJSON Guidance where
-  parseJSON json = gparseJSON guidanceFields json >>= check
+
+instance FromJSON YAMLGuidance where
+  parseJSON = Y.withObject "YAMLGuidance" $ \v -> YAMLGuidance
+    <$> v .:? "origin"
+    <*> v .:? "end"
+    <*> v .:? "section"
+    
+     {- }>>= check
     where
       check guidance
-        | origin guidance == FromCurPC
+        | yamlOrigin guidance == FromCurPC
         = fail "Disassembly origin cannot be '$'."
-        | endAddr guidance == FromCurPC
+        | yamlEndAddr guidance == FromCurPC
         = fail "Disassembly end cannot be '$'."
         | otherwise
-        = pure guidance
+        = pure guidance -}
+
+instance FromJSON Guidance where
+  parseJSON = fmap convert <$> parseJSON
+    where
+      convert yaml = Guidance {
+        origin = fromMaybe (GuidanceAddr z80MinAddr) (yamlOrigin yaml),
+        endAddr = fromMaybe (GuidanceAddr z80MaxAddr) (yamlEndAddr yaml),
+        sections = fromMaybe H.empty (yamlSections yaml)
+      }
+
+instance ToJSON YAMLGuidance where
+  toJSON = undefined
 
 instance ToJSON Guidance where
-  toJSON = gtoJSON guidanceFields
-
+  toJSON guidance = Y.object [
+      "origin" .= origin guidance
+    , "end" .= endAddr guidance
+    , "section" .= sections guidance
+    ]
+  
 instance FromJSON Directive where
   parseJSON = gparseJSON guidanceFields
 
@@ -251,12 +286,12 @@ repackResult = either (fail <$> T.unpack) pure
 guidanceFields :: JsonOptions
 guidanceFields = defaultJsonOptions { jsonFieldName = guidanceJSONMap, jsonTagName = directiveJSONMap }
 
-guidanceJSONMap :: DatatypeName -> FieldName -> JsonFieldName
-guidanceJSONMap "Guidance"  "endAddr"  = "end"
-guidanceJSONMap "Guidance"  "sections" = "section"
-guidanceJSONMap "Guidance"  "origin"   = "origin"
-guidanceJSONMap "Directive" fname      = directiveJSONMap fname
-guidanceJSONMap dtName      fname      = dtName ++ ":" ++ fname
+renameFields :: DatatypeName -> FieldName -> JsonFieldName
+renameFields "YAMLGuidance"  "yamlEndAddr"  = "end"
+renameFields "YAMLGuidance"  "yamlOrigin"   = "origin"
+renameFields "YAMLGuidance"  "yamlSections" = "section"
+renameFields "Directive" fname      = renameDirective fname
+renameFields dtName      fname      = dtName ++ ":" ++ fname
 
 directiveJSONMap :: ConstructorName -> JsonTagName
 directiveJSONMap tag = fromMaybe ("unknown Directive tag: " ++ tag) $ H.lookup tag directiveRenameTable
@@ -356,6 +391,10 @@ getMatchingSection g md5sum =
       sectKeys      = H.keys $ filteredSects g
   in  if not (null $ filteredSects g) && length sectKeys == 1 then Just (filteredSects g H.! head sectKeys) else Nothing
 
+-- Yuck. Data.Digest.Pure.MD5 uses lazy byte strings, need to upconvert to strict
+-- for YAML -> S.concat . B.toChunks
+yamlStringGuidance :: B.ByteString -> Either Y.ParseException Guidance
+yamlStringGuidance = Y.decodeEither' . S.concat . B.toChunks
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Diagnostic functions:
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=

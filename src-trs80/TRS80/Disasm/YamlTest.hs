@@ -4,7 +4,8 @@
 module Main (main) where
 
 import           Control.Monad
-import           Data.ByteString (ByteString)
+import           Data.ByteString.Lazy (ByteString, toChunks)
+import qualified Data.ByteString as S
 import qualified Data.Foldable as Foldable
 import qualified Data.Text as T
 import           Data.Text.Encoding (decodeUtf8)
@@ -138,9 +139,9 @@ doYAMLTest opts testString =
   when (showContent opts) (do
     putStrLn "YAML Test Content:"
     putStrLn "~~~~"
-    putStrLn (T.unpack (decodeUtf8 testString))
+    putStrLn (T.unpack . decodeUtf8 . S.concat . toChunks $ testString)
     putStrLn "~~~~")
-  >> (case Y.decodeEither' testString :: Either Y.ParseException Guidance of
+  >> (case yamlStringGuidance testString of
         Left  err ->
           do
             when (showFail opts) (putStrLn (Y.prettyPrintParseException err))
