@@ -24,7 +24,6 @@ library
     json-sop,
     lens,
     microlens,
-    parsec,
     pureMD5,
     scientific,
     text,

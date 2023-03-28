@@ -13,7 +13,7 @@ library
   default-language:     Haskell2010
 
   build-depends:
-    base <5,
+    base,
     IntervalMap,
     bytestring,
     comonad,
@@ -134,7 +134,7 @@ test-suite z80execute
     default-language:   Haskell2010
     type:               exitcode-stdio-1.0
     main-is:            Z80/Tests/Z80Execute.hs
-    hs-source-dirs:     ., ../src-emubase
+    hs-source-dirs:     .
     -- cpp-options:        -DTEST_DEBUG
     ghc-options:        -Wall
     build-depends:
@@ -153,20 +153,19 @@ test-suite z80execute
       deepseq,
       directory,
       filepath,
-      generics-sop,
       hashable,
+      generics-sop,
       microlens-platform,
       transformers >= 0.5,
       old-locale,
-      parsec,
       primitive,
       psqueues,
       syb,
       text,
       time >= 1.8,
-      uniplate,
       unordered-containers,
-      vector
+      vector,
+      emubase
     default-extensions:
       CPP,
       GADTs,
@@ -177,14 +176,6 @@ test-suite z80execute
       BangPatterns,
       TemplateHaskell
     other-modules:
-      Machine,
-      Machine.Device,
-      Machine.DisassemblerTypes,
-      Machine.MemorySystem,
-      Machine.NullProcessor,
-      Machine.ProgramCounter,
-      Machine.System,
-      Machine.Utils,
       Z80,
       Z80.DisasmOutput,
       Z80.Disassembler,

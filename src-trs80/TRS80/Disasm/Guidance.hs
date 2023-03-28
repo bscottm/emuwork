@@ -304,12 +304,18 @@ convertZ80addr str = convertWord16 str >>= checkRange minZ80addr maxZ80addr
 convertZ80disp :: T.Text -> Either T.Text Z80disp
 convertZ80disp str = convertWord16 str >>= checkRange minZ80disp maxZ80disp
 
--- | Ensure that a converted value (see 'convertZ80addr' and 'convertZ80disp') is properly bounded.
+-- | Ensure that a converted value is properly bounded (see 'convertZ80addr' and 'convertZ80disp'.)
 checkRange :: (Integral a) => Int -> Int -> Int -> Either T.Text a
 checkRange lower upper val
   | val >= lower && val <= upper = Right (fromIntegral val)
   | otherwise = Left
-  $ T.concat ["Value range exceeded (", T.pack (show lower), " <= x <= ", T.pack (show upper), "): ", T.pack (show val)]
+  $ T.concat ["Value range exceeded ("
+             , T.pack . show $ lower
+             , " <= x <= "
+             , T.pack . show $ upper
+             , "): "
+             , T.pack . show $ val
+             ]
 
 convertWord16 :: T.Text -> Either T.Text Int
 convertWord16 t | T.isPrefixOf "0x" t = convertHex (T.drop 2 t)
@@ -533,9 +539,13 @@ data YAMLGuidance where
 instance FromJSON YAMLGuidance where
   parseJSON = Y.withObject "YAMLGuidance" (\v ->
     YAMLGuidance
-      <$> v .:? "origin"
-      <*> v .:? "end"
+      <$> (v .:? "origin" >>= checkNotFromCurPC "origin")
+      <*> (v .:? "end" >>= checkNotFromCurPC "end")
       <*> v .:? "section")
+    where
+      checkNotFromCurPC attr (Just FromCurPC) = fail ("Cannot set " ++ T.unpack attr ++ " to current PC ($)")
+      checkNotFromCurPC _    thing            = pure thing
+
 
 instance ToJSON YAMLGuidance where
   toJSON guidance = object [ "origin" .= yamlOrigin guidance
@@ -560,6 +570,7 @@ data Guidance where
 instance FromJSON Guidance where
   parseJSON = fmap convert <$> parseJSON
     where
+      -- Converts YAMLGuidance to Guidance. :-)
       convert yaml = Guidance {
         origin = fromMaybe (GuidanceAddr z80MinAddr) (yamlOrigin yaml),
         endAddr = fromMaybe (GuidanceAddr z80MaxAddr) (yamlEndAddr yaml),
