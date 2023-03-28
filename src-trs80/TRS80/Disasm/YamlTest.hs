@@ -8,7 +8,7 @@ import           Data.ByteString.Lazy (ByteString, toChunks)
 import qualified Data.ByteString as S
 import qualified Data.Foldable as Foldable
 import qualified Data.Text as T
-import           Data.Text.Encoding (decodeUtf8)
+import qualified Data.Text.Encoding as E (decodeUtf8)
 import qualified Data.Yaml as Y
 import           System.Console.GetOpt
 import           System.Environment
@@ -111,27 +111,28 @@ assrt @!? msg = assertionPredicate assrt >>= (\b -> when b (assertFailure msg))
 
 mkYAMLTests :: TestArgs -> IO Test
 mkYAMLTests opts =
-  return $ test [ "origin"   ~: test [ "bad origin (1)"    ~: badOrigin00 opts     @!? "bad origin (1) succeeded."
-                                     , "bad origin (2)"    ~: badOrigin01 opts     @!? "bad origin (2) succeeded."
-                                     , "bad oriign (3)"    ~: badOrigin02 opts     @!? "bad origin (3) succeeded."
-                                     , "origin+end"        ~: goodGuidance opts    @?  "origin+end failed."
-                                     , "one section"       ~: oneSection opts      @?  "one section failed."
+  return $ test [ "origin"   ~: test [ "bad origin (1)"    ~: badOrigin00 opts       @!? "bad origin (1) succeeded."
+                                     , "bad origin (2)"    ~: badOrigin01 opts       @!? "bad origin (2) succeeded."
+                                     , "bad oriign (3)"    ~: badOrigin02 opts       @!? "bad origin (3) succeeded."
+                                     , "origin+end"        ~: goodGuidance opts      @?  "origin+end failed."
+                                     , "one section"       ~: oneSection opts        @?  "one section failed."
                                      ]
-                , "equates"  ~: test [ "valid equate"       ~: validEquate opts    @?  "valid equate failed."
-                                     , "invalid equate"     ~: invalidEquate opts  @!? "invalid equate succeeded."
-                                     , "invalid hex value"  ~: invalidHex opts     @!? "invalid hex succeeded."
-                                     , "out of range value" ~: invalidValue opts   @!? "invalid value succeeded."
-                                     , "missing equ name"   ~: missingEquName opts @!? "missing equate name succeeded."
+                , "equates"  ~: test [ "valid equate"       ~: validEquate opts      @?  "valid equate failed."
+                                     , "invalid equate (1)" ~: invalidEquate00 opts  @!? "invalid equate (1) succeeded."
+                                     , "invalid equate (2)" ~: invalidEquate01 opts  @!? "invalid equate (2) succeeded."
+                                     , "invalid hex value"  ~: invalidHex opts       @!? "invalid hex succeeded."
+                                     , "out of range value" ~: invalidValue opts     @!? "invalid value succeeded."
+                                     , "missing equ name"   ~: missingEquName opts   @!? "missing equate name succeeded."
                                      ]
-                , "disasm"   ~: test [ "valid disasm"       ~: validDisasm opts    @?  "disasm failed."
+                , "disasm"   ~: test [ "valid disasm"       ~: validDisasm opts      @?  "disasm failed."
                                      ]
-                , "bytes"    ~: test [ "valid bytes"        ~: validBytes opts     @?  "bytes directive failed."
+                , "bytes"    ~: test [ "valid bytes"        ~: validBytes opts       @?  "bytes directive failed."
                                      ]
-                , "ascii"    ~: test [ "valid ascii"        ~: validAscii opts     @? "ascii directive failed."
+                , "ascii"    ~: test [ "valid ascii"        ~: validAscii opts       @? "ascii directive failed."
                                      ]
-                , "highbits" ~: test [ "valid highbits"     ~: validHighBits opts  @? "highbits directive failed."
+                , "highbits" ~: test [ "valid highbits"     ~: validHighBits opts    @? "highbits directive failed."
                                      ]
-                , "symbols"  ~: test [ "known symbols"      ~: knownSymbols opts   @? "known symbols failed."
+                , "symbols"  ~: test [ "known symbols"      ~: knownSymbols opts     @? "known symbols failed."
                                      ]
                 ]
 
@@ -140,17 +141,15 @@ doYAMLTest opts testString =
   when (showContent opts) (do
     putStrLn "YAML Test Content:"
     putStrLn "~~~~"
-    putStrLn (T.unpack . decodeUtf8 . S.concat . toChunks $ testString)
+    putStrLn (T.unpack . E.decodeUtf8 . S.concat . toChunks $ testString)
     putStrLn "~~~~")
   >> (case yamlStringGuidance testString of
         Left  err ->
-          do
-            when (showFail opts) (putStrLn (Y.prettyPrintParseException err))
-            return False
+          when (showFail opts) (putStrLn (Y.prettyPrintParseException err))
+          >> return False
         Right res ->
-          do
-            when (showResult opts) $ print res
-            return True)
+          when (showResult opts) (print res)
+          >> return True)
 
 badOrigin00 :: TestArgs -> IO Bool
 badOrigin00 opts = doYAMLTest opts [r|origin: not an origin|]
@@ -179,7 +178,7 @@ oneSection :: TestArgs -> IO Bool
 oneSection opts = doYAMLTest opts [r|
 origin: 0x2e00
 end: 0x2fff
-secton:
+section:
   first_section:
     - comment: |
         This is a multiline comment.
@@ -206,8 +205,8 @@ section:
 |]
 
 -- | Invalid equate name
-invalidEquate :: TestArgs -> IO Bool
-invalidEquate opts = doYAMLTest opts [r|
+invalidEquate00 :: TestArgs -> IO Bool
+invalidEquate00 opts = doYAMLTest opts [r|
 origin: 0x0000
 end:    0x0001
 section:
@@ -215,6 +214,16 @@ section:
     - equate:
         name: 0RST10VEC
         value: 0x4003
+|]
+
+-- | Invalid equate name
+invalidEquate01 :: TestArgs -> IO Bool
+invalidEquate01 opts = doYAMLTest opts [r|
+origin: 0x0000
+end:    0x0001
+section:
+  foo:
+    - equate:[0RST10VEC, 0x4003]
 |]
 
 

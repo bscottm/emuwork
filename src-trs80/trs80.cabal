@@ -38,9 +38,7 @@ library
   default-extensions:
     CPP,
     GADTs,
-    MultiParamTypeClasses,
-    OverloadedStrings,
-    TemplateHaskell
+    OverloadedStrings
 
   exposed-modules:
     TRS80
@@ -50,6 +48,31 @@ library
     TRS80.Disasm
     TRS80.CommonOptions
     TRS80.Disasm.Guidance
+
+executable disasm-check
+  default-language:   Haskell2010
+  main-is:            TRS80/Executables/DisasmCheck.hs
+  Build-Depends:
+    aeson,
+    base,
+    containers,
+    bytestring,
+    deepseq,
+    lens,
+    scientific,
+    vector,
+    text,
+    trs80,
+    unordered-containers,
+    yaml,
+    emubase,
+    z80
+  other-modules:
+    TRS80.Disasm.Guidance
+  default-extensions:
+    CPP,
+    GADTs,
+    OverloadedStrings
 
 test-suite yamltest
     default-language:   Haskell2010

@@ -14,9 +14,6 @@ module TRS80.Disasm.Guidance
   , Z80guidanceAddr(..)
   , Z80guidanceDisp(..)
   , Z80guidanceAddrRange(..)
-  , SymEquateName(..)
-  , tryit
-  , tryit2
   , getKnownSymbols
   , invertKnownSymbols
   , getMatchingSection
@@ -350,16 +347,6 @@ convertNum base digitValid errMsg str = if T.all digitValid str
     -- For base 8 and base 10, no correction needed. For hex, this takes care of 'A'-'F'
     digitCorrect c = let i = fromEnum c in (i .&. 0xf) + ((i .&. 0x40) `shiftR` 6) * 9
 
-parseSymEquateName :: Y.Value -> Either T.Text SymEquateName
-parseSymEquateName (Y.String name)
-  | goodFirstChar . T.head $ name
-  = pure . SymEquateName $ name
-  | otherwise
-  = fail ("invalid symbolic equate name: " ++ show name)
-  where
-    goodFirstChar c = C.isAlpha c || c == '_'
-parseSymEquateName badsym = fail ("invalid symbolic equate name: " ++ show badsym)
-
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Wrapper type for 'Z80addr' so that we can write our own 'Value' parser
 data Z80guidanceAddr =
@@ -393,30 +380,13 @@ instance ToJSON Z80guidanceDisp where
   toJSON = Y.String . as0xHex . unZ80guidanceDisp
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- | Wrapper type for symbolic equate names
-newtype SymEquateName =
-  SymEquateName
-  {
-    symEquateName :: T.Text
-  } deriving (Eq, Ord)
-
-instance Show SymEquateName where
-  show = show . symEquateName
-
-instance FromJSON SymEquateName where
-  parseJSON = repackResult . parseSymEquateName
-
-instance ToJSON SymEquateName where
-  toJSON = Y.String . symEquateName
-
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Wrapper type for address ranges pairs. This accepts "[start address, end address]" or "start", "end"/"nbytes", "nBytes"
 -- attribute/value pairs.
 data Z80guidanceAddrRange =
     AbsRange Z80guidanceAddr Z80guidanceAddr
   -- ^ Absolute range, where the end address is absolute
   | RelRange Z80guidanceAddr Z80guidanceDisp
-  -- ^ Relative range, wher ethe end address is a displacement (i.e., relative)
+  -- ^ Relative range, where the end address is a displacement (i.e., relative)
   deriving (Eq)
 
 instance FromJSON Z80guidanceAddr where
@@ -439,8 +409,8 @@ instance FromJSON Z80guidanceAddrRange where
   parseJSON _                = fail "Address range should have 'start' and 'end' or 'nbytes'/'nBytes' attributes"
 
 instance ToJSON Z80guidanceAddrRange where
-  toJSON (AbsRange sAddr eAddr) = object ["addr" .= as0xHex sAddr, "end" .= as0xHex eAddr]
-  toJSON (RelRange sAddr disp ) = object ["addr" .= as0xHex sAddr, "nbytes" .= (as0xHex . unZ80guidanceDisp) disp]
+  toJSON (AbsRange sAddr eAddr) = object ["addr" .= toJSON sAddr, "end" .= toJSON eAddr]
+  toJSON (RelRange sAddr disp ) = object ["addr" .= toJSON sAddr, "nbytes" .= (toJSON . unZ80guidanceDisp $ disp)]
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Wrapper type for MD5 signatures
@@ -467,7 +437,7 @@ instance ToJSON Z80guidanceMD5Sig where
 -- | Disassembly directives that occur within a "section"
 data Directive where
   MD5Sum       :: Z80guidanceMD5Sig -> Directive
-  SymEquate    :: SymEquateName -> Z80guidanceAddr -> Directive
+  SymEquate    :: T.Text -> Z80guidanceAddr -> Directive
   Comment      :: T.Text -> Directive
   DoDisasm     :: Z80guidanceAddrRange -> Directive
   GrabBytes    :: Z80guidanceAddrRange -> Directive
@@ -501,14 +471,23 @@ instance FromJSON Directive where
 
       parseEquate (Y.Array a) =
         SymEquate
-          <$> parseJSON (a ! 0)
+          <$> parseSymEquateName (a ! 0)
           <*> parseJSON (a ! 1)
       parseEquate (Y.Object o) = 
         SymEquate
-          <$> o .: "name"
+          <$> (o .: "name" >>= parseSymEquateName)
           <*> o .: "value"
       parseEquate obj = fail ("invalid equate: " ++ show obj)
 
+      parseSymEquateName :: Y.Value -> Parser T.Text
+      parseSymEquateName (Y.String name)
+        | goodFirstChar . T.head $ name
+        = pure name
+        | otherwise
+        = fail ("invalid symbolic equate name: " ++ show name)
+        where
+          goodFirstChar c = C.isAlpha c || c == '_'
+      parseSymEquateName badsym = fail ("invalid symbolic equate name: " ++ show badsym)
   parseJSON thing = fail ("invalid directive: " ++ show thing)
 
 instance ToJSON Directive where
@@ -620,13 +599,3 @@ yamlStringGuidance = Y.decodeEither' . S.concat . B.toChunks
 
 yamlFileGuidance :: FilePath -> IO (Either Y.ParseException Guidance)
 yamlFileGuidance = Y.decodeFileEither
-
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- Diagnostic functions:
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
-tryit :: IO (Either Y.ParseException Guidance)
-tryit = Y.decodeFileEither "/tmp/guidance.yaml"
-
-tryit2 :: IO ()
-tryit2 = tryit >>= either print (Y.encodeFile "/tmp/out.yaml")
