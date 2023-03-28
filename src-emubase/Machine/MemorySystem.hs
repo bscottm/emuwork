@@ -1,3 +1,5 @@
+{-# LANGUAGE  CPP #-}
+
 {-| General-purpose system memory, for both traditional memory and for port-based I/O systems.
 
 Memory is a collection of address regions ('addrType') stored in an 'IntervalMap'. The 'IntervalMap' stores the start

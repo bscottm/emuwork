@@ -4,7 +4,6 @@
 {-# LANGUAGE LambdaCase           #-}
 {-# LANGUAGE RankNTypes           #-}
 {-# LANGUAGE ScopedTypeVariables  #-}
-{-# LANGUAGE TemplateHaskell      #-}
 {-# LANGUAGE TypeFamilies         #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 
@@ -15,6 +14,7 @@ module TRS80.Disasm.Guidance
   , Z80guidanceAddr(..)
   , Z80guidanceDisp(..)
   , Z80guidanceAddrRange(..)
+  , SymEquateName(..)
   , tryit
   , tryit2
   , getKnownSymbols
@@ -25,43 +25,24 @@ module TRS80.Disasm.Guidance
   )
 where
 
-import           Control.Applicative            ( (<|>) )
-import           Data.Aeson.Types               ( (.=), (.:?) )
-import qualified Data.Aeson.KeyMap as AKM       ( lookup )
+import           Control.Applicative  ((<|>))
+
+import qualified Data.Aeson.KeyMap    as AKM (lookup, toList)
+import           Data.Aeson.Types     ((.:), (.:?), (.=))
 import           Data.Bits
-import qualified Data.ByteString.Lazy          as B
-import qualified Data.ByteString               as S
-import qualified Data.Char                     as C
-import           Data.Either                    ( lefts
-                                                , rights
-                                                )
-import qualified Data.HashMap.Strict           as H
-import           Data.Maybe                     ( fromMaybe
-                                                , isJust
-                                                , fromJust
-                                                )
-import qualified Data.Scientific               as S
-import qualified Data.Text                     as T
-import           Data.Vector                    ( (!) )
-import qualified Data.Vector                   as V
-import           Data.Yaml                      ( FromJSON(..)
-                                                , Parser
-                                                , ToJSON(..)
-                                                , object
-                                                )
-import qualified Data.Yaml                     as Y
-import           Generics.SOP                   ( ConstructorName
-                                                , DatatypeName
-                                                , FieldName
-                                                )
-import           Generics.SOP.JSON              ( JsonFieldName
-                                                , JsonOptions(..)
-                                                , JsonTagName
-                                                , defaultJsonOptions
-                                                , gparseJSON
-                                                , gtoJSON
-                                                )
-import           Generics.SOP.TH                ( deriveGeneric )
+import qualified Data.ByteString      as S
+import qualified Data.ByteString.Lazy as B
+import qualified Data.Char            as C
+import           Data.Either          (lefts, rights)
+import qualified Data.HashMap.Strict  as H
+import           Data.Maybe           (fromJust, fromMaybe, isJust)
+import qualified Data.Scientific      as S
+import qualified Data.Text            as T
+import           Data.Vector          ((!))
+import qualified Data.Vector          as V
+import           Data.Yaml            (FromJSON (..), Parser, ToJSON (..), object, array)
+import qualified Data.Yaml            as Y
+
 -- import           Debug.Trace
 
 import           Machine.Utils                  ( ShowHex(..)
@@ -363,6 +344,236 @@ convertNum base digitValid errMsg str = if T.all digitValid str
     -- For base 8 and base 10, no correction needed. For hex, this takes care of 'A'-'F'
     digitCorrect c = let i = fromEnum c in (i .&. 0xf) + ((i .&. 0x40) `shiftR` 6) * 9
 
+parseSymEquateName :: Y.Value -> Either T.Text SymEquateName
+parseSymEquateName (Y.String name)
+  | goodFirstChar . T.head $ name
+  = pure . SymEquateName $ name
+  | otherwise
+  = fail ("invalid symbolic equate name: " ++ show name)
+  where
+    goodFirstChar c = C.isAlpha c || c == '_'
+parseSymEquateName badsym = fail ("invalid symbolic equate name: " ++ show badsym)
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Wrapper type for 'Z80addr' so that we can write our own 'Value' parser
+data Z80guidanceAddr =
+    FromCurPC
+  |  GuidanceAddr Z80addr
+  deriving (Eq)
+
+instance Show Z80guidanceAddr where
+  show FromCurPC           = "$"
+  show (GuidanceAddr addr) = as0xHexS addr
+
+instance ShowHex Z80guidanceAddr where
+  asHex FromCurPC           = "$"
+  asHex (GuidanceAddr addr) = as0xHex addr
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Wrapper type for 'Z80disp' so that we can write our own 'Value' parser
+newtype Z80guidanceDisp =
+  Z80guidanceDisp
+  {
+    unZ80guidanceDisp :: Z80disp
+  } deriving (Eq, Ord)
+
+instance Show Z80guidanceDisp where
+  show = as0xHexS . unZ80guidanceDisp
+
+instance FromJSON Z80guidanceDisp where
+  parseJSON = repackResult . parseZ80Disp
+
+instance ToJSON Z80guidanceDisp where
+  toJSON = Y.String . as0xHex . unZ80guidanceDisp
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Wrapper type for symbolic equate names
+newtype SymEquateName =
+  SymEquateName
+  {
+    symEquateName :: T.Text
+  } deriving (Eq, Ord)
+
+instance Show SymEquateName where
+  show = show . symEquateName
+
+instance FromJSON SymEquateName where
+  parseJSON = repackResult . parseSymEquateName
+
+instance ToJSON SymEquateName where
+  toJSON = Y.String . symEquateName
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Wrapper type for address ranges pairs. This accepts "[start address, end address]" or "start", "end"/"nbytes", "nBytes"
+-- attribute/value pairs.
+data Z80guidanceAddrRange =
+    AbsRange Z80guidanceAddr Z80guidanceAddr
+  -- ^ Absolute range, where the end address is absolute
+  | RelRange Z80guidanceAddr Z80guidanceDisp
+  -- ^ Relative range, wher ethe end address is a displacement (i.e., relative)
+  deriving (Eq)
+
+instance FromJSON Z80guidanceAddr where
+  parseJSON = repackResult . parseZ80guidanceAddr
+
+instance ToJSON Z80guidanceAddr where
+  toJSON FromCurPC           = Y.String "$"
+  toJSON (GuidanceAddr addr) = (Y.String . as0xHex) addr
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+instance Show Z80guidanceAddrRange where
+  show (AbsRange sAddr eAddr) = "AbsRange(" ++ as0xHexS sAddr ++ ", " ++ as0xHexS eAddr ++ ")"
+  show (RelRange sAddr disp ) = "RelRange(" ++ as0xHexS sAddr ++ ", " ++ (as0xHexS . unZ80guidanceDisp) disp ++ ")"
+
+instance FromJSON Z80guidanceAddrRange where
+  parseJSON (Y.Array vals)
+    | V.length vals /= 2 = fail "Address range must have 2 elements, [start, end]"
+    | otherwise          = repackResult $ AbsRange <$> parseZ80guidanceAddr (vals ! 1) <*> parseZ80guidanceAddr (vals ! 0)
+  parseJSON (Y.Object attrs) = repackResult $ parseAddrRange attrs
+  parseJSON _                = fail "Address range should have 'start' and 'end' or 'nbytes'/'nBytes' attributes"
+
+instance ToJSON Z80guidanceAddrRange where
+  toJSON (AbsRange sAddr eAddr) = object ["addr" .= as0xHex sAddr, "end" .= as0xHex eAddr]
+  toJSON (RelRange sAddr disp ) = object ["addr" .= as0xHex sAddr, "nbytes" .= (as0xHex . unZ80guidanceDisp) disp]
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Wrapper type for MD5 signatures
+newtype Z80guidanceMD5Sig =
+  Z80guidanceMD5Sig {
+    unZ80guidanceMD5Sig :: B.ByteString
+  } deriving (Eq, Show)
+
+instance FromJSON Z80guidanceMD5Sig where
+  parseJSON (Y.String s) = if all (\x -> T.compareLength x 2 == EQ) strChunks && length bytes == 16 && null errs
+    then pure . Z80guidanceMD5Sig . B.pack . rights $ bytes
+    else fail . T.unpack . T.unlines $ errs
+   where
+    strChunks = T.chunksOf 2 s
+    bytes     = map convertBytes strChunks
+    convertBytes x = fromIntegral <$> convertHex x
+    errs = lefts bytes
+  parseJSON _ = fail "md5 signature expects a 16 byte hex string, no '0x'."
+
+instance ToJSON Z80guidanceMD5Sig where
+  toJSON = Y.String . T.concat . map asHex . B.unpack . unZ80guidanceMD5Sig
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Disassembly directives that occur within a "section"
+data Directive where
+  MD5Sum       :: Z80guidanceMD5Sig -> Directive
+  SymEquate    :: SymEquateName -> Z80guidanceAddr -> Directive
+  Comment      :: T.Text -> Directive
+  DoDisasm     :: Z80guidanceAddrRange -> Directive
+  GrabBytes    :: Z80guidanceAddrRange -> Directive
+  GrabAsciiZ   :: Z80guidanceAddr -> Directive
+  GrabAscii    :: Z80guidanceAddrRange -> Directive
+  HighBitTable :: Z80guidanceAddrRange -> Directive
+  JumpTable    :: Z80guidanceAddrRange -> Directive
+  KnownSymbols :: (H.HashMap T.Text Z80guidanceAddr) -> Directive
+  deriving (Eq, Show)
+
+instance FromJSON Directive where
+  parseJSON (Y.Object thing)
+    {- | trace ("FromJSON Directive " ++ show thing) False
+    = undefined
+    | otherwise -}
+    = mkDirective . head . AKM.toList $ thing
+    where
+      mkDirective (label, content) =
+        case label of
+          "ascii"     -> GrabAscii <$> parseJSON content
+          "asciiz"    -> GrabAsciiZ <$> parseJSON content
+          "bytes"     -> GrabBytes <$> parseJSON content
+          "comment"   -> Comment <$> parseJSON content
+          "disasm"    -> DoDisasm <$> parseJSON content
+          "equate"    -> parseEquate content
+          "highbits"  -> HighBitTable <$> parseJSON content
+          "jumptable" -> JumpTable <$> parseJSON content
+          "md5"       -> MD5Sum <$> parseJSON content
+          "symbols"   -> KnownSymbols <$> parseJSON content
+          _           -> fail ("bad directive: " ++ show label)
+
+      parseEquate (Y.Array a) =
+        SymEquate
+          <$> parseJSON (a ! 0)
+          <*> parseJSON (a ! 1)
+      parseEquate (Y.Object o) = 
+        SymEquate
+          <$> o .: "name"
+          <*> o .: "value"
+      parseEquate obj = fail ("invalid equate: " ++ show obj)
+
+  parseJSON thing = fail ("invalid directive: " ++ show thing)
+
+instance ToJSON Directive where
+  toJSON (MD5Sum sig) = object [ "md5" .= sig ]
+  toJSON (SymEquate name value) = object [ "equate" .=  array [ toJSON name, toJSON value ]]
+  toJSON (Comment cmnt) = object [ "comment" .= cmnt ]
+  toJSON (DoDisasm range) = object [ "disasm" .= range ]
+  toJSON (GrabBytes range) = object [ "bytes" .= range ]
+  toJSON (GrabAsciiZ addr) = object [ "asciiz" .= addr ]
+  toJSON (GrabAscii range) = object [ "ascii" .= range ]
+  toJSON (HighBitTable range) = object [ "highbits" .= range ]
+  toJSON (JumpTable range) = object [ "jumptable" .= range ]
+  toJSON (KnownSymbols symtab) = object [ "symbols" .= symtab ]
+
+data YAMLGuidance where
+  YAMLGuidance ::
+    { yamlOrigin   :: Maybe Z80guidanceAddr
+      -- Disassembly origin address (where to start disassembling)
+    , yamlEndAddr  :: Maybe Z80guidanceAddr
+      -- End disassembly address
+    , yamlSections :: Maybe (H.HashMap T.Text [Directive])
+      -- Map of section names to a list of directives to apply
+    } -> YAMLGuidance
+  deriving (Eq, Show)
+
+-- $(deriveJSON guidanceFields ''YAMLGuidance)
+
+instance FromJSON YAMLGuidance where
+  parseJSON = Y.withObject "YAMLGuidance" (\v ->
+    YAMLGuidance
+      <$> v .:? "origin"
+      <*> v .:? "end"
+      <*> v .:? "section")
+
+instance ToJSON YAMLGuidance where
+  toJSON guidance = object [ "origin" .= yamlOrigin guidance
+                           , "end" .= yamlEndAddr guidance
+                           , "section" .= yamlSections guidance
+                           ]
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+-- | Disassembler guidance: When to disassemble, when to dump bytes, ... basically guidance to the drive
+-- the disassembly process (could be made more generic as part of a 'Machine' module.)
+data Guidance where
+  Guidance ::
+    { origin   :: Z80guidanceAddr
+      -- Disassembly origin address (where to start disassembling)
+    , endAddr  :: Z80guidanceAddr
+      -- End disassembly address
+    , sections :: H.HashMap T.Text (V.Vector Directive)
+      -- Map of section names to a list of directives to apply
+    } -> Guidance
+  deriving (Eq, Show)
+
+instance FromJSON Guidance where
+  parseJSON = fmap convert <$> parseJSON
+    where
+      convert yaml = Guidance {
+        origin = fromMaybe (GuidanceAddr z80MinAddr) (yamlOrigin yaml),
+        endAddr = fromMaybe (GuidanceAddr z80MaxAddr) (yamlEndAddr yaml),
+        sections = H.map V.fromList $ fromMaybe H.empty (yamlSections yaml)
+      }
+
+instance ToJSON Guidance where
+  toJSON guidance = Y.object [
+      "origin" .= origin guidance
+    , "end" .= endAddr guidance
+    , "section" .= sections guidance
+    ]
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 getKnownSymbols :: V.Vector Directive -> H.HashMap T.Text Z80guidanceAddr
@@ -391,10 +602,14 @@ getMatchingSection g md5sum =
       sectKeys      = H.keys $ filteredSects g
   in  if not (null $ filteredSects g) && length sectKeys == 1 then Just (filteredSects g H.! head sectKeys) else Nothing
 
--- Yuck. Data.Digest.Pure.MD5 uses lazy byte strings, need to upconvert to strict
+-- Data.Digest.Pure.MD5 uses lazy byte strings, need to upconvert to strict byte strings
 -- for YAML -> S.concat . B.toChunks
 yamlStringGuidance :: B.ByteString -> Either Y.ParseException Guidance
 yamlStringGuidance = Y.decodeEither' . S.concat . B.toChunks
+
+yamlFileGuidance :: FilePath -> IO (Either Y.ParseException Guidance)
+yamlFileGuidance = Y.decodeFileEither
+
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Diagnostic functions:
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=

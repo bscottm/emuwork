@@ -230,8 +230,8 @@ doDirective directive dstate =
   case directive of
     G.SymEquate label addr ->
       let addr' = unPC $ getGuidanceAddr dstate addr
-      in  (Seq.singleton $ mkEquate label addr'
-          , dstate & disasmSymbolTable %~ H.insert addr' label
+      in  (Seq.singleton $ mkEquate (G.symEquateName label) addr'
+          , dstate & disasmSymbolTable %~ H.insert addr' (G.symEquateName label)
           )
     G.Comment comment ->
       (Seq.singleton $ mkLineComment comment, dstate)

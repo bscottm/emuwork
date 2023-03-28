@@ -171,17 +171,19 @@ oneSection :: TestArgs -> IO Bool
 oneSection opts = doYAMLTest opts [r|
 origin: 0x2e00
 end: 0x2fff
-secton 1:
-  - comment: |
-      This is a multiline comment.
-      Fun should ensue!
+secton:
+  first_section:
+    - comment: |
+        This is a multiline comment.
+        Fun should ensue!
 |]
 
 validEquate :: TestArgs -> IO Bool
 validEquate opts = doYAMLTest opts [r|---
 origin: 0x0000
 end:    0x0001
-section 1:
+section:
+  valid_equate:
     - comment: |
         multiline comment
         comment line 2
@@ -189,9 +191,9 @@ section 1:
         name: RST08VEC
         value: 0x4000
     - comment: RST10 vector - this is a JP instruction
-    - equate:
-        name: RST10VEC
-        value: 0x4003
+    - equate: [RST10VEC, 0x4003]
+      #  name: RST10VEC
+      #  value: 0x4003
 ...
 |]
 
@@ -201,6 +203,7 @@ invalidEquate opts = doYAMLTest opts [r|
 origin: 0x0000
 end:    0x0001
 section:
+  foo:
     - equate:
         name: 0RST10VEC
         value: 0x4003
@@ -213,6 +216,7 @@ invalidHex opts = doYAMLTest opts [r|
 origin: 0x0000
 end:    0x0001
 section:
+  invalid_equate:
     - equate:
         name:  RST10VEC
         value: 0xg
@@ -224,6 +228,7 @@ invalidValue opts = doYAMLTest opts [r|
 origin: 0x0000
 end:    0x0001
 section:
+  invalid_value:
     - equate:
         name:  RST10VEC
         value: 65536
@@ -235,6 +240,7 @@ missingEquName opts = doYAMLTest opts [r|
 origin: 0x0000
 end:    0x0001
 section:
+  missing_equate:
     - equate:
         value: 65536
 |]
@@ -245,9 +251,10 @@ validDisasm opts = doYAMLTest opts [r|
 origin: 0x0000
 end:    0x0001
 section:
-- disasm:
-    nbytes: 0x0a26
-    addr: 0x25d9
+  valid_disasm:
+    - disasm:
+        nbytes: 0x0a26
+        addr: 0x25d9
 |]
 
 -- | Valid bytes directive
@@ -256,9 +263,10 @@ validBytes opts = doYAMLTest opts [r|
 origin: 0x0000
 end:    0x0001
 section:
-- bytes:
-    nbytes: 0x0010
-    addr: 0x0050
+  valid_bytes:
+    - bytes:
+        nbytes: 0x0010
+        addr: 0x0050
 |]
 
 -- | Valid ASCII directive
@@ -267,9 +275,10 @@ validAscii opts = doYAMLTest opts [r|
 origin: 0x0000
 end:    0x0001
 section:
-- ascii:
-    addr: 0x0105
-    nBytes: 0x000b
+  valid_ascii:
+    - ascii:
+        addr: 0x0105
+        nBytes: 0x000b
 |]
 
 -- | Valid highbits directive
@@ -278,9 +287,10 @@ validHighBits opts = doYAMLTest opts [r|
 origin: 0x0000
 end:    0x0001
 section:
-- highbits:
-    addr: 0x1650
-    nbytes: 0x01d0
+  valid_highbits:
+    - highbits:
+        addr: 0x1650
+        nbytes: 0x01d0
 |]
 
 knownSymbols :: TestArgs -> IO Bool
@@ -288,7 +298,8 @@ knownSymbols opts = doYAMLTest opts [r|
 origin: 0x0000
 end:    0x0001
 section:
-- symbols:
-    foo: 0x4000
-    bar: 0x4001
-|]
+  known_symbols:
+    - symbols:
+        foo: 0x4000
+        bar: 0x4001
+  |]
