@@ -1,0 +1,4 @@
+*.pdf   -text
+*.rom   -text
+*.sh    text eol=lf
+*       text=auto
