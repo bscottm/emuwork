@@ -1,18 +1,18 @@
 module Z80.Tests.Execute.Utils where
 
-import           Control.Monad                        (when)
-import Data.Bits
-import Data.List as List
-import Data.Text (Text)
-import Data.Text as T
-import qualified Data.Text.IO as TIO
-import Lens.Micro.Platform
-import System.IO
-import           Test.HUnit                           (Assertion, assertBool)
-import Text.Printf
+import           Control.Monad       (when)
 
-import Machine
-import Z80
+import           Data.Bits
+import           Data.List           as List
+import           Data.Text           as T
+import qualified Data.Text.IO        as TIO
+import           Lens.Micro.Platform
+import           System.IO
+import           Test.HUnit          (Assertion, assertBool)
+import           Text.Printf
+
+import           Machine
+import           Z80
 
 -- | Compare two systems' registers: 'leftRegs' are the expected registers, 'rightRegs' are the actual values. If they
 -- don't match, then the contents of both are printed to 'stdout'.

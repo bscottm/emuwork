@@ -1,15 +1,12 @@
-{-# LANGUAGE DataKinds            #-}
-{-# LANGUAGE FlexibleContexts     #-}
-{-# LANGUAGE GADTs                #-}
-{-# LANGUAGE LambdaCase           #-}
-{-# LANGUAGE RankNTypes           #-}
-{-# LANGUAGE ScopedTypeVariables  #-}
-{-# LANGUAGE TypeFamilies         #-}
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE LambdaCase #-}
+
+{- | TRS-80 ROM disassembly guidance
+-}
 
 module TRS80.Disasm.Guidance
   ( Guidance(..)
   , yamlStringGuidance
+  , yamlFileGuidance
   , Directive(..)
   , Z80guidanceAddr(..)
   , Z80guidanceDisp(..)
@@ -56,180 +53,6 @@ import           Z80                            ( Z80addr
 instance e ~ T.Text => MonadFail (Either e) where
   fail = Left . T.pack
 
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- | Wrapper type for 'Z80addr' so that we can write our own 'Value' parser
-data Z80guidanceAddr =
-    FromCurPC
-  |  GuidanceAddr Z80addr
-  deriving (Eq)
-
-instance Show Z80guidanceAddr where
-  show FromCurPC           = "$"
-  show (GuidanceAddr addr) = as0xHexS addr
-
-instance ShowHex Z80guidanceAddr where
-  asHex FromCurPC           = "$"
-  asHex (GuidanceAddr addr) = as0xHex addr
-
--- | Wrapper type for 'Z80disp' so that we can write our own 'Value' parser
-newtype Z80guidanceDisp =
-  Z80guidanceDisp
-  {
-    unZ80guidanceDisp :: Z80disp
-  } deriving (Eq, Ord)
-
-instance Show Z80guidanceDisp where
-  show = as0xHexS . unZ80guidanceDisp
-
--- | Wrapper type for address ranges pairs. This accepts "[start address, end address]" or "start", "end"/"nbytes", "nBytes"
--- attribute/value pairs.
-data Z80guidanceAddrRange =
-    AbsRange Z80guidanceAddr Z80guidanceAddr
-  -- ^ Absolute range, where the end address is absolute
-  | RelRange Z80guidanceAddr Z80guidanceDisp
-  -- ^ Relative range, wher ethe end address is a displacement (i.e., relative)
-  deriving (Eq)
-
-instance Show Z80guidanceAddrRange where
-  show (AbsRange sAddr eAddr) = "AbsRange(" ++ as0xHexS sAddr ++ ", " ++ as0xHexS eAddr ++ ")"
-  show (RelRange sAddr disp ) = "RelRange(" ++ as0xHexS sAddr ++ ", " ++ (as0xHexS . unZ80guidanceDisp) disp ++ ")"
-
--- | Wrapper type for MD5 signatures
-newtype Z80guidanceMD5Sig =
-  Z80guidanceMD5Sig {
-    unZ80guidanceMD5Sig :: B.ByteString
-  } deriving (Eq, Show)
-
--- | Disassembler guidance: When to disassemble, when to dump bytes, ... basically guidance to the drive
--- the disassembly process (could be made more generic as part of a 'Machine' module.)
-data Guidance where
-  Guidance ::
-    { origin   :: Z80guidanceAddr
-      -- Disassembly origin address (where to start disassembling)
-    , endAddr  :: Z80guidanceAddr
-      -- End disassembly address
-    , sections :: H.HashMap T.Text (V.Vector Directive)
-      -- Map of section names to a list of directives to apply
-    } -> Guidance
-  deriving (Eq, Show)
-
-data YAMLGuidance where
-  YAMLGuidance ::
-    { yamlOrigin   :: Maybe Z80guidanceAddr
-      -- Disassembly origin address (where to start disassembling)
-    , yamlEndAddr  :: Maybe Z80guidanceAddr
-      -- End disassembly address
-    , yamlSections :: Maybe (H.HashMap T.Text (V.Vector Directive))
-      -- Map of section names to a list of directives to apply
-    } -> YAMLGuidance
-  -- deriving (Eq, Show)
-
-data Directive =
-    MD5Sum Z80guidanceMD5Sig
-    -- ^ MD5 signature: Conditionally apply the directives iff the section's signature matches
-  | SymEquate T.Text Z80guidanceAddr
-    -- Symbolic name and value associated iwth with the symbolic name
-  | Comment T.Text
-    -- Comment text
-  | DoDisasm Z80guidanceAddrRange
-    -- Start disassembly address and number of bytes to disassemble
-  | GrabBytes Z80guidanceAddrRange
-    -- Start of range, number of bytes to grab
-  | GrabAsciiZ Z80guidanceAddr
-    -- Start address to start grabbing 0-terminated ASCII string
-  | GrabAscii Z80guidanceAddrRange
-    -- Start of range, number of bytes to grab
-  | HighBitTable Z80guidanceAddrRange
-    -- Start of table, table length
-  | JumpTable Z80guidanceAddrRange
-    -- Jump table start, table length
-  | KnownSymbols (H.HashMap T.Text Z80guidanceAddr)
-    -- Mapping between symbols and addresses for a more user friendly output
-  deriving (Eq, Show)
-
-deriveGeneric ''Directive
--- deriveGeneric ''YAMLGuidance
-
-
-instance FromJSON YAMLGuidance where
-  parseJSON = Y.withObject "YAMLGuidance" $ \v -> YAMLGuidance
-    <$> v .:? "origin"
-    <*> v .:? "end"
-    <*> v .:? "section"
-    
-     {- }>>= check
-    where
-      check guidance
-        | yamlOrigin guidance == FromCurPC
-        = fail "Disassembly origin cannot be '$'."
-        | yamlEndAddr guidance == FromCurPC
-        = fail "Disassembly end cannot be '$'."
-        | otherwise
-        = pure guidance -}
-
-instance FromJSON Guidance where
-  parseJSON = fmap convert <$> parseJSON
-    where
-      convert yaml = Guidance {
-        origin = fromMaybe (GuidanceAddr z80MinAddr) (yamlOrigin yaml),
-        endAddr = fromMaybe (GuidanceAddr z80MaxAddr) (yamlEndAddr yaml),
-        sections = fromMaybe H.empty (yamlSections yaml)
-      }
-
-instance ToJSON YAMLGuidance where
-  toJSON = undefined
-
-instance ToJSON Guidance where
-  toJSON guidance = Y.object [
-      "origin" .= origin guidance
-    , "end" .= endAddr guidance
-    , "section" .= sections guidance
-    ]
-  
-instance FromJSON Directive where
-  parseJSON = gparseJSON guidanceFields
-
-instance ToJSON Directive where
-  toJSON = gtoJSON guidanceFields
-
-instance FromJSON Z80guidanceAddr where
-  parseJSON = repackResult . parseZ80guidanceAddr
-
-instance ToJSON Z80guidanceAddr where
-  toJSON FromCurPC           = Y.String "$"
-  toJSON (GuidanceAddr addr) = (Y.String . as0xHex) addr
-
-instance FromJSON Z80guidanceDisp where
-  parseJSON = repackResult . parseZ80Disp
-
-instance ToJSON Z80guidanceDisp where
-  toJSON = Y.String . as0xHex . unZ80guidanceDisp
-
-instance FromJSON Z80guidanceAddrRange where
-  parseJSON (Y.Array vals)
-    | V.length vals /= 2 = fail "Address range must have 2 elements, [start, end]"
-    | otherwise          = repackResult $ AbsRange <$> parseZ80guidanceAddr (vals ! 1) <*> parseZ80guidanceAddr (vals ! 0)
-  parseJSON (Y.Object attrs) = repackResult $ parseAddrRange attrs
-  parseJSON _                = fail "Address range should have 'start' and 'end' or 'nbytes'/'nBytes' attributes"
-
-instance ToJSON Z80guidanceAddrRange where
-  toJSON (AbsRange sAddr eAddr) = object ["addr" .= as0xHex sAddr, "end" .= as0xHex eAddr]
-  toJSON (RelRange sAddr disp ) = object ["addr" .= as0xHex sAddr, "nbytes" .= (as0xHex . unZ80guidanceDisp) disp]
-
-instance FromJSON Z80guidanceMD5Sig where
-  parseJSON (Y.String s) = if all (\x -> T.compareLength x 2 == EQ) strChunks && length bytes == 16 && null errs
-    then pure $ (Z80guidanceMD5Sig . B.pack . rights) bytes
-    else (fail . T.unpack . T.unlines) errs
-   where
-    strChunks = T.chunksOf 2 s
-    bytes     = map convertBytes strChunks
-    convertBytes x = fromIntegral <$> convertHex x
-    errs = lefts bytes
-  parseJSON _ = fail "md5 signature expects a 16 byte hex string, no '0x'."
-
-instance ToJSON Z80guidanceMD5Sig where
-  toJSON = Y.String . T.concat . map asHex . B.unpack . unZ80guidanceMD5Sig
-
 parseZ80guidanceAddr :: Y.Value -> Either T.Text Z80guidanceAddr
 parseZ80guidanceAddr (Y.String strval) | strval == "$" = pure FromCurPC
                                        | otherwise     = GuidanceAddr <$> convertZ80addr strval
@@ -261,34 +84,6 @@ parseZ80Disp invalid = fail $ "Invalid Z80 displacement: " ++ show invalid
 repackResult :: Either T.Text a -> Parser a
 repackResult = either (fail <$> T.unpack) pure
 
-guidanceFields :: JsonOptions
-guidanceFields = defaultJsonOptions { jsonFieldName = guidanceJSONMap, jsonTagName = directiveJSONMap }
-
-renameFields :: DatatypeName -> FieldName -> JsonFieldName
-renameFields "YAMLGuidance"  "yamlEndAddr"  = "end"
-renameFields "YAMLGuidance"  "yamlOrigin"   = "origin"
-renameFields "YAMLGuidance"  "yamlSections" = "section"
-renameFields "Directive" fname      = renameDirective fname
-renameFields dtName      fname      = dtName ++ ":" ++ fname
-
-directiveJSONMap :: ConstructorName -> JsonTagName
-directiveJSONMap tag = fromMaybe ("unknown Directive tag: " ++ tag) $ H.lookup tag directiveRenameTable
-
--- | Translation table mapping 'Directive' constructor names to tags in the YAML/JSON source
-directiveRenameTable :: H.HashMap String String
-directiveRenameTable = H.fromList
-  [ ("MD5Sum"      , "md5")
-  , ("SymEquate"   , "equate")
-  , ("Comment"     , "comment")
-  , ("DoDisasm"    , "disasm")
-  , ("GrabBytes"   , "bytes")
-  , ("GrabAsciiZ"  , "asciiz")
-  , ("GrabAscii"   , "ascii")
-  , ("HighBitTable", "highbits")
-  , ("JumpTable"   , "jumptable")
-  , ("KnownSymbols", "symbols")
-  ]
-
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Convert a text string to a Z80 address. The converted value's range is checked to ensure it is
@@ -304,9 +99,10 @@ convertZ80disp str = convertWord16 str >>= checkRange minZ80disp maxZ80disp
 -- | Ensure that a converted value is properly bounded (see 'convertZ80addr' and 'convertZ80disp'.)
 checkRange :: (Integral a) => Int -> Int -> Int -> Either T.Text a
 checkRange lower upper val
-  | val >= lower && val <= upper = Right (fromIntegral val)
-  | otherwise = Left
-  $ T.concat ["Value range exceeded ("
+  | val >= lower && val <= upper
+  = Right (fromIntegral val)
+  | otherwise
+  = Left $ T.concat ["Value range exceeded ("
              , T.pack . show $ lower
              , " <= x <= "
              , T.pack . show $ upper
@@ -475,11 +271,10 @@ instance FromJSON Directive where
           <*> parseJSON (a ! 1)
       parseEquate (Y.Object o) = 
         SymEquate
-          <$> (o .: "name" >>= parseSymEquateName)
+          <$> (parseSymEquateName =<< o .: "name")
           <*> o .: "value"
       parseEquate obj = fail ("invalid equate: " ++ show obj)
 
-      parseSymEquateName :: Y.Value -> Parser T.Text
       parseSymEquateName (Y.String name)
         | goodFirstChar . T.head $ name
         = pure name
@@ -487,7 +282,9 @@ instance FromJSON Directive where
         = fail ("invalid symbolic equate name: " ++ show name)
         where
           goodFirstChar c = C.isAlpha c || c == '_'
+
       parseSymEquateName badsym = fail ("invalid symbolic equate name: " ++ show badsym)
+  
   parseJSON thing = fail ("invalid directive: " ++ show thing)
 
 instance ToJSON Directive where

@@ -1,19 +1,21 @@
+{-# LANGUAGE  CPP #-}
+
 {- | 'MemorySystem' exercise module -}
 
 module Main where
 
 import           Control.Arrow                        (first, second)
-import           Control.Monad                        (mapM_, replicateM, sequence_, unless)
+import           Control.Monad                        (replicateM, unless)
 import           Control.Monad.Trans.State.Strict     (evalState, execState, runState, state)
 import           Data.Char                            (ord)
 import qualified Data.Foldable                        as Fold
 import qualified Data.IntervalMap.Interval            as I
 import           Data.List                            (elemIndices)
 import           Data.Maybe                           (fromMaybe)
-import           Data.Monoid                          (mempty)
+-- import           Data.Monoid                          (mempty)
 import           Data.Vector.Unboxed                  (Vector, (!))
 import qualified Data.Vector.Unboxed                  as DVU
-import           Data.Word
+import           Data.Word                            (Word8, Word16)
 import           System.IO                            (hPutStrLn, stderr)
 import           System.Random                        (Random, StdGen, getStdGen, randomR, setStdGen)
 import           Test.Framework                       (Test, defaultMain, plusTestOptions, testGroup)
@@ -28,9 +30,9 @@ import           Debug.Trace
 import           Text.Printf
 #endif
 
-import qualified Machine.MemorySystem                 as M
-import           Machine.Utils
-import           Machine.Tests.TestDevice
+import qualified Machine.MemorySystem     as M
+import           Machine.Tests.TestDevice (mkTestDevice, mkVideoDevice, vidCols, vidLinearSize, vidRows, videoTestPattern)
+import           Machine.Utils            (ShowHex (as0xHexS))
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Driver...
@@ -259,8 +261,8 @@ test_mappend :: TestParams -> Assertion
 test_mappend _args =
   let imgA     = DVU.generate 4096 (\x -> fromIntegral (x `mod` 256)) :: Vector Word8
       msysA    = M.mkROMRegion 0 imgA testSystem
-      msysB    = M.mkRAMRegion 0x2000 0x1000 (M.mkRAMRegion 0x1000 0x1000 testSystem)
-      msys     = msysA `mappend` msysB
+      msysB    = M.mkRAMRegion 0x2000 0x1000 <> M.mkRAMRegion 0x1000 0x1000 $ testSystem
+      msys     = msysA <> msysB
       rlist    = map fst (M.regionList msys)
   in  assertBool (if   M.countRegions msys /= 4
                   then "Expected 4 regions: " ++ show (M.countRegions msys)
@@ -380,8 +382,8 @@ test_gapWindows _args =
               )
             >> return passed
 
-  in  and <$> sequence [inner (totalLen - w) | w <- [0..fromIntegral(totalLen - 1)]]
-      >>= assertBool "read gapped window failed"
+  in  sequence [inner (totalLen - w) | w <- [0..fromIntegral(totalLen - 1)]]
+      >>= (assertBool "read gapped window failed" . and)
 
 test_patchROM01 :: TestParams -> Assertion
 test_patchROM01 _args =

@@ -3,21 +3,24 @@
 
 module Main (main) where
 
-import           Control.Monad
-import           Data.ByteString.Lazy (ByteString, toChunks)
-import qualified Data.ByteString as S
-import qualified Data.Foldable as Foldable
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as E (decodeUtf8)
-import qualified Data.Yaml as Y
-import           System.Console.GetOpt
-import           System.Environment
-import           System.Exit
-import           System.IO (stderr, hPutStrLn)
-import           Test.HUnit
-import           Text.RawString.QQ
+import           Control.Monad         (foldM, unless, when, guard)
 
-import           TRS80.Disasm.Guidance
+import qualified Data.ByteString       as S
+import           Data.ByteString.Lazy  (ByteString, toChunks)
+import           Data.List             (intercalate, foldl')
+import qualified Data.Text             as T
+import qualified Data.Text.Encoding    as E (decodeUtf8)
+import qualified Data.Yaml             as Y
+
+import           System.Console.GetOpt (ArgDescr (NoArg), ArgOrder (RequireOrder), OptDescr (..), getOpt)
+import           System.Environment    (getArgs, getProgName)
+import           System.Exit           (exitFailure, exitSuccess)
+import           System.IO             (hPutStrLn, stderr)
+import           Test.HUnit            (Assertion, AssertionPredicable (..), Counts (errors, failures), Node (Label, ListItem),
+                                        State (path), Test, Testable (test), assertFailure, performTest, showCounts, (@?), (~:))
+import           Text.RawString.QQ     (r)
+
+import TRS80.Disasm.Guidance ( yamlStringGuidance )
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- Driver...
@@ -31,39 +34,37 @@ main =
   where
     -- We get a triple, not three separate arguments:
     combineArgs (optsActions, rest, errs) =
-          unless (null errs) (mapM_ (hPutStrLn stderr) errs >> showUsage >> exitFailure)
+          unless (null errs) (hPutStrLn stderr (intercalate "\n" errs) >> showUsage >> exitFailure)
           >> unless (null rest) showUsage
-          >> Foldable.foldl (>>=) (return mkTestArgs) optsActions
+          >> foldM (flip ($)) mkTestArgs optsActions
 
-    runYAMLTests tests =
-      do { (counts', _) <- performTest reportStart reportError reportFailure () tests
-        ; putStrLn ""
-        ; putStrLn "Summary:"
-        ; putStrLn (showCounts counts')
-        ; if errors counts' == 0 || failures counts' == 0
-          then exitSuccess
-          else exitFailure
-        }
+    runYAMLTests tests = do
+      (counts', _) <- performTest reportStart reportError reportFailure () tests
+      putStrLn (intercalate "\n" ["", "Summary:", showCounts counts'])
+      when (errors counts' == 0 || failures counts' == 0) exitSuccess
+      exitFailure
   
     reportStart ss _us = putStrLn . T.unpack . showPath . path $ ss
-    reportError   = reportProblem "Error:"   "Error in:   "
-    reportFailure = reportProblem "Failure:" "Failure in: "
-    reportProblem p0 p1 _loc msg ss _us = putStrLn line
+    reportError   = reportProblem "Error"
+    reportFailure = reportProblem "Failure"
+    reportProblem msgType _loc msg ss _us = putStrLn line
       where
-        line  = concat [ "### "
-                       , if null path' then p0 else p1
-                       , path'
-                       , "\n"
-                       , msg
-                       ]
+        line  = "### " ++ msgType ++ if null path' then ":" else " in:" ++ path' ++ "\n" ++ msg
         path' = T.unpack. showPath . path $ ss
+
     showPath [] = T.empty
-    showPath nodes = T.concat ["++ ", T.intercalate ":" (map showNode (reverse (filter onlyLabels nodes)))]
-     where onlyLabels (Label _)   = True
-           onlyLabels _           = False
-           showNode (ListItem _n) = T.empty
-           showNode (Label label) = T.justifyLeft 15 ' ' (T.pack $ safe label (show label))
-           safe s ss = if ':' `elem` s || "\"" ++ s ++ "\"" /= ss then ss else s
+    showPath nodes = T.concat ["++ ", T.intercalate ":" (map showNode labelPath)]
+     where
+      labelPath              = reverse (filter onlyLabels nodes)
+      onlyLabels (Label _)   = True
+      onlyLabels _           = False
+      showNode (ListItem _n) = T.empty
+      showNode (Label label) = T.justifyLeft 9 ' ' (T.pack . safe $ label)
+      safe s
+        | ':' `elem` s || head s == '"'
+        = show s
+        | otherwise
+        = s
 
 data TestArgs =
   TestArgs
@@ -137,19 +138,18 @@ mkYAMLTests opts =
                 ]
 
 doYAMLTest :: TestArgs -> ByteString -> IO Bool
-doYAMLTest opts testString =
-  when (showContent opts) (do
+doYAMLTest opts testString = do
+  when (showContent opts)
+   (do
     putStrLn "YAML Test Content:"
     putStrLn "~~~~"
     putStrLn (T.unpack . E.decodeUtf8 . S.concat . toChunks $ testString)
     putStrLn "~~~~")
-  >> (case yamlStringGuidance testString of
-        Left  err ->
-          when (showFail opts) (putStrLn (Y.prettyPrintParseException err))
-          >> return False
-        Right res ->
-          when (showResult opts) (print res)
-          >> return True)
+  let handleErr err = (when (showFail opts) . putStrLn . Y.prettyPrintParseException $ err)
+                      >> return False
+      handleRes res = (when (showResult opts) . print $ res)
+                      >> return True
+  either handleErr handleRes (yamlStringGuidance testString)
 
 badOrigin00 :: TestArgs -> IO Bool
 badOrigin00 opts = doYAMLTest opts [r|origin: not an origin|]

@@ -16,5 +16,5 @@ genericIOErrors :: String                       -- ^ An indication of where the 
                 -> IOError                      -- ^ The IO exception
                 -> IO (DVU.Vector Word8)        -- ^ Result is always 'invalidVector'
 genericIOErrors whence exc =
-  hPutStrLn stderr (whence ++ ": " ++ (show exc))
+  hPutStrLn stderr (whence ++ ": " ++ show exc)
   >> invalidVector

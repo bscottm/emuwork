@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 module Main (main) where
 
 import           Control.Monad
@@ -27,13 +26,11 @@ main =
         return $ newopts { files = rest }
     
     runIt :: DisasmCheckArgs -> IO ()
-    runIt opts =
-      yamlFileGuidance (head . files $ opts)
-      >>= (\case
-            Left err ->
-              putStrLn (Y.prettyPrintParseException err)
-            Right res ->
-              when (showParsed opts) (S.putStr $ Y.encode res))
+    runIt opts = do
+      yamlResult <- yamlFileGuidance (head . files $ opts)
+      let gotError      = putStrLn . Y.prettyPrintParseException
+          gotResult     = when (showParsed opts) . S.putStr . Y.encode
+      either gotError gotResult yamlResult
 
 showUsage :: IO ()
 showUsage = do

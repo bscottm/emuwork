@@ -46,13 +46,15 @@ intelHexReader :: FilePath
                -> T.Text
                -> IO (Vector Word8)
 intelHexReader path input =
-  case parse intelHexParser path input of
-    Left errMsg -> hPutStrLn stderr ("Error parsing Intel hex format: " ++ show errMsg)
-                   >> invalidVector
-    Right ihex  -> let ihex'                = (Seq.sort . trimEOF) ihex
-                       maxAddr              = getLastAddr ihex'
-                       tempVec              = DVU.create (M.new (fromIntegral maxAddr) >>= fillVector ihex')
-                   in  return tempVec
+  let badHexRead errMsg =
+        hPutStrLn stderr ("Error parsing Intel hex format: " ++ show errMsg)
+        >> invalidVector
+      mkImageVector ihex =
+        let ihex'                = (Seq.sort . trimEOF) ihex
+            maxAddr              = getLastAddr ihex'
+            tempVec              = DVU.create (M.new (fromIntegral maxAddr) >>= fillVector ihex')
+        in  return tempVec
+  in either badHexRead mkImageVector (parse intelHexParser path input)
 
 -- | Fill the mutable vector from the sequence of 'IHexLine' records
 

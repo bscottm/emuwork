@@ -9,26 +9,30 @@ module TRS80.Disasm
   , disasmUsage
   ) where
 
-import           Control.Arrow (first)
-import           Lens.Micro ((^.), (%~), (.~), (&))
-import           Control.Monad (unless)
-import           Control.Monad.Trans.State.Strict (state, runState)
+import           Control.Arrow                    (first)
+import           Control.Monad                    (unless)
+import           Control.Monad.Trans.State.Strict (runState, state)
+
 import           Data.Binary
 import           Data.Bits
-import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy             as B
 import           Data.Char
 import           Data.Digest.Pure.MD5
-import qualified Data.Foldable as Foldable
-import qualified Data.HashMap.Strict as H
+import qualified Data.Foldable                    as Foldable
+import qualified Data.HashMap.Strict              as H
+import           Data.List                        (intercalate)
 import           Data.Maybe
-import           Data.Sequence ((|>), (><))
-import qualified Data.Sequence as Seq
-import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
-import qualified Data.Vector as V
-import           Data.Vector.Unboxed (Vector, (!))
-import qualified Data.Vector.Unboxed as DVU
-import qualified Data.Yaml as Y
+import           Data.Sequence                    ((><), (|>))
+import qualified Data.Sequence                    as Seq
+import qualified Data.Text                        as T
+import qualified Data.Text.IO                     as TIO
+import qualified Data.Vector                      as V
+import           Data.Vector.Unboxed              (Vector, (!))
+import qualified Data.Vector.Unboxed              as DVU
+import qualified Data.Yaml                        as Y
+
+import           Lens.Micro                       ((%~), (&), (.~), (^.))
+
 import           System.Console.GetOpt
 import           System.Exit
 import           System.IO
@@ -47,39 +51,37 @@ import           Z80
 disasmCmd :: Z80system z80sys
           -> [String]
           -> IO ()
-disasmCmd sys opts =
-  do
+disasmCmd sys opts = do
     options <- getCommonOptions opts
-    case options of
-      (CommonOptions imgRdr image msize, _rest, unOpts) ->
-        do
-          disopts <- getDisasmOptions unOpts
-          case disopts of
-            (DisasmOptions gFile, []) ->
-              do
-                gresult <- Y.decodeFileEither gFile :: IO (Either Y.ParseException G.Guidance)
-                case gresult of
-                  Right guidance -> trs80disassemble sys imgRdr image msize guidance
-                  Left  err      -> mapM_ (hPutStrLn stderr)
-                                      [ gFile ++ ":"
-                                      , Y.prettyPrintParseException err
-                                      ]
-
-            (_, _) -> hPutStrLn stderr "Invalid disassembler options. Exiting."
-                      >> showUsage
-      (InvalidOptions, _, _) ->
-          disasmUsage
-          >> exitFailure
-
-      (_, rest, unOpts) ->
-        hPutStrLn stderr "Unrecognized options:"
-        >> mapM_ (\s -> hPutStrLn stderr ("  " ++ s)) unOpts
-        >> hPutStrLn stderr ("Extra arguments: " ++ show rest)
-        >> showUsage
+    processOptions options
   where
     showUsage = commonOptionUsage
                 >> disasmUsage
                 >> exitFailure
+    
+    processOptions commonOpts@(CommonOptions _imgRdr _image _msize, _rest, unOpts) = do
+      disopts <- getDisasmOptions unOpts
+      doDisassemble commonOpts disopts
+
+    processOptions (InvalidOptions, _, _) =
+          disasmUsage
+          >> exitFailure
+
+    processOptions (_, rest, unOpts) =
+        hPutStrLn stderr "Unrecognized options:"
+        >> mapM_ (\s -> hPutStrLn stderr ("  " ++ s)) unOpts
+        >> hPutStrLn stderr ("Extra arguments: " ++ show rest)
+        >> showUsage
+
+    doDisassemble (CommonOptions imgRdr image msize, _rest, _unOpts) (DisasmOptions gFile, []) = do
+      gresult <- G.yamlFileGuidance gFile
+      let gotError err = hPutStrLn stderr (intercalate "\n" [ gFile ++ ":", Y.prettyPrintParseException err ])
+          gotResult    = trs80disassemble sys imgRdr image msize
+      either gotError gotResult gresult
+
+    doDisassemble _ _ =
+      hPutStrLn stderr "Invalid disassembler options. Exiting."
+      >> showUsage
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -226,37 +228,42 @@ romSigs = H.fromList [ ( B.pack [ 0xca, 0x74, 0x82, 0x2e, 0xbc, 0x28, 0x03, 0xc6
 doDirective :: G.Directive
             -> Z80disassembly
             -> (Seq.Seq Z80DisasmElt, Z80disassembly)
-doDirective directive dstate =
-  case directive of
-    G.SymEquate label addr ->
-      let addr' = unPC $ getGuidanceAddr dstate addr
-      in  (Seq.singleton $ mkEquate label addr'
-          , dstate & disasmSymbolTable %~ H.insert addr' label
-          )
-    G.Comment comment ->
-      (Seq.singleton $ mkLineComment comment, dstate)
-    G.DoDisasm addrRange ->
-      let (sAddr, eAddr) = getGuidanceRange dstate addrRange
-      in  disassembler (dstate & disasmCurAddr .~ sAddr
-                               & disasmFinishAddr .~ eAddr)
-    G.GrabBytes addrRange ->
-      let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
-      in  first Seq.singleton $ z80disbytes nBytes (dstate & disasmCurAddr .~ sAddr)
-    G.GrabAsciiZ sAddr ->
-      z80disasciiz (dstate & disasmCurAddr .~ getGuidanceAddr dstate sAddr)
-    G.GrabAscii addrRange ->
-      let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
-      in  first Seq.singleton $ z80disascii nBytes (dstate & disasmCurAddr .~ sAddr)
-    G.HighBitTable addrRange ->
-      let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
-      in  highbitCharTable nBytes (dstate & disasmCurAddr .~ sAddr)
-    G.JumpTable addrRange ->
-      let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
-      in  jumpTable nBytes (dstate & disasmCurAddr .~ sAddr)
-    G.MD5Sum _ ->
-      (Seq.empty, dstate)
-    G.KnownSymbols _ ->
-      (Seq.empty, dstate)
+
+doDirective (G.SymEquate label addr) dstate =
+  let addr' = unPC $ getGuidanceAddr dstate addr
+  in  (Seq.singleton $ mkEquate label addr', dstate & disasmSymbolTable %~ H.insert addr' label)
+
+doDirective (G.Comment comment) dstate =
+  (Seq.singleton $ mkLineComment comment, dstate)
+
+doDirective (G.DoDisasm addrRange) dstate =
+  let (sAddr, eAddr) = getGuidanceRange dstate addrRange
+  in  disassembler (dstate & disasmCurAddr .~ sAddr & disasmFinishAddr .~ eAddr)
+
+doDirective (G.GrabBytes addrRange) dstate =
+  let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
+  in  first Seq.singleton $ z80disbytes nBytes (dstate & disasmCurAddr .~ sAddr)
+
+doDirective (G.GrabAsciiZ sAddr) dstate =
+  z80disasciiz (dstate & disasmCurAddr .~ getGuidanceAddr dstate sAddr)
+
+doDirective (G.GrabAscii addrRange) dstate =
+  let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
+  in  first Seq.singleton $ z80disascii nBytes (dstate & disasmCurAddr .~ sAddr)
+
+doDirective (G.HighBitTable addrRange) dstate =
+  let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
+  in  highbitCharTable nBytes (dstate & disasmCurAddr .~ sAddr)
+
+doDirective (G.JumpTable addrRange) dstate =
+  let (sAddr, nBytes) = getGuidanceRangeDisp dstate addrRange
+  in  jumpTable nBytes (dstate & disasmCurAddr .~ sAddr)
+
+doDirective (G.MD5Sum _) dstate =
+  (Seq.empty, dstate)
+
+doDirective (G.KnownSymbols _) dstate =
+  (Seq.empty, dstate)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | The TRS-80's BASIC has a table of keywords, where the first letter of the keyword has the
