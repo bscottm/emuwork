@@ -2,7 +2,6 @@
 -- | The main module, where all of the fun happens.
 module Main (main) where
 
-import           Control.Lens
 import           Control.Monad
 import           Data.Word
 import           System.Console.GetOpt

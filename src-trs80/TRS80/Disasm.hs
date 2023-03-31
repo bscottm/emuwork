@@ -5,8 +5,7 @@ TRS-80 Model I disassembler.
 -}
 
 module TRS80.Disasm
-  ( disasmCmd
-  , disasmUsage
+  ( trs80disassemble
   ) where
 
 import           Control.Arrow                    (first)
@@ -20,7 +19,6 @@ import           Data.Char
 import           Data.Digest.Pure.MD5
 import qualified Data.Foldable                    as Foldable
 import qualified Data.HashMap.Strict              as H
-import           Data.List                        (intercalate)
 import           Data.Maybe
 import           Data.Sequence                    ((><), (|>))
 import qualified Data.Sequence                    as Seq
@@ -29,91 +27,17 @@ import qualified Data.Text.IO                     as TIO
 import qualified Data.Vector                      as V
 import           Data.Vector.Unboxed              (Vector, (!))
 import qualified Data.Vector.Unboxed              as DVU
-import qualified Data.Yaml                        as Y
 
-import           Lens.Micro                       ((%~), (&), (.~), (^.))
+import           Lens.Micro.Platform              ((%~), (&), (.~), (^.))
 
-import           System.Console.GetOpt
-import           System.Exit
 import           System.IO
 
 import           Machine
-import           TRS80.CommonOptions
 import qualified TRS80.Disasm.Guidance as G
 import           TRS80.System
 import           Z80
 
 -- import           Debug.Trace
-
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
--- | Disassembler command main logic.
-disasmCmd :: Z80system z80sys
-          -> [String]
-          -> IO ()
-disasmCmd sys opts = do
-    options <- getCommonOptions opts
-    processOptions options
-  where
-    showUsage = commonOptionUsage
-                >> disasmUsage
-                >> exitFailure
-    
-    processOptions commonOpts@(CommonOptions _imgRdr _image _msize, _rest, unOpts) = do
-      disopts <- getDisasmOptions unOpts
-      doDisassemble commonOpts disopts
-
-    processOptions (InvalidOptions, _, _) =
-          disasmUsage
-          >> exitFailure
-
-    processOptions (_, rest, unOpts) =
-        hPutStrLn stderr "Unrecognized options:"
-        >> mapM_ (\s -> hPutStrLn stderr ("  " ++ s)) unOpts
-        >> hPutStrLn stderr ("Extra arguments: " ++ show rest)
-        >> showUsage
-
-    doDisassemble (CommonOptions imgRdr image msize, _rest, _unOpts) (DisasmOptions gFile, []) = do
-      gresult <- G.yamlFileGuidance gFile
-      let gotError err = hPutStrLn stderr (intercalate "\n" [ gFile ++ ":", Y.prettyPrintParseException err ])
-          gotResult    = trs80disassemble sys imgRdr image msize
-      either gotError gotResult gresult
-
-    doDisassemble _ _ =
-      hPutStrLn stderr "Invalid disassembler options. Exiting."
-      >> showUsage
-
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
-data DisasmOptions =
-    -- | Disassembler-specific options
-  DisasmOptions
-    { guidanceFile :: FilePath
-    }
-  | InvalidDisasm
-
-getDisasmOptions :: [String]
-                 -> IO (DisasmOptions, [String])
-getDisasmOptions opts =
-  case getOpt Permute disasmOptions opts of
-    (optsActions, rest, [])   -> return (Foldable.foldr id mkDisasmOptions optsActions, rest)
-    (_,           _,    errs) -> mapM_ (hPutStrLn stderr) errs
-                                 >> return (InvalidDisasm, [])
-
-mkDisasmOptions :: DisasmOptions
-mkDisasmOptions = DisasmOptions { guidanceFile = "" }
-
-disasmOptions :: [OptDescr (DisasmOptions -> DisasmOptions)]
-disasmOptions =
-  [ Option [] ["guidance"] (ReqArg setGuidanceFile "FILE") "Disassembler guidance file"
-  ]
-
-disasmUsage :: IO ()
-disasmUsage = hPutStrLn stderr (usageInfo "Disassembler options" disasmOptions)
-
-setGuidanceFile :: FilePath -> DisasmOptions -> DisasmOptions
-setGuidanceFile arg flags@DisasmOptions{} = flags { guidanceFile = arg }
-setGuidanceFile _   flags = flags
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -126,7 +50,7 @@ trs80disassemble :: Z80system z80sys
                  -> IO ()
 trs80disassemble sys imgReader imgName msize guidance =
   do
-    trs80 <- trs80System imgName imgReader (fromIntegral msize) sys
+    trs80 <- trs80System imgName imgReader msize sys
     let (img, _sys') = sysMReadN theOrigin (fromIntegral (theEndAddr - theOrigin) + 1) trs80
     unless (DVU.null img) $
       case G.getMatchingSection guidance (romMD5 img) of

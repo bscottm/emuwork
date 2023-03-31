@@ -6,7 +6,7 @@
 resolver: lts-20.11
 
 packages:
-  - '.'
+  - src-main
   - src-emubase/
   - src-trs80/
   - src-z80/

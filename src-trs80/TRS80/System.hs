@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleInstances    #-}
-
 {- |
 The venerable TRS-80 (aka "the Trash 80") system.
 -}
@@ -9,7 +7,7 @@ module TRS80.System
   , TRS80ModelISystem
   ) where
 
-import           Lens.Micro          ((&), (%~))
+import           Lens.Micro.Platform ((&), (%~))
 import           Data.Vector.Unboxed (Vector)
 
 import           Machine

@@ -49,18 +49,44 @@ import           Z80                            ( Z80addr
                                                 )
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- <sigh> orphan instance...
-instance e ~ T.Text => MonadFail (Either e) where
-  fail = Left . T.pack
+-- There isn't an |instance e ~ Text => MonadFail (Either e)| when Either uses T.Text for Left and
+-- we're using OverloadedStrings. Creating that instance results in an orphan.
+--
+-- Here's the newtype approach to coding around the orphan instance problem 
+--
+-- Note that there are a few places where unEitherText has to be invoked to get the Either object
+-- back for 
 
-parseZ80guidanceAddr :: Y.Value -> Either T.Text Z80guidanceAddr
+newtype EitherText a = EitherText { unEitherText :: Either T.Text a }
+
+instance Functor EitherText where
+  -- fmap :: (a -> b) -> EitherText a -> EitherText b
+  fmap f (EitherText e) = EitherText $ fmap f e
+
+instance Applicative EitherText where
+  -- pure :: a -> EitherText a
+  pure = EitherText . Right
+  -- (<*>) :: EitherText (a -> b) -> EitherText a -> EitherText b
+  (EitherText f) <*> (EitherText a) = EitherText $ f <*> a
+
+instance Monad EitherText where
+  -- (>>=) :: EitherText a -> (a -> EitherText b) -> EitherText b
+  (EitherText a) >>= f = EitherText $ a >>= (unEitherText . f)
+
+instance MonadFail EitherText where
+  -- fail :: String -> EitherText a
+  fail = EitherText . Left . T.pack
+
+-- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+
+parseZ80guidanceAddr :: Y.Value -> EitherText Z80guidanceAddr
 parseZ80guidanceAddr (Y.String strval) | strval == "$" = pure FromCurPC
                                        | otherwise     = GuidanceAddr <$> convertZ80addr strval
 parseZ80guidanceAddr (Y.Number numval) =
   maybe (fail "address exceeds 16-bit unsigned integer range") (pure <$> GuidanceAddr) (S.toBoundedInteger numval)
 parseZ80guidanceAddr invalid = fail $ "Invalid Z80 address: " ++ show invalid
 
-parseAddrRange :: Y.Object -> Either T.Text Z80guidanceAddrRange
+parseAddrRange :: Y.Object -> EitherText Z80guidanceAddrRange
 parseAddrRange attrs = maybe (fail "Missing 'addr' attribute")
                              parseRange
                              (AKM.lookup "addr" attrs)
@@ -75,48 +101,49 @@ parseAddrRange attrs = maybe (fail "Missing 'addr' attribute")
     | otherwise
     = fail "Incomplete address range: Missing 'end' or 'nbytes'/'nBytes' attributes."
 
-parseZ80Disp :: Y.Value -> Either T.Text Z80guidanceDisp
+parseZ80Disp :: Y.Value -> EitherText Z80guidanceDisp
 parseZ80Disp (Y.String strval) = Z80guidanceDisp <$> convertZ80disp strval
 parseZ80Disp (Y.Number numval) =
   maybe (fail "displacement exceeds 16-bit signed integer range") (pure <$> Z80guidanceDisp) (S.toBoundedInteger numval)
 parseZ80Disp invalid = fail $ "Invalid Z80 displacement: " ++ show invalid
 
-repackResult :: Either T.Text a -> Parser a
-repackResult = either (fail <$> T.unpack) pure
+repackResult :: EitherText a -> Parser a
+repackResult = either (fail <$> T.unpack) pure . unEitherText
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 -- | Convert a text string to a Z80 address. The converted value's range is checked to ensure it is
 -- a proper 16-bit quantity.
-convertZ80addr :: T.Text -> Either T.Text Z80addr
+convertZ80addr :: T.Text -> EitherText Z80addr
 convertZ80addr str = convertWord16 str >>= checkRange minZ80addr maxZ80addr
 
 -- | Convert a text string to a Z80 displacement. The converted value's range is checked to ensure it is
 -- a proper 16-bit quantity.
-convertZ80disp :: T.Text -> Either T.Text Z80disp
+convertZ80disp :: T.Text -> EitherText Z80disp
 convertZ80disp str = convertWord16 str >>= checkRange minZ80disp maxZ80disp
 
 -- | Ensure that a converted value is properly bounded (see 'convertZ80addr' and 'convertZ80disp'.)
-checkRange :: (Integral a) => Int -> Int -> Int -> Either T.Text a
+checkRange :: (Integral a) => Int -> Int -> Int -> EitherText a
 checkRange lower upper val
   | val >= lower && val <= upper
-  = Right (fromIntegral val)
+  = pure . fromIntegral $ val
   | otherwise
-  = Left $ T.concat ["Value range exceeded ("
-             , T.pack . show $ lower
-             , " <= x <= "
-             , T.pack . show $ upper
-             , "): "
-             , T.pack . show $ val
-             ]
+  -- You'd like to use fail here, but fail :: String -> ...
+  = EitherText . Left . T.pack . concat $ ["Value range exceeded ("
+                                          , show lower
+                                          , " <= x <= "
+                                          , show upper
+                                          , "): "
+                                          , show val
+                                          ]
 
-convertWord16 :: T.Text -> Either T.Text Int
+convertWord16 :: T.Text -> EitherText Int
 convertWord16 t | T.isPrefixOf "0x" t = convertHex (T.drop 2 t)
                 | T.isPrefixOf "0o" t = convertOctal (T.drop 2 t)
                 | T.isPrefixOf "0" t  = convertOctal (T.tail t)
                 | otherwise           = convertNum 10 C.isDigit "Invalid decimal constant" t
 
-convertHex, convertOctal :: T.Text -> Either T.Text Int
+convertHex, convertOctal :: T.Text -> EitherText Int
 convertHex = convertNum 16 C.isHexDigit "Invalid hexadecimal constant"
 convertOctal = convertNum 8 C.isOctDigit "Invalid octal constant"
 
@@ -132,10 +159,12 @@ minZ80disp = fromIntegral (minBound :: Z80disp)
 maxZ80disp :: Int
 maxZ80disp = fromIntegral (maxBound :: Z80disp)
 
-convertNum :: Int -> (Char -> Bool) -> T.Text -> T.Text -> Either T.Text Int
-convertNum base digitValid errMsg str = if T.all digitValid str
-  then Right $ str2Num str
-  else Left $ T.concat [errMsg, ": '", str, T.singleton '\'']
+convertNum :: Int -> (Char -> Bool) -> T.Text -> T.Text -> EitherText Int
+convertNum base digitValid errMsg str
+  | T.all digitValid str
+  = pure . str2Num $ str
+  | otherwise
+  = EitherText . Left . T.concat $ [errMsg, ": '", str, T.singleton '\'']
  where
   str2Num = fst . T.mapAccumR digit2num 0 . T.reverse {-str-}
    where
@@ -217,13 +246,14 @@ newtype Z80guidanceMD5Sig =
 
 instance FromJSON Z80guidanceMD5Sig where
   parseJSON (Y.String s) = if all (\x -> T.compareLength x 2 == EQ) strChunks && length bytes == 16 && null errs
-    then pure . Z80guidanceMD5Sig . B.pack . rights $ bytes
+    then pure . Z80guidanceMD5Sig . B.pack . rights . unBytes $ bytes
     else fail . T.unpack . T.unlines $ errs
    where
     strChunks = T.chunksOf 2 s
     bytes     = map convertBytes strChunks
     convertBytes x = fromIntegral <$> convertHex x
-    errs = lefts bytes
+    errs = lefts . unBytes $ bytes
+    unBytes = map unEitherText
   parseJSON _ = fail "md5 signature expects a 16 byte hex string, no '0x'."
 
 instance ToJSON Z80guidanceMD5Sig where

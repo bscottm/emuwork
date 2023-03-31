@@ -33,6 +33,7 @@ main =
     >>= runYAMLTests
   where
     -- We get a triple, not three separate arguments:
+    combineArgs :: ([TestArgs -> IO TestArgs], [String], [String]) -> IO TestArgs
     combineArgs (optsActions, rest, errs) =
           unless (null errs) (hPutStrLn stderr (intercalate "\n" errs) >> showUsage >> exitFailure)
           >> unless (null rest) showUsage

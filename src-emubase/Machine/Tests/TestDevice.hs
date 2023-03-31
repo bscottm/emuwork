@@ -12,7 +12,7 @@ module Machine.Tests.TestDevice
 import           Control.Arrow               (second)
 import           Lens.Micro.Platform         (Lens', set, (^.), (%~), (&))
 import           Data.Char                   (ord)
-import           Data.List                   (cycle)
+-- import           Data.List                   (cycle)
 import qualified Data.Vector.Unboxed         as DVU
 import           Data.Word
 import           Data.Semigroup()
