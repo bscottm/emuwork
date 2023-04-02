@@ -1,18 +1,26 @@
 module Z80.Tests.Execute.LoadStore where
 
-import Control.Monad (when)
+import           Control.Monad              (when, unless)
+
 import           Data.Bits
-import           Data.Text as T
+import           Data.Text                  as T
+import qualified Data.Text.IO               as TIO
+
 import           Lens.Micro.Platform
-import           System.Random           (StdGen, getStdGen, randomR, setStdGen)
-import           Test.HUnit              (Assertion, assertBool)
-import           Text.Printf
 
 import           Machine
-import           Z80
 
+import           System.Random              (StdGen, getStdGen, randomR, setStdGen)
+
+import           Test.HUnit                 (Assertion, assertBool)
+
+import           Text.Printf
+
+import           Z80
 import           Z80.Tests.Execute.TestData
 import           Z80.Tests.Execute.Utils
+import Control.Monad.Trans.Writer (WriterT(..))
+import System.IO (stderr)
 
 -- | Test the 8-bit-to-8-bit loads (LD A, B; LD B, (HL); LD H, (IX+3) ...)
 test_ldReg8Reg8
@@ -26,9 +34,11 @@ test_ldReg8Reg8 opts =
     assertBool "Reg8 HL/IX/IY indirects failed." (and reg8Indirect)
   where
     testReg8Load (dstReg, dstSetter, _dstGetter, _dstVal, dstText) (srcReg, srcSetter, _srcGetter, srcVal, srcText) =
-      compareRegs z80expected z80' (T.pack (printf "LD %s, %s (0x%02x)" dstText srcText srcVal))
+      compareRegs z80expected z80' (T.concat [ prettyInsn, " // ", T.pack . show $ insn ])
       where
-        z80'        = z80instructionExecute (DecodedInsn 0x1003 (LD (Reg8Reg8 dstReg srcReg))) z80test
+        prettyInsn  = T.pack $ printf "LD %s, %s (0x%02x)" dstText srcText srcVal
+        insn        = LDr8r8 (Reg8Reg8 dstReg srcReg)
+        z80'        = z80instructionExecute (DecodedInsn 0x1003 insn) z80test
         z80test     = z80initialCPU & processor . cpu . regs . srcSetter .~ srcVal
         z80expected = z80test       & processor . cpu . regs . dstSetter .~ srcVal
 
@@ -63,12 +73,12 @@ test_ldReg8Reg8 opts =
                              | src <- reg8TestData]
         return (hlLoads ++ hlStores ++ ixLoads ++ ixStores ++ iyLoads ++ iyStores)
 
-    hlIndirectLoad  reg _idxOffset = LD (Reg8Reg8 reg HLindirect)
-    hlIndirectStore reg _idxOffset = LD (Reg8Reg8 HLindirect reg)
-    ixIndirectLoad  reg  idxOffset = LD (Reg8Reg8 reg (IXindirect idxOffset))
-    ixIndirectStore reg  idxOffset = LD (Reg8Reg8 (IXindirect idxOffset) reg)
-    iyIndirectLoad  reg  idxOffset = LD (Reg8Reg8 reg (IYindirect idxOffset))
-    iyIndirectStore reg  idxOffset = LD (Reg8Reg8 (IYindirect idxOffset) reg)
+    hlIndirectLoad  reg _idxOffset = LDr8r8 (Reg8Reg8 reg HLindirect)
+    hlIndirectStore reg _idxOffset = LDr8r8 (Reg8Reg8 HLindirect reg)
+    ixIndirectLoad  reg  idxOffset = LDr8r8 (Reg8Reg8 reg (IXindirect idxOffset))
+    ixIndirectStore reg  idxOffset = LDr8r8 (Reg8Reg8 (IXindirect idxOffset) reg)
+    iyIndirectLoad  reg  idxOffset = LDr8r8 (Reg8Reg8 reg (IYindirect idxOffset))
+    iyIndirectStore reg  idxOffset = LDr8r8 (Reg8Reg8 (IYindirect idxOffset) reg)
 
     testIndirectLoads (dstReg, dstSetter, _dstGetter, _dstVal, dstText) loadFunc memAddr idxOffset bannerStr =
       compareRegs z80expected z80' (T.pack (printf bannerStr dstText))
@@ -95,7 +105,7 @@ test_ldReg8Imm opts =
     testReg8Imm (srcReg, srcSetter, _srcGetter, srcVal, srcText) =
       compareRegs z80expected z80' (T.pack (printf "LD %s, 0x%02x" srcText srcVal))
       where
-        z80'        = z80instructionExecute (DecodedInsn 0x1003 (LD (Reg8Imm srcReg srcVal))) z80indirectSys
+        z80'        = z80instructionExecute (DecodedInsn 0x1003 (LDr8imm (Reg8Imm srcReg srcVal))) z80indirectSys
         z80expected = z80indirectSys & processor . cpu . regs . srcSetter .~ srcVal
 
 test_ldOtherIndirect
@@ -125,19 +135,19 @@ test_ldOtherIndirect opts =
                         & z80creg  .~ fromIntegral (bcIndAddr .&. 0xff)
                         & z80dreg  .~ fromIntegral ((deIndAddr `shiftR` 8) .&. 0xff)
                         & z80ereg  .~ fromIntegral (deIndAddr .&. 0xff))
-    bcload = z80instructionExecute (DecodedInsn 0x1005 (LD AccBCIndirect)) z80testSys
+    bcload = z80instructionExecute (DecodedInsn 0x1005 (LDAmem FromBCindirect)) z80testSys
     bcLoadVal = fst $ sysMRead bcIndAddr z80testSys
     bcloadExpected = z80testSys & processor . cpu . regs . z80accum .~ bcLoadVal
-    deload = z80instructionExecute (DecodedInsn 0x1008 (LD AccDEIndirect)) z80testSys
+    deload = z80instructionExecute (DecodedInsn 0x1008 (LDAmem FromDEindirect)) z80testSys
     deLoadVal = fst $ sysMRead deIndAddr z80testSys
     deloadExpected = z80testSys & processor . cpu . regs . z80accum .~ deLoadVal
-    immload = z80instructionExecute (DecodedInsn 0x100a (LD (AccImm16Indirect (AbsAddr immIndAddr)))) z80testSys
+    immload = z80instructionExecute (DecodedInsn 0x100a (LDAmem (AccFromMem (AbsAddr immIndAddr)))) z80testSys
     immLoadVal = fst $ sysMRead immIndAddr z80testSys
     immloadExpected = z80testSys & processor . cpu . regs . z80accum .~ immLoadVal
 
-    bcstore = z80instructionExecute (DecodedInsn 0x100c (LD BCIndirectStore)) z80testSys
-    destore = z80instructionExecute (DecodedInsn 0x100d (LD DEIndirectStore)) z80testSys
-    immstore = z80instructionExecute (DecodedInsn 0x100e (LD (Imm16IndirectStore (AbsAddr immIndAddr)))) z80testSys
+    bcstore = z80instructionExecute (DecodedInsn 0x100c (LDAmem ToBCindirect)) z80testSys
+    destore = z80instructionExecute (DecodedInsn 0x100d (LDAmem ToDEindirect)) z80testSys
+    immstore = z80instructionExecute (DecodedInsn 0x100e (LDAmem (AccToMem (AbsAddr immIndAddr)))) z80testSys
 
 test_ldSpecials
   :: TestParams
@@ -146,13 +156,13 @@ test_ldSpecials opts =
   assertBool "LD A, (I|R)/LD (I|R), A failed" (resultAI && resultIA && resultAR && resultRA)
   where
     z80testSys = z80randMem opts
-    iload = z80instructionExecute (DecodedInsn 0x1000 (LD AccIReg)) z80testSys
+    iload = z80instructionExecute (DecodedInsn 0x1000 (LDAspecial FromItoA)) z80testSys
     resultAI = z80registers iload ^. z80accum == z80registers z80testSys ^. z80ipage
-    istore = z80instructionExecute (DecodedInsn 0x1001 (LD IRegAcc)) z80testSys
+    istore = z80instructionExecute (DecodedInsn 0x1001 (LDAspecial FromAtoI)) z80testSys
     resultIA = z80registers istore ^. z80ipage == z80registers z80testSys ^. z80accum
-    rload = z80instructionExecute (DecodedInsn 0x1002 (LD AccRReg)) z80testSys
+    rload = z80instructionExecute (DecodedInsn 0x1002 (LDAspecial FromRtoA)) z80testSys
     resultAR = z80registers rload ^. z80accum == z80registers z80testSys ^. z80rreg
-    rstore = z80instructionExecute (DecodedInsn 0x1003 (LD RRegAcc)) z80testSys
+    rstore = z80instructionExecute (DecodedInsn 0x1003 (LDAspecial FromAtoR)) z80testSys
     resultRA = z80registers rstore ^. z80rreg == z80registers z80testSys ^. z80accum
 
 
@@ -161,69 +171,57 @@ test_ldReg16Imm
   -> Assertion
 test_ldReg16Imm _opts =
   do
-    results <- sequence [test_reg16imm reg | reg <- reg16TestData]
-    spResult <- compareRegs spImmExpected spImmGot (T.pack (printf "LD SP, 0x3c4b"))
-    assertBool "16-bit immediate loads" (and results && spResult)
+    results <- sequence [test_reg16imm tdata | tdata <- reg16TestData]
+    assertBool "16-bit immediate loads" (and results)
   where
-    test_reg16imm (rpair, reg, _getLens, val, name) =
+    test_reg16imm (rpair, _getter, setter, val, name) =
       compareRegs regExpected regGot (T.pack (printf "LD %s, 0x%04x" name val))
       where
-        regGot = z80instructionExecute (DecodedInsn 0x1101 (LD (RPair16ImmLoad rpair (AbsAddr val)))) z80initialCPU
-        regExpected = reg16set val reg z80initialCPU
-    spImmGot = z80instructionExecute (DecodedInsn 0x1104 (LD (RPair16ImmLoad SP (AbsAddr 0x3c4b)))) z80initialCPU
-    spImmExpected = z80initialCPU & processor . cpu . regs . z80sp .~ 0x3c4b
+        regGot = z80instructionExecute (DecodedInsn 0x1101 (LDr16imm (Reg16Imm rpair (AbsAddr val)))) z80initialCPU
+        regExpected = setter val z80initialCPU
 
-test_ldReg16IndLoad
+
+test_ldReg16MemLoad
   :: TestParams
   -> Assertion
-test_ldReg16IndLoad opts =
+test_ldReg16MemLoad opts =
   do
     stdGen <- getStdGen
     let (offset, stdGen') = randomR (0, 1023) stdGen :: (Z80addr, StdGen)
         indirectAddr      = 0x7200 + offset
     setStdGen stdGen'
-    results <- sequence [test_reg16indLoad reg indirectAddr | reg <- reg16TestData]
-    let spExpected = expectedVal indirectAddr
-        spGot      = spGotVal indirectAddr
-        spResult   = spExpected == spGot
-    when (spExpected /= spGot) $
-      printf "LD SP, (0x%04x): Expected 0x%04x, got 0x%04x\n" indirectAddr spExpected spGot
-    assertBool "16-bit indirect loads" (and results)
-    assertBool "SP indirect load" spResult
+    results <- sequence [doLoad tdata indirectAddr | tdata <- reg16TestData]
+    assertBool "16-bit memory loads" (and results)
   where
     z80testSys = z80randMem opts
-    test_reg16indLoad (rpair, _reg, getLens, _val, name) indirectAddr =
+    doLoad (rpair, getter, _setter, _val, name) indirectAddr =
       do
-        when (expectedVal indirectAddr /= gotVal) $
-          printf "LD %s, (0x%04x): Expected 0x%04x, got 0x%04x\n" name indirectAddr (expectedVal indirectAddr) gotVal
-        return (expectedVal indirectAddr == gotVal)
+        when (expectedVal /= gotVal) $
+          printf "LD %s, (0x%04x): Expected 0x%04x, got 0x%04x\n" name indirectAddr expectedVal gotVal
+        return (expectedVal == gotVal)
       where
-        indLoad = z80instructionExecute (DecodedInsn 0x10f0 (LD (RPIndirectLoad rpair (AbsAddr indirectAddr)))) z80testSys
-        gotVal = getLens indLoad
-    expectedVal indirectAddr = make16bit . fst $ sysMReadN indirectAddr 2 z80testSys
-    spIndLoad indirectAddr = z80instructionExecute (DecodedInsn 0x10f3 (LD (RPIndirectLoad SP (AbsAddr indirectAddr)))) z80testSys
-    spGotVal indirectAddr = spIndLoad indirectAddr ^. processor . cpu . regs . z80sp
+        testInsn = DecodedInsn 0x10f0 (LDr16mem (ToReg16 rpair (AbsAddr indirectAddr)))
+        indLoad = z80instructionExecute testInsn z80testSys
+        gotVal = getter indLoad
+        expectedVal = make16bit . fst $ sysMReadN indirectAddr 2 z80testSys
+ 
 
-
-test_ldReg16IndStore
+test_ldReg16MemStore
   :: TestParams
   -> Assertion
-test_ldReg16IndStore opts =
-  do
-    stdGen <- getStdGen
-    let (offset, stdGen') = randomR (0, 1023) stdGen :: (Z80addr, StdGen)
-        indirectAddr = 0x7200 + offset
-    setStdGen stdGen'
-    results <- sequence [test_reg16indStore reg indirectAddr | reg <- reg16TestData]
-    spResult <- compareMem16 indirectAddr (expectedVal indirectAddr) (spIndStore indirectAddr)
-                             (T.pack (printf "LD (0x%04x), SP" indirectAddr))
-    assertBool "16-bit indirect stores" (and results)
-    assertBool "SP indirect store" spResult
+test_ldReg16MemStore opts = do
+  stdGen <- getStdGen
+  let (offset, stdGen') = randomR (0, 1023) stdGen :: (Z80addr, StdGen)
+      memAddr = 0x7200 + offset
+  setStdGen stdGen'
+  (results, logs) <- runWriterT $ sequence [doStore tdata memAddr | tdata <- reg16TestData]
+  let result = and results
+  unless result $ TIO.hPutStrLn stderr (T.intercalate "\n" logs)
+  assertBool "16-bit memory stores" result
   where
-    z80testSys = z80randMem opts
-    test_reg16indStore (rpair, _reg, _getLens, _val, name) indirectAddr =
-      compareMem16 indirectAddr (expectedVal indirectAddr) indStore (T.pack (printf "LD (0x%04x), %s" indirectAddr name))
+    doStore (rpair, _getter, setter, val, name) testAddr = do
+      compareMem16 testAddr val memSys (T.pack (printf "LD (0x%04x), %s" testAddr name))
       where
-        indStore = z80instructionExecute (DecodedInsn 0x10f2 (LD (RPIndirectStore rpair (AbsAddr indirectAddr)))) z80testSys
-    expectedVal indirectAddr = make16bit . fst $ sysMReadN indirectAddr 2 z80testSys
-    spIndStore indirectAddr = z80instructionExecute (DecodedInsn 0x10f5 (LD (RPIndirectStore SP (AbsAddr indirectAddr)))) z80testSys
+        testInsn   = DecodedInsn 0x10f2 (LDr16mem (FromReg16 rpair (AbsAddr testAddr)))
+        memSys     = z80instructionExecute testInsn z80testSys
+        z80testSys = setter val $ z80randMem opts

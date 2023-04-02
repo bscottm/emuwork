@@ -115,7 +115,7 @@ mkYAMLTests :: TestArgs -> IO Test
 mkYAMLTests opts =
   return $ test [ "origin"   ~: test [ "bad origin (1)"    ~: badOrigin00 opts       @!? "bad origin (1) succeeded."
                                      , "bad origin (2)"    ~: badOrigin01 opts       @!? "bad origin (2) succeeded."
-                                     , "bad oriign (3)"    ~: badOrigin02 opts       @!? "bad origin (3) succeeded."
+                                     , "bad origin (3)"    ~: badOrigin02 opts       @!? "bad origin (3) succeeded."
                                      , "origin+end"        ~: goodGuidance opts      @?  "origin+end failed."
                                      , "one section"       ~: oneSection opts        @?  "one section failed."
                                      ]

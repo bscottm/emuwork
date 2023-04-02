@@ -104,11 +104,11 @@ disassembler = disassembler' (Seq.empty ><)
         doPostProc (dstate', disElt)    = (dstate' ^. disasmPostProc) disElt dstate'
         mkDisElt curPC (insn', dstate') = ( dstate' & disasmSystem .~ sys'
                                                     & disasmCurAddr .~ newPC
-                                          , mkDisasmInsn (unPC curPC) insMem (insn' ^. decodedInsn) T.empty
+                                          , mkDisasmInsn (thePC curPC) insMem (insn' ^. decodedInsn) T.empty
                                           )
           where
             newPC = insn'  ^. decodedInsnPC
-            (insMem, sys') = sysMReadN (unPC curPC) (fromIntegral (newPC - curPC)) (dstate' ^. disasmSystem)
+            (insMem, sys') = sysMReadN (thePC curPC) (fromIntegral (newPC - curPC)) (dstate' ^. disasmSystem)
 
 -- | 'DisElement' is a dissassembly element: a disassembled instruction (with corresponding address and instruction
 -- words) or pseudo operation.
@@ -283,10 +283,10 @@ disasmLabelNum f ds = (\num -> ds { _disasmLabelNum = num }) <$> f (_disasmLabel
 disasmCurAddr :: Lens' (DisasmState cpuType insnType addrType wordType extPseudoType) (ProgramCounter addrType)
 disasmCurAddr f ds = (\addr -> ds { _disasmCurAddr = addr }) <$> f (_disasmCurAddr ds)
 
--- | Alternate version that 'unPC'-s the program counter
+-- | Alternate version that 'thePC'-s the program counter
 disasmCurAddr' :: DisasmState cpuType insnType addrType wordType extPseudoType
                -> addrType
-disasmCurAddr' ds = ds ^. disasmCurAddr & unPC
+disasmCurAddr' ds = ds ^. disasmCurAddr & thePC
 
 disasmFinishAddr :: Lens' (DisasmState cpuType insnType addrType wordType extPseudoType) (ProgramCounter addrType)
 disasmFinishAddr f ds = (\addr -> ds { _disasmFinishAddr = addr }) <$> f (_disasmFinishAddr ds)
@@ -297,10 +297,10 @@ disasmOriginAddr f ds = (\addr -> ds { _disasmOriginAddr = addr }) <$> f (_disas
 disasmEndAddr :: Lens' (DisasmState cpuType insnType addrType wordType extPseudoType) (ProgramCounter addrType)
 disasmEndAddr f ds = (\addr -> ds { _disasmEndAddr = addr }) <$> f (_disasmEndAddr ds)
 --
--- | Alternate version that 'unPC'-s the program counter
+-- | Alternate version that 'thePC'-s the program counter
 disasmEndAddr' :: DisasmState cpuType insnType addrType wordType extPseudoType
                -> addrType
-disasmEndAddr' ds = ds ^. disasmEndAddr & unPC
+disasmEndAddr' ds = ds ^. disasmEndAddr & thePC
 
 disasmSymbolTable :: Lens' (DisasmState cpuType insnType addrType wordType extPseudoType) (HashMap addrType T.Text)
 disasmSymbolTable f ds = (\syms -> ds { _disasmSymbolTable = syms }) <$> f (_disasmSymbolTable ds)
@@ -381,7 +381,7 @@ disasmMRead :: ( Integral addrType
              -> (wordType, DisasmState cpuType insnType addrType wordType extPseudoType)
 disasmMRead dstate = (word, dstate & disasmSystem .~ sys' & disasmCurAddr +~ 1)
   where
-    (word, sys') = sysMRead (dstate ^. disasmCurAddr & unPC) (dstate ^. disasmSystem)
+    (word, sys') = sysMRead (dstate ^. disasmCurAddr & thePC) (dstate ^. disasmSystem)
 
 -- | Read a vector of words from a system's memory at the disassembler's current addresss, returning the vector and
 -- the updated disassembly state
@@ -398,7 +398,7 @@ disasmMReadN :: ( Integral addrType
              -> (Vector wordType, DisasmState cpuType insnType addrType wordType extPseudoType)
 disasmMReadN nWords dstate = (wvec, dstate & disasmSystem .~ sys'& disasmCurAddr +~ fromIntegral nWords)
   where
-    (wvec, sys') = sysMReadN (dstate ^. disasmCurAddr & unPC) nWords (dstate ^. disasmSystem)
+    (wvec, sys') = sysMReadN (dstate ^. disasmCurAddr & thePC) nWords (dstate ^. disasmSystem)
 
 #if !MIN_VERSION_microlens_platform(0,4,10)
 (+~) :: Num a => ASetter s t a a -> a -> s -> t

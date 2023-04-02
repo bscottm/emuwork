@@ -144,16 +144,16 @@ z80DefaultPostProcessor disElt@DisasmInsn{} dstate = (Seq.singleton disElt, labe
     hasAddress = case insn of
         -- Somewhat dubious:
         -- LD (RPair16ImmLoad _rp (AbsAddr addr))  -> doCollectSymtab "M"
-      LD (RPIndirectLoad _rp (AbsAddr addr)) -> Just ("M", addr)
-      LD (RPIndirectStore _rp (AbsAddr addr)) -> Just ("M", addr)
-      DJNZ (AbsAddr addr)       -> Just ("L", addr)
-      JR   (AbsAddr addr)       -> Just ("L", addr)
-      JRCC _cc (AbsAddr addr)   -> Just ("L", addr)
-      JP (AbsAddr addr)         -> Just ("L", addr)
-      JPCC _cc (AbsAddr addr)   -> Just ("L", addr)
-      CALL (AbsAddr addr)       -> Just ("SUB", addr)
-      CALLCC _cc (AbsAddr addr) -> Just ("SUB", addr)
-      _otherwise                -> Nothing
+      LDr16mem (ToReg16 _rp (AbsAddr addr))   -> Just ("M", addr)
+      LDr16mem (FromReg16 _rp (AbsAddr addr)) -> Just ("M", addr)
+      DJNZ (AbsAddr addr)                     -> Just ("L", addr)
+      JR   (AbsAddr addr)                     -> Just ("L", addr)
+      JRCC _cc (AbsAddr addr)                 -> Just ("L", addr)
+      JP (AbsAddr addr)                       -> Just ("L", addr)
+      JPCC _cc (AbsAddr addr)                 -> Just ("L", addr)
+      CALL (AbsAddr addr)                     -> Just ("SUB", addr)
+      CALLCC _cc (AbsAddr addr)               -> Just ("SUB", addr)
+      _otherwise                              -> Nothing
     mkLabel prefix = T.append prefix (T.pack $ show $ dstate' ^. disasmLabelNum)
   labelAddresses _disElt dstate' = dstate'
 -- Everything else...
@@ -163,4 +163,4 @@ z80DefaultPostProcessor disElt dstate' = defaultPostProcessor disElt dstate'
 z80AddrInDisasmRange :: Z80addr
                      -> Z80disassembly
                      -> Bool
-z80AddrInDisasmRange addr dstate = unPC (dstate ^. disasmOriginAddr) <= addr && addr <= unPC (dstate ^. disasmEndAddr)
+z80AddrInDisasmRange addr dstate = thePC (dstate ^. disasmOriginAddr) <= addr && addr <= thePC (dstate ^. disasmEndAddr)

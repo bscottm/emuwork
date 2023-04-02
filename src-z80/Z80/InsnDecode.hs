@@ -1,6 +1,4 @@
 {-# LANGUAGE GADTs                 #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeSynonymInstances  #-}
 {-# OPTIONS_HADDOCK ignore-exports #-}
 
 module Z80.InsnDecode
@@ -16,6 +14,7 @@ import           Lens.Micro.Platform
 import           Data.Bits
 import           Data.IntMap         (IntMap, (!))
 import qualified Data.IntMap         as IntMap
+import           Data.Maybe          (fromMaybe)
 import qualified Data.Vector.Unboxed as DVU
 
 -- import Debug.Trace
@@ -31,7 +30,7 @@ type Z80decodedInsn sysType = (DecodedInsn Z80instruction Z80addr, Z80system sys
 
 z80InsDecode :: ProcessorDecoder Z80state Z80instruction Z80addr Z80word
 z80InsDecode pc z80sys =
-  case sysMRead (unPC pc) z80sys of
+  case sysMRead (thePC pc) z80sys of
         (0xdd, z80sys')  -> indexedPrefix 0xdd z80ixTransform z80sys'
         (0xfd, z80sys')  -> indexedPrefix 0xfd z80iyTransform z80sys'
         (opc,  z80sys')  -> decode opc z80sys' pc z80nullTransform
@@ -52,10 +51,34 @@ z80InsDecode pc z80sys =
             _otherwise -> undefined
 
 -- | Break the instruction opcode into its z, y, p and q components
-opcComponents :: (Bits d, Num d)
-              => d
-              -> (d, d, d, d)
-opcComponents opc = (opc .&. 7, shiftR opc 3 .&. 7, shiftR opc 4 .&. 3, shiftR opc 3 .&. 1)
+--
+-- Opcode bits look like (courtesy of http://z80.info/decoding):
+--
+-- >  7  6  5  4  3  2  1  0
+-- > -----  -------  -------
+-- >   x       y        z
+-- >        ---- --
+-- >          p   q
+--
+-- x: Bits 6, 7
+-- y: Bits 3, 4, 5 (subdivided into p [bits 4, 5] and q [bit 3])
+-- z: Bits 0, 1, 2
+opcComponents :: Z80word
+              -> (Z80word, Z80word, Z80word, Z80word)
+opcComponents opc =
+  let z = opc .&. 7
+      y = shiftR opc 3 .&. 7
+      p = y `shiftR` 1
+      q = y .&. 1
+  in (z, y, p, q)
+
+-- | Wrap a result from one of the instruction decode functions
+wrapDecode :: Z80instruction
+             -> ProgramCounter Z80addr
+             -> EmulatedSystem Z80state Z80instruction Z80addr Z80word
+             -> Z80decodedInsn sysType
+wrapDecode ins pc sys = (DecodedInsn (1+ pc) ins, sys)
+{-# INLINEABLE wrapDecode #-}
 
 -- | Instruction group 0 decoder:
 group0decode :: Z80word
@@ -68,78 +91,60 @@ group0decode :: Z80word
              -- ^ Index register transform function
              -> Z80decodedInsn sysType
              -- ^ (Instruction, New disassembly state)
+group0decode opc sys pc xForm =
+  case opcComponents opc of
+    (0, 0, _, _) -> oneByteInsn NOP sys pc
+    (0, 1, _, _) -> oneByteInsn (EXC AFAF') sys pc
+    (0, 2, _, _) -> displacementInstruction sys pc DJNZ
+    (0, 3, _, _) -> displacementInstruction sys pc JR
+    (0, y, _, _) -> displacementInstruction sys pc (JRCC $ condCode (y - 4))
+    (1, _, p, 0) -> mkAbsAddrIns sys pc $ LDr16imm . Reg16Imm (pairSP reg16XFormF p)
+    (1, _, p, 1) -> oneByteInsn (ADD16 (alu16XFormF DestHL) (pairSP reg16XFormF p)) sys pc
+    (2, _, 0, 0) -> oneByteInsn (LDAmem ToBCindirect) sys pc
+    (2, _, 1, 0) -> oneByteInsn (LDAmem ToDEindirect) sys pc
+    (2, _, 2, 0) -> mkAbsAddrIns sys pc $ LDr16mem . indirectStoreXFormF . FromReg16 (RPair16 HL)
+    (2, _, 3, 0) -> mkAbsAddrIns sys pc $ LDAmem . AccToMem
+    (2, _, 0, 1) -> oneByteInsn (LDAmem FromBCindirect) sys pc
+    (2, _, 1, 1) -> oneByteInsn (LDAmem FromDEindirect) sys pc
+    (2, _, 2, 1) -> mkAbsAddrIns sys pc $ LDr16mem . indirectLoadXFormF . ToReg16 (RPair16 HL)
+    (2, _, 3, 1) -> mkAbsAddrIns sys pc $ LDAmem . AccFromMem
+    (3, _, p, 0) -> oneByteInsn (INC16 (pairSP reg16XFormF p)) sys pc
+    (3, _, p, 1) -> oneByteInsn (DEC16 (pairSP reg16XFormF p)) sys pc
+    (4, y, _, _) -> reg8DecodedInsnIXYhl reg8XFormF sys pc y INC
+    (5, y, _, _) -> reg8DecodedInsnIXYhl reg8XFormF sys pc y DEC
+    (6, y, _, _) ->
+      let (newpc, theReg, sys')     = reg8IXYhl reg8XFormF sys pc y
+          (newpc', (immval, sys'')) = sysIncPCAndRead newpc sys'
+      in  (DecodedInsn (1+ newpc') (LDr8imm (Reg8Imm theReg immval)), sys'')
+    (7, y, _, _) -> wrapDecode (accumOps ! fromIntegral y) pc sys
+    _otherwise    -> wrapDecode (Z80undef [opc]) pc sys
+    where
+      reg8XFormF           = reg8XForm xForm
+      reg16XFormF          = reg16XForm xForm
+      alu16XFormF          = alu16XForm xForm
+      indirectStoreXFormF  = indirectStoreXForm xForm
+      indirectLoadXFormF   = indirectLoadXForm xForm
 
-group0decode opc sys pc xForm
-  | z == 0
-  = case y of
-      0          -> oneByteInsn sys pc NOP
-      1          -> oneByteInsn sys pc (EXC AFAF')
-      2          -> displacementInstruction sys pc DJNZ
-      3          -> displacementInstruction sys pc JR
-      _otherwise -> displacementInstruction sys pc (JRCC $ condCode (y - 4))
-  | z == 1, q == 0
-  = mkAbsAddrIns sys pc $ LD . RPair16ImmLoad (pairSP reg16XFormF p)
-  | z == 1, q == 1
-  = oneByteInsn sys pc (ADD16 (alu16XFormF DestHL) (pairSP reg16XFormF p))
-  | z == 2, q == 0
-  = case p of
-      0          -> oneByteInsn sys pc $ LD BCIndirectStore
-      1          -> oneByteInsn sys pc $ LD DEIndirectStore
-      2          -> mkAbsAddrIns sys pc $ LD . indirectStoreXFormF . RPIndirectStore (RPair16 HL)
-      3          -> mkAbsAddrIns sys pc $ LD . Imm16IndirectStore
-      _otherwise -> undefined
-  | z == 2, q == 1
-  = case p of
-      0          -> oneByteInsn sys pc $ LD AccBCIndirect
-      1          -> oneByteInsn sys pc $ LD AccDEIndirect
-      2          -> mkAbsAddrIns sys pc $ LD . indirectLoadXFormF . RPIndirectLoad (RPair16 HL)
-      3          -> mkAbsAddrIns sys pc $ LD . AccImm16Indirect
-      _otherwise -> undefined
-  | z == 3
-  = case q of
-      0          -> oneByteInsn sys pc $ INC16 (pairSP reg16XFormF p)
-      1          -> oneByteInsn sys pc $ DEC16 (pairSP reg16XFormF p)
-      _otherwise -> undefined
-  | z == 4
-  = reg8DecodedInsn reg8XFormF sys pc y INC
-  | z == 5
-  = reg8DecodedInsn reg8XFormF sys pc y DEC
-  | z == 6
-  = let (newpc, theReg, sys')     = reg8 reg8XFormF sys pc y
-        (newpc', (immval, sys'')) = sysIncPCAndRead newpc sys'
-    in  (DecodedInsn (1+ newpc') (LD (Reg8Imm theReg immval)), sys'')
-  | z == 7
-  = defResult (accumOps ! fromIntegral y)
-  | otherwise
-  = defResult (Z80undef [opc])
-  where
-    (z, y, p, q)  = opcComponents opc
-    reg8XFormF    = reg8XForm xForm
-    reg16XFormF   = reg16XForm xForm
-    alu16XFormF   = alu16XForm xForm
-    indirectStoreXFormF = indirectStoreXForm xForm
-    indirectLoadXFormF = indirectLoadXForm xForm
-    defResult ins = (DecodedInsn (1+ pc) ins, sys)
-
-oneByteInsn :: Z80system sysType
+oneByteInsn :: Z80instruction
+            -> Z80system sysType
             -> Z80PC
-            -> Z80instruction
             -> Z80decodedInsn sysType
-oneByteInsn sys pc insn = (DecodedInsn (1+ pc) insn, sys)
+oneByteInsn insn sys pc = (DecodedInsn (1+ pc) insn, sys)
 {-# INLINEABLE oneByteInsn #-}
 
 
 -- | Accumulator operations map
 accumOps :: IntMap Z80instruction
-accumOps = IntMap.fromList [ (0, RLCA)
-                           , (1, RRCA)
-                           , (2, RLA)
-                           , (3, RRA)
-                           , (4, DAA)
-                           , (5, CPL)
-                           , (6, SCF)
-                           , (7, CCF)
-                           ]
+accumOps = IntMap.fromList
+  [ (0, RLCA)
+  , (1, RRCA)
+  , (2, RLA)
+  , (3, RRA)
+  , (4, DAA)
+  , (5, CPL)
+  , (6, SCF)
+  , (7, CCF)
+  ]
 
 -- | Instruction group 1: 8-bit loads and HALT
 group1decode :: Z80word
@@ -147,16 +152,22 @@ group1decode :: Z80word
              -> Z80PC
              -> Z80indexTransform sysType
              -> Z80decodedInsn sysType
-group1decode opc sys pc xform
-  | z == 6, y == 6
-  = (DecodedInsn (pc + 1) HALT, sys)
-  | otherwise
-  = let reg8XFormF              = reg8XForm xform
-        (newpc, dstReg, sys')   = reg8 reg8XFormF sys pc y
-        (newpc', srcReg, sys'') = reg8 reg8XFormF sys' newpc z
-    in  (DecodedInsn (newpc' + 1) (LD (Reg8Reg8 dstReg srcReg)), sys'')
-  where
-    (z, y, _p, _q) = opcComponents opc
+group1decode opc sys pc xform =
+  case opcComponents opc of
+    -- LD HL, HL -> HALT
+    (6, 6, _, _) -> (DecodedInsn (pc + 1) HALT, sys)
+    (z, y, _, _) ->
+      let reg8XFormF              = reg8XForm xform
+          srcReg' = reg8NumToReg ! fromIntegral z
+          dstReg' = reg8NumToReg ! fromIntegral y
+          xformF' =
+            if (srcReg' `elem` [H, L] && dstReg' == HLindirect)
+               || (dstReg' `elem` [H, L] && srcReg' == HLindirect)
+            then reg8
+            else reg8IXYhl     
+          (newpc, dstReg, sys')   = xformF' reg8XFormF sys pc y
+          (newpc', srcReg, sys'') = xformF' reg8XFormF sys' newpc z
+      in  (DecodedInsn (1+ newpc') (LDr8r8 (Reg8Reg8 dstReg srcReg)), sys'')
 
 -- | ALU instruction decode (group 2)
 group2decode :: Z80word
@@ -173,7 +184,7 @@ group2decode opc sys pc xForms =
       insCTor    = case opc `shiftR` 3 .&. 7 of
                      0          -> ADD8 . ALUAcc
                      1          -> ADC8 . ALUAcc
-                     2          -> SUB
+                     2          -> SUB8 . ALUAcc
                      3          -> SBC8 . ALUAcc
                      4          -> AND
                      5          -> XOR
@@ -192,68 +203,56 @@ group3decode :: Z80word
              -- ^ HL to IX or IY conversion functions
              -> Z80decodedInsn sysType
              -- ^ Decoded result
-group3decode opc sys pc xForm
-  | z == 0          = defResult (RETCC $ condCode y)
-  | z == 1          = case q of
-                        0 -> defResult ((POP . pairAF reg16XFormF) p)
-                        1 -> case p of
-                               0          -> defResult RET
-                               1          -> defResult (EXC Primes)
-                               2          -> defResult $ instructionXFormF JPHL
-                               3          -> defResult $ instructionXFormF LDSPHL
-                               _otherwise -> undefined
-                        _otherwise -> undefined
-  | z == 2          = mkAbsAddrIns sys pc $ JPCC (condCode y)
-  | z == 3          = case y of
-                        0          -> mkAbsAddrIns sys pc JP
-                        -- CB instruction prefix
-                        1          -> let (newpc, (nextOpc, sys')) = sysIncPCAndRead pc sys
-                                          (bitIns, sys'')          = bitopsDecode sys' newpc nextOpc
-                                      in  (DecodedInsn (newpc + 1) bitIns, sys'')
-                        2          -> let (newpc, (nextOpc, sys')) = sysIncPCAndRead pc sys
-                                      in  (DecodedInsn (newpc + 1) ((OUT . PortImm) nextOpc), sys')
-                        3          -> let (newpc, (nextOpc, sys')) = sysIncPCAndRead pc sys
-                                      in  (DecodedInsn (newpc + 1) ((IN . PortImm) nextOpc), sys')
-                        4          -> defResult (EXC $ exchangeXFormF SPHL)
-                        5          -> defResult (EXC DEHL)
-                        6          -> defResult DI
-                        7          -> defResult EI
-                        _otherwise -> undefined
-  | z == 4           = mkAbsAddrIns sys pc $ CALLCC (condCode y)
-  | z == 5           = case q of
-                         0 -> defResult (PUSH (pairAF reg16XFormF p))
-                         1 -> case p of
-                                0          -> mkAbsAddrIns sys pc CALL
-                                -- DD instruction prefix (should never reach here.)
-                                1          -> undefined
-                                -- ED instruction prefix
-                                2          -> let (newpc, (nextOpc, sys')) = sysIncPCAndRead pc sys
-                                              in  edPrefixDecode nextOpc sys' newpc
-                                -- FD instruction prefix (should never reach here.)
-                                3          -> undefined
-                                _otherwise -> undefined
-                         _otherwise -> undefined
-  | z == 6           = let (newpc, (nextOpc, sys')) = sysIncPCAndRead pc sys
-                           imm     = ALUimm nextOpc
-                           insCTor = case y of
-                                       0          -> ADD8 . ALUAcc
-                                       1          -> ADC8 . ALUAcc
-                                       2          -> SUB
-                                       3          -> SBC8 . ALUAcc
-                                       4          -> AND
-                                       5          -> XOR
-                                       6          -> OR
-                                       7          -> CP
-                                       _otherwise -> undefined
-                       in  (DecodedInsn (newpc + 1) (insCTor imm), sys')
-  | z == 7           = defResult (RST (y * 8))
-  | otherwise        = defResult (Z80undef [opc])
-  where
-    (z, y, p, q)  = opcComponents opc
-    reg16XFormF   = reg16XForm xForm
-    exchangeXFormF = exchangeXForm xForm
-    instructionXFormF  = instructionXForm xForm
-    defResult ins = (DecodedInsn (pc + 1) ins, sys)
+group3decode opc sys pc xForm = case opcComponents opc of
+    (0, y, _, _) -> wrapDecode (RETCC $ condCode y) pc sys
+    (1, _, p, 0) -> wrapDecode ((POP . pairAF reg16XFormF) p) pc sys
+    (1, _, 0, 1) -> wrapDecode RET pc sys
+    (1, _, 1, 1) -> wrapDecode (EXC Primes) pc sys
+    (1, _, 2, 1) -> wrapDecode (instructionXFormF JPHL) pc sys
+    (1, _, 3, 1) -> wrapDecode (instructionXFormF LDSPHL) pc sys
+    (2, y, _, _) -> mkAbsAddrIns sys pc $ JPCC (condCode y)
+    (3, 0, _, _) -> mkAbsAddrIns sys pc JP
+    (3, 1, _, _) -> let (newpc, (nextOpc, sys')) = sysIncPCAndRead pc sys
+                        (bitIns, sys'') = bitopsDecode sys' newpc nextOpc
+                    in  (DecodedInsn (newpc + 1) bitIns, sys'')
+    (3, 2, _, _) -> let (newpc, (nextOpc, sys')) = sysIncPCAndRead pc sys
+                    in  (DecodedInsn (newpc + 1) ((OUT . PortImm) nextOpc), sys')
+    (3, 3, _, _) -> let (newpc, (nextOpc, sys')) = sysIncPCAndRead pc sys
+                    in  (DecodedInsn (newpc + 1) ((IN . PortImm) nextOpc), sys')
+    (3, 4, _, _) -> wrapDecode (EXC $ exchangeXFormF SPHL) pc sys
+    (3, 5, _, _) -> wrapDecode (EXC DEHL) pc sys
+    (3, 6, _, _) -> wrapDecode DI pc sys
+    (3, 7, _, _) -> wrapDecode EI pc sys
+    (4, y, _, _) -> mkAbsAddrIns sys pc $ CALLCC (condCode y)
+    (5, _, p, 0) -> wrapDecode (PUSH (pairAF reg16XFormF p)) pc sys
+    (5, _, 0, 1) -> mkAbsAddrIns sys pc CALL
+    (5, _, 1, 1) -> wrapDecode (Z80undef [opc]) pc sys
+    (5, _, 2, 1) -> let (newpc, (nextOpc, sys')) = sysIncPCAndRead pc sys
+                    in  edPrefixDecode nextOpc sys' newpc
+    (5, _, 3, 1) -> wrapDecode (Z80undef [opc]) pc sys
+    (5, 0, p, _) -> wrapDecode (PUSH (pairAF reg16XFormF p)) pc sys
+    (5, 1, 0, _) -> mkAbsAddrIns sys pc CALL
+    (5, 1, 2, _) -> let (newpc, (nextOpc, sys')) = sysIncPCAndRead pc sys
+                    in  edPrefixDecode nextOpc sys' newpc
+    (5, _, _, _) -> wrapDecode (Z80undef [opc]) pc sys
+    (6, 0, _, _) -> aluImm (ADD8 . ALUAcc)
+    (6, 1, _, _) -> aluImm (ADC8 . ALUAcc)
+    (6, 2, _, _) -> aluImm (SUB8 . ALUAcc)
+    (6, 3, _, _) -> aluImm (SBC8 . ALUAcc)
+    (6, 4, _, _) -> aluImm AND
+    (6, 5, _, _) -> aluImm XOR
+    (6, 6, _, _) -> aluImm OR
+    (6, 7, _, _) -> aluImm CP
+    (7, y, _, _) -> wrapDecode (RST (y * 8)) pc sys
+    _            -> wrapDecode (Z80undef [opc]) pc sys
+    where
+      reg16XFormF   = reg16XForm xForm
+      exchangeXFormF = exchangeXForm xForm
+      instructionXFormF  = instructionXForm xForm
+      aluImm insCTor =
+        let (newpc, (nextOpc, sys')) = sysIncPCAndRead pc sys
+            imm = ALUimm nextOpc
+        in (DecodedInsn (newpc + 1) (insCTor imm), sys')
 
 -- | The SET, RESet, BIT instructions and rotation operations. Note that this is not suitable for dealing with the
 -- IX and IY indexed instructions, since the instruction format is 'DDCB <displacement> <opcode>', and has to be
@@ -267,27 +266,29 @@ bitopsDecode :: Z80system sysType
              -> (Z80instruction, Z80system sysType)
              -- ^ The result
 bitopsDecode sys pc opc =
-  case shiftR opc 6 .&. 3 of
+  case x of
     0          -> ((rotOps ! fromIntegral y) theReg, sys')
     1          -> (BIT y theReg, sys')
     2          -> (RES y theReg, sys')
     3          -> (SET y theReg, sys')
     _otherwise -> undefined
   where
+    x              = opc `shiftR` 6 .&. 3
     (z, y, _p, _q) = opcComponents opc
     -- Ignore any new program counter 'reg8' because we always apply the null transform
     (_, theReg, sys') = reg8 (reg8XForm z80nullTransform) sys pc z
 
 rotOps :: IntMap (Z80reg8 -> Z80instruction)
-rotOps = IntMap.fromList [ (0, RLC)
-                         , (1, RRC)
-                         , (2, RL)
-                         , (3, RR)
-                         , (4, SLA)
-                         , (5, SRA)
-                         , (6, SLL)
-                         , (7, SRL)
-                         ]
+rotOps = IntMap.fromList
+  [ (0, RLC)
+  , (1, RRC)
+  , (2, RL)
+  , (3, RR)
+  , (4, SLA)
+  , (5, SRA)
+  , (6, SLL)
+  , (7, SRL)
+  ]
 
 -- | Undocumented rotate/shift/bit operations using IX and IY
 undocBitOpsDecode :: Z80word
@@ -304,20 +305,20 @@ undocBitOpsDecode prefixOpc pc sys =
                           0xdd       -> IXindirect
                           0xfd       -> IYindirect
                           _otherwise -> undefined) . fromIntegral
-      z = opc .&. 7
-      y = shiftR opc 3 .&. 7
+      x = shiftR opc 6 .&. 3
+      (z, y, _p, _q) = opcComponents opc
       -- Ignore any new program counter 'reg8' because we always apply the null transform
       (_, theReg, sys''') = reg8 (reg8XForm z80nullTransform) sys'' pc z
       instruction
         | theReg == HLindirect
-        = case shiftR opc 6 .&. 3 of
+        = case x of
             0          -> (rotOps ! fromIntegral y) (idxReg8Ctor disp)
             1          -> BIT y (idxReg8Ctor disp)
             2          -> RES y (idxReg8Ctor disp)
             3          -> SET y (idxReg8Ctor disp)
             _otherwise -> undefined
         | otherwise
-        = case shiftR opc 6 .&. 3 of
+        = case x of
             0          -> (undocRotOps ! fromIntegral y) (idxReg8Ctor disp) theReg
             1          -> BIT y (idxReg8Ctor disp)
             2          -> RESidx y (idxReg8Ctor disp) theReg
@@ -341,112 +342,84 @@ edPrefixDecode :: Z80word
                -> Z80system sysType
                -> Z80PC
                -> Z80decodedInsn sysType
-edPrefixDecode opc sys pc
-  | x == 0
-  = invalid
-  | x == 1, z == 0, y /= 6
-  = let (newpc, reg, sys') = reg8 nullXFormF sys pc y
-    in  (DecodedInsn (newpc + 1) (IN . CIndIO $ reg), sys')
-  | x == 1, z == 0, y == 6
-  = defResult (IN CIndIO0)
-  | x == 1, z == 1, y /= 6
-  = let (newpc, reg, sys') = reg8 nullXFormF sys pc y
-    in  (DecodedInsn (newpc + 1) (OUT . CIndIO $ reg), sys')
-  | x == 1, z == 1, y == 6
-  = defResult (OUT CIndIO0)
-  | x == 1, z == 2, q == 0
-  = defResult (SBC16 (alu16XFormF DestHL) $ pairSP nullReg16XFormF p)
-  | x == 1, z == 2, q == 1
-  = defResult (ADC16 (alu16XFormF DestHL) $ pairSP nullReg16XFormF p)
-  | x == 1, z == 2
-  = invalid
-  | x == 1, z == 3, q == 0
-  = mkAbsAddrIns sys pc $ LD . RPIndirectStore (pairSP nullReg16XFormF p)
-  | x == 1, z == 3, q == 1
-  = mkAbsAddrIns sys pc $ LD . RPIndirectLoad (pairSP nullReg16XFormF p)
-  | x == 1, z == 3
-  = invalid
-  | x == 1, z == 4
-  = defResult NEG
-  | x == 1, z == 5, y .&. 1 == 1
-  = defResult RETI
-  | x == 1, z == 5, y .&. 1 /= 1
-  = defResult RETN
-  | x == 1, z == 6
-  = defResult (IM (interruptMode ! fromIntegral y))
-  | x == 1, z == 7
-  = case y of
-     0          -> defResult (LD IRegAcc)
-     1          -> defResult (LD RRegAcc)
-     2          -> defResult (LD AccIReg)
-     3          -> defResult (LD AccRReg)
-     4          -> defResult RRD
-     5          -> defResult RLD
-     6          -> invalid
-     7          -> invalid
-     _otherwise -> error ("edPrefixDecode, x = 1, z = 7: invalid y = " ++ show y)
-  | x == 2, z <= 3, y >= 4
-  = -- Increment, Increment-Repeat instructions
-    defResult $ (incdecOps ! fromIntegral y) ! fromIntegral z
-  | x == 2
-  = invalid
-  | x == 3
-  = invalid
-  -- Should never be matched...
-  | otherwise
-  = error ("edPrefixDecode: could not decode instruction, x == "
-           ++ show x
-           ++ ", z == "
-           ++ show z
-           ++ ", y == "
-           ++ show y)
+edPrefixDecode opc sys pc = case (x, z, y, p, q) of
+  (0, _, _, _, _) -> invalid
+  (1, 0, 6, _, _) -> wrapDecode (IN CIndIO0) pc sys
+  (1, 0, _, _, _) -> wrapDecode (IN . CIndIO $ (reg8NumToReg ! fromIntegral y)) pc sys
+  (1, 1, 6, _, _) -> wrapDecode (OUT CIndIO0) pc sys
+  (1, 1, _, _, _) -> wrapDecode (OUT . CIndIO $ (reg8NumToReg ! fromIntegral y)) pc sys
+  (1, 2, _, _, 0) -> wrapDecode (SBC16 (alu16XFormF DestHL) $ pairSP nullReg16XFormF p) pc sys
+  (1, 2, _, _, 1) -> wrapDecode (ADC16 (alu16XFormF DestHL) $ pairSP nullReg16XFormF p) pc sys
+  (1, 2, _, _, _) -> invalid
+  (1, 3, _, _, 0) -> mkAbsAddrIns sys pc $ LDr16mem . FromReg16 (pairSP nullReg16XFormF p)
+  (1, 3, _, _, 1) -> mkAbsAddrIns sys pc $ LDr16mem . ToReg16 (pairSP nullReg16XFormF p)
+  (1, 3, _, _, _) -> invalid
+  (1, 4, _, _, _) -> wrapDecode NEG pc sys
+  (1, 5, _, _, 1) -> wrapDecode RETI pc sys
+  (1, 5, _, _, 0) -> wrapDecode RETN pc sys
+  (1, 6, _, _, _) -> wrapDecode (IM (interruptMode ! fromIntegral y)) pc sys
+  (1, 7, 0, _, _) -> wrapDecode (LDAspecial FromAtoI) pc sys
+  (1, 7, 1, _, _) -> wrapDecode (LDAspecial FromAtoR) pc sys
+  (1, 7, 2, _, _) -> wrapDecode (LDAspecial FromItoA) pc sys
+  (1, 7, 3, _, _) -> wrapDecode (LDAspecial FromRtoA) pc sys
+  (1, 7, 4, _, _) -> wrapDecode RRD pc sys
+  (1, 7, 5, _, _) -> wrapDecode RLD pc sys
+  (1, 7, 6, _, _) -> invalid
+  (1, 7, 7, _, _) -> invalid
+  (2, _, _, _, _) ->
+    if z <= 3 && y >= 4
+    then
+      -- Increment, Increment-Repeat instructions
+        wrapDecode ((incdecOps ! fromIntegral y) ! fromIntegral z) pc sys
+    else
+        invalid
+  (3, _, _, _, _) -> invalid
+  -- Catch-all for Haskell's incomplete pattern matching
+  (_, _, _, _, _) -> invalid
   where
     x               = opc `shiftR` 6 .&. 3
-    y               = opc `shiftR` 3 .&. 7
-    z               = opc .&. 7
-    p               = y `shiftR` 1 .&. 3
-    q               = y .&. 1
-    invalid         = defResult (Z80undef [0xed, opc])
-    nullXFormF      = reg8XForm z80nullTransform
+    (z, y, p, q)    = opcComponents opc
+    invalid         = wrapDecode (Z80undef [0xed, opc]) pc sys
     nullReg16XFormF = reg16XForm z80nullTransform
     alu16XFormF     = alu16XForm z80nullTransform
-    defResult ins   = (DecodedInsn (pc + 1) ins, sys)
 
 -- | Block/compare/input/output increment-decrement lookup table
 incdecOps :: IntMap (IntMap Z80instruction)
-incdecOps = IntMap.fromList [ (4, IntMap.fromList [ (0, LDI )
-                                                  , (1, CPI )
-                                                  , (2, INI )
-                                                  , (3, OUTI )
-                                                  ] )
-                            , (5, IntMap.fromList [ (0, LDD)
-                                                  , (1, CPD)
-                                                  , (2, IND)
-                                                  , (3, OUTD)
-                                                  ] )
-                            , (6, IntMap.fromList [ (0, LDIR)
-                                                  , (1, CPIR)
-                                                  , (2, INIR)
-                                                  , (3, OTIR)
-                                                  ] )
-                            , (7, IntMap.fromList [ (0, LDDR)
-                                                  , (1, CPDR)
-                                                  , (2, INDR)
-                                                  , (3, OTDR)
-                                                  ] )
-                            ]
+incdecOps = IntMap.fromList
+  [ (4, IntMap.fromList [ (0, LDI )
+                        , (1, CPI )
+                        , (2, INI )
+                        , (3, OUTI )
+                        ] )
+  , (5, IntMap.fromList [ (0, LDD)
+                        , (1, CPD)
+                        , (2, IND)
+                        , (3, OUTD)
+                        ] )
+  , (6, IntMap.fromList [ (0, LDIR)
+                        , (1, CPIR)
+                        , (2, INIR)
+                        , (3, OTIR)
+                        ] )
+  , (7, IntMap.fromList [ (0, LDDR)
+                        , (1, CPDR)
+                        , (2, INDR)
+                        , (3, OTDR)
+                        ] )
+  ]
 
 -- | Convert embedded interrupt mode to actual interrupt mode
 interruptMode :: IntMap Z80word
-interruptMode = IntMap.fromList [ (0, 0)
-                                , (1, 0)        -- Could be either 0 or 1, not clear from instruction set description
-                                , (2, 1)
-                                , (3, 2)
-                                , (4, 0)
-                                , (5, 0)        -- Could be either 0 or 1, not clear from instruction set description
-                                , (6, 1)
-                                , (7, 2)
-                                ]
+interruptMode = IntMap.fromList
+  [ (0, 0)
+  , (1, 0)        -- Could be either 0 or 1, not clear from instruction set description
+  , (2, 1)
+  , (3, 2)
+  , (4, 0)
+  , (5, 0)        -- Could be either 0 or 1, not clear from instruction set description
+  , (6, 1)
+  , (7, 2)
+  ]
 
 -- | Convert 16-bit register pair/SP index to a 'RegPairSP' operand
 pairSP :: (Z80reg16 -> Z80reg16)                -- ^ Transform function for index registers, when neeeded
@@ -468,7 +441,8 @@ pairAF  xform 2 = (AFPair16 . xform) HL
 pairAF _xform 3 = AF
 pairAF _      x = error ("pairAF: invalid 16-bit register code " ++ show x)
 
--- | Convert 8-bit register index to a 'Z80reg8' operand
+-- | Convert 8-bit register index to a 'Z80reg8' operand. Note that this
+-- will leave H and L untransformed to avoid "LD IXh, (IX+3)" transformations.
 reg8 :: Z80reg8XForm sysType
      -- ^ Register transform function, used for IX/IY transformations
      -> Z80system sysType
@@ -479,17 +453,49 @@ reg8 :: Z80reg8XForm sysType
      -- ^ 8-bit register index
      -> (Z80PC, Z80reg8, Z80system sysType)
      -- ^ Register and new disassembly state
-reg8 _xform sys  pc 0 = (pc, B, sys)
-reg8 _xform sys  pc 1 = (pc, C, sys)
-reg8 _xform sys  pc 2 = (pc, D, sys)
-reg8 _xform sys  pc 3 = (pc, E, sys)
-reg8 xform sys  pc 4  = xform sys pc H
-reg8 xform sys  pc 5  = xform sys pc L
-reg8  xform sys  pc 6 = xform sys pc HLindirect
-reg8 _xform sys  pc 7 = (pc, A, sys)
-reg8 _xform _sys pc x = error ("reg8: Invalid 8-bit register code " ++ show x ++ " at " ++ as0xHexS pc)
+reg8 xform sys pc 6 = xform sys pc HLindirect
+reg8 _ sys pc n = (pc, reg, sys) where
+    reg = fromMaybe (error $ "reg8: Invalid register index: " ++ show n)
+                    (IntMap.lookup (fromIntegral n) reg8NumToReg)
 
--- | Convert 8-bit register index to a 'Z80reg8' operand
+reg8NumToReg :: IntMap Z80reg8
+reg8NumToReg = IntMap.fromList
+  [ (0, B)
+  , (1, C)
+  , (2, D)
+  , (3, E)
+  , (4, H)
+  , (5, L)
+  , (6, HLindirect)
+  , (7, A)
+  ]
+
+-- | Convert 8-bit register index to a 'Z80reg8' operand.
+reg8IXYhl :: Z80reg8XForm sysType
+     -- ^ Register transform function, used for IX/IY transformations
+     -> Z80system sysType
+     -- ^ Memory from which to fetch IX/IY displacements
+     -> Z80PC
+     -- ^ Disassembler state
+     -> Z80word
+     -- ^ 8-bit register index
+     -> (Z80PC, Z80reg8, Z80system sysType)
+     -- ^ Register and new disassembly state
+reg8IXYhl xform sys pc 4 = xform sys pc H
+reg8IXYhl xform sys pc 5 = xform sys pc L
+reg8IXYhl xform sys pc 6 = xform sys pc HLindirect
+reg8IXYhl _ sys pc n = (pc, reg, sys) where
+    reg = case n of
+        0 -> B
+        1 -> C
+        2 -> D
+        3 -> E
+        7 -> A
+        _ -> error "reg8IXYhl: Invalid register number"
+
+{-
+-- | Convert 8-bit register index to a 'Z80reg8' operand, prohibiting
+-- transforms H -> I[XY]h and L -> I[XY]l
 reg8DecodedInsn :: Z80reg8XForm sysType
                 -- ^ Register transform function, used for IX/IY transformations
                 -> Z80system sysType
@@ -502,8 +508,28 @@ reg8DecodedInsn :: Z80reg8XForm sysType
                 -- ^ Instruction constructor
                 -> Z80decodedInsn sysType
                 -- ^ Register and new disassembly state
+
 reg8DecodedInsn xform sys pc regWord ctor =
   let (newpc, theReg, sys')     = reg8 xform sys pc regWord
+  in  (DecodedInsn (newpc + 1) (ctor theReg), sys')
+-}
+
+-- | Convert 8-bit register index to a 'Z80reg8' operand, allowing
+-- transforms H -> I[XY]h and L -> I[XY]l
+reg8DecodedInsnIXYhl :: Z80reg8XForm sysType
+                     -- ^ Register transform function, used for IX/IY transformations
+                     -> Z80system sysType
+                     -- ^ Memory from which to fetch IX/IY displacements
+                     -> Z80PC
+                     -- ^ Current program counter
+                     -> Z80word
+                     -- ^ 8-bit register index
+                     -> (Z80reg8 -> Z80instruction)
+                     -- ^ Instruction constructor
+                     -> Z80decodedInsn sysType
+                     -- ^ Register and new disassembly state
+reg8DecodedInsnIXYhl xform sys pc regWord ctor =
+  let (newpc, theReg, sys')     = reg8IXYhl xform sys pc regWord
   in  (DecodedInsn (newpc + 1) (ctor theReg), sys')
 
 -- | Convert an 8-bit register index to an ALU operand 'OperALU'
@@ -518,7 +544,7 @@ aluReg8 :: Z80reg8XForm sysType
         -> (Z80PC, OperALU, Z80system sysType)
 -- Use the _2 tuple lens to apply the 'ALUreg8' data constructor on the first element of the pair
 -- returned by 'reg8'
-aluReg8 xform sys pc val = _2 %~ ALUreg8 $ reg8 xform sys pc val
+aluReg8 xform sys pc val = _2 %~ ALUreg8 $ reg8IXYhl xform sys pc val
 
 -- | Convert condition code
 condCode :: Z80word
@@ -558,7 +584,7 @@ z80getAddr :: Z80system sysType
            -> Z80PC
            -- ^ The program counter
            -> (Z80addr, Z80system sysType)
-z80getAddr sys pc = sysMReadN (unPC pc) 2 sys & _1 %~ makeAddr
+z80getAddr sys pc = sysMReadN (thePC pc) 2 sys & _1 %~ makeAddr
   where
     makeAddr awords = shiftL (fromIntegral (awords DVU.! 1)) 8 .|. fromIntegral (awords DVU.! 0)
 
@@ -585,12 +611,12 @@ type Z80ALU16XForm =    DestALU16
                      -> DestALU16
 
 -- | Indirect stores: LD (addr), [HL|IX|IY]
-type Z80IndirectStoreXForm = OperLD
-                           -> OperLD
+type Z80IndirectStoreXForm = Reg16Mem
+                           -> Reg16Mem
 
 -- | Indirect loads: LD [HL|IX|IY], (addr)
-type Z80IndirectLoadXForm = OperLD
-                          -> OperLD
+type Z80IndirectLoadXForm = Reg16Mem
+                          -> Reg16Mem
 
 -- | Exchange operands
 type Z80ExchangeXForm     = Z80ExchangeOper
@@ -634,12 +660,12 @@ ixXFormALU16 other  = other
 -- | Transform 16-bit indirect stores, e.g., "LD (aaaa), HL" when HL is the
 -- source.
 ixXFormIndirectStore :: Z80IndirectStoreXForm
-ixXFormIndirectStore (RPIndirectStore (RPair16 HL) addr) = RPIndirectStore (RPair16 IX) addr
-ixXFormIndirectStore other                               = other
+ixXFormIndirectStore (FromReg16 (RPair16 HL) addr) = FromReg16 (RPair16 IX) addr
+ixXFormIndirectStore other                         = other
 
 ixXFormIndirectLoad :: Z80IndirectLoadXForm
-ixXFormIndirectLoad (RPIndirectLoad (RPair16 HL) addr) = RPIndirectLoad (RPair16 IX) addr
-ixXFormIndirectLoad other                              = other
+ixXFormIndirectLoad (ToReg16 (RPair16 HL) addr)    = ToReg16 (RPair16 IX) addr
+ixXFormIndirectLoad other                          = other
 
 ixXFormExchange :: Z80ExchangeXForm
 ixXFormExchange SPHL  = SPIX
@@ -660,12 +686,12 @@ iyXFormALU16 DestHL = DestIY
 iyXFormALU16 other  = other
 
 iyXFormIndirectStore :: Z80IndirectStoreXForm
-iyXFormIndirectStore (RPIndirectStore (RPair16 HL) addr) = RPIndirectStore (RPair16 IY) addr
-iyXFormIndirectStore other                               = other
+iyXFormIndirectStore (FromReg16 (RPair16 HL) addr) = FromReg16 (RPair16 IY) addr
+iyXFormIndirectStore other                         = other
 
 iyXFormIndirectLoad :: Z80IndirectLoadXForm
-iyXFormIndirectLoad (RPIndirectLoad (RPair16 HL) addr)   = RPIndirectLoad (RPair16 IY) addr
-iyXFormIndirectLoad other                  = other
+iyXFormIndirectLoad (ToReg16 (RPair16 HL) addr)   = ToReg16 (RPair16 IY) addr
+iyXFormIndirectLoad other                         = other
 
 iyXFormExchange :: Z80ExchangeXForm
 iyXFormExchange SPHL  = SPIY

@@ -72,11 +72,16 @@ reg8TestData =
 -- | The ordinary 16-bit registers used to test 16-bit load operations. The 'RegPairSP' argument is used for the 'LD'
 -- instruction; the 'Z80reg16' is passed to 'reg16set' to set the expected value and the 'Z80addr' is the test value.
 reg16TestData
-  :: [(RegPairSP, Z80reg16, Z80system sysType -> Z80addr, Z80addr, Text)]
+  :: [(RegPairSP, Z80system sysType -> Z80addr, Z80addr -> Z80system sysType -> Z80system sysType, Z80addr, Text)]
 reg16TestData =
-  [ (RPair16 BC, BC, reg16get BC, 0x1234, "BC")
-  , (RPair16 DE, DE, reg16get DE, 0x5678, "DE")
-  , (RPair16 HL, HL, reg16get HL, 0x9abc, "HL")
-  , (RPair16 IX, IX, reg16get IX, 0xdef0, "IX")
-  , (RPair16 IY, IY, reg16get IY, 0x1f2e, "IY")
+  [ (RPair16 BC, reg16get BC, setValue BC, 0x1234, "BC")
+  , (RPair16 DE, reg16get DE, setValue DE, 0x5678, "DE")
+  , (RPair16 HL, reg16get HL, setValue HL, 0x9abc, "HL")
+  , (RPair16 IX, reg16get IX, setValue IX, 0xdef0, "IX")
+  , (RPair16 IY, reg16get IY, setValue IY, 0x1f2e, "IY")
+  , (SP,         getSP,       setSP,       0x1f43, "SP")         
   ]
+  where
+    setValue      = flip reg16set
+    getSP sys     = sys ^. processor . cpu . regs . z80sp
+    setSP val sys = sys &  processor . cpu . regs . z80sp .~ val

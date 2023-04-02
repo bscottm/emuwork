@@ -30,8 +30,8 @@ test_subReg8 = assertBoolMessages [ runTest reg8 elt1 elt2
       | otherwise
       = T.pack $ printf "%s: Expected 0x%04x, got 0x%04x" (z80ShortInsnFormat ins) (val1 - val2) gotVal
       where
-        ins = SUB . ALUreg8 $ reg8
-        gotVal = accumResult reg8 val1 val2 SUB
+        ins = SUB8 . ALUAcc . ALUreg8 $ reg8
+        gotVal = accumResult reg8 val1 val2 (SUB8 . ALUAcc)
 
 
 test_andReg8 :: Assertion
@@ -112,6 +112,6 @@ accumResult reg accum val ins = z80registers testSys ^. z80accum
       = z80system & processor . cpu . regs .~
                    ( z80registers z80system
                      & z80accum .~ accum
-                     & (z80Reg8Lens reg) .~ val
+                     & z80Reg8Lens reg .~ val
                    )
     testSys     = z80instructionExecute (DecodedInsn 0x1000 (ins . ALUreg8 $ reg)) initialSys

@@ -1,5 +1,6 @@
 module Z80.Execute.ALUops
   ( aluAccumOp
+  , aluAccumMathOp
   )
 where
 
@@ -12,25 +13,33 @@ import Z80.Processor
 import Z80.System
 
 
---
+-- |
 aluAccumOp
   :: OperALU
   -> (Z80word -> Z80word -> Z80word)
   -> Bool
   -> Z80system sysTag
   -> Z80system sysTag
-aluAccumOp (ALUimm  imm) arithOp nFlag sys               = doALUAccumVal (arithOp imm) nFlag sys
-aluAccumOp (ALUreg8 HLindirect) arithOp nFlag sys        = doALUAccumVal (arithOp memVal) nFlag sys'
-  where
-    (memVal, sys') = sysMRead (reg16get HL sys) sys
-aluAccumOp (ALUreg8 (IXindirect disp)) arithOp nFlag sys = doALUAccumVal (arithOp memVal) nFlag sys'
-  where
-    (memVal, sys') = sysMRead (reg16get IX sys + signExtend disp) sys
-aluAccumOp (ALUreg8 (IYindirect disp)) arithOp nFlag sys = doALUAccumVal (arithOp memVal) nFlag sys'
-  where
-    (memVal, sys') = sysMRead (reg16get IY sys + signExtend disp) sys
-aluAccumOp (ALUreg8 reg)   arithOp nFlag sys             = doALUAccumReg8 (z80Reg8Lens reg) arithOp nFlag sys
+aluAccumOp op arithOp nFlag sys = case op of
+  ALUimm imm                -> doALUAccumVal (arithOp imm) nFlag sys
+  ALUreg8 HLindirect        -> doALUAccumVal (arithOp memVal) nFlag sys'
+    where
+      (memVal, sys') = sysMRead (reg16get HL sys) sys
+  ALUreg8 (IXindirect disp) -> doALUAccumVal (arithOp memVal) nFlag sys'
+    where
+      (memVal, sys') = sysMRead (reg16get IX sys + signExtend disp) sys
+  ALUreg8 (IYindirect disp) -> doALUAccumVal (arithOp memVal) nFlag sys'
+    where
+      (memVal, sys') = sysMRead (reg16get IY sys + signExtend disp) sys
+  ALUreg8 reg               -> doALUAccumReg8 (z80Reg8Lens reg) arithOp nFlag sys
 
+aluAccumMathOp
+  :: DestALUAcc
+  -> (Z80word -> Z80word -> Z80word)
+  -> Bool
+  -> Z80system sysTag
+  -> Z80system sysTag
+aluAccumMathOp (ALUAcc op) {-arithOp nFlag sys-} = aluAccumOp op {-arithOp nFlag sys-}
 
 doALUAccumReg8
   :: Lens Z80registers Z80registers Z80word Z80word

@@ -75,7 +75,8 @@ library
   other-modules:
     TRS80.System
     TRS80.Disasm
-    TRS80.CommonOptions
+    -- Deprecated.
+    -- TRS80.CommonOptions
     TRS80.Disasm.Guidance
 
 test-suite yamltest

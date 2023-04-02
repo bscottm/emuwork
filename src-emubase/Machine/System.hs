@@ -76,16 +76,13 @@ mkEmulatedSystem sysCpu name aliases =
 
 -- | 'EmulatedProcessor' boxes the emulated machine's processor. All interesting operations on an @EmulatedProcessor@
 -- are in the `ProcessorOps` data type.
-data EmulatedProcessor cpuType insnSet addrType wordType =
-  EmulatedProcessor
-    { _procPrettyName :: String
-    -- ^ Pretty name for the emulated processor
-    , _cpu            :: cpuType
-    -- ^ Processor-specific internal data (registers, flags, etc.)
-    , _ops            :: ProcessorOps cpuType insnSet addrType wordType
-    -- ^ Processor operation functions
-    }
-    deriving (Show)
+data EmulatedProcessor cpuType insnSet addrType wordType where
+  EmulatedProcessor ::
+    {_procPrettyName :: String
+    , _cpu :: cpuType
+    , _ops :: ProcessorOps cpuType insnSet addrType wordType
+    } -> EmulatedProcessor cpuType insnSet addrType wordType
+  deriving (Show)
 
 -- | Lens for the processor's pretty name. This is a read-only lens.
 procPrettyName :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) String
@@ -188,7 +185,7 @@ sysReadAndIncPC
   => ProgramCounter addrType
   -> EmulatedSystem cpuType insnSet addrType wordType
   -> (ProgramCounter addrType, (wordType, EmulatedSystem cpuType insnSet addrType wordType))
-sysReadAndIncPC pc sys = (1+ pc, sysMRead (unPC pc) sys)
+sysReadAndIncPC pc sys = (1+ pc, sysMRead (thePC pc) sys)
 
 -- | Fetch the next word from memory (pre-incrementing the program counter), returning the incremented pc, memory value
 -- and updated system state as the tuple @(newPC, (val, updatedSystem))@.
@@ -197,7 +194,7 @@ sysIncPCAndRead
   => ProgramCounter addrType
   -> EmulatedSystem cpuType insnSet addrType wordType
   -> (ProgramCounter addrType, (wordType, EmulatedSystem cpuType insnSet addrType wordType))
-sysIncPCAndRead pc sys = (pc', sysMRead (unPC pc') sys) where pc' = 1+ pc
+sysIncPCAndRead pc sys = (pc', sysMRead (thePC pc') sys) where pc' = 1+ pc
 
 -- | Read a single word from a system's memory, updating the system's memory state as part of the return
 sysMRead
@@ -231,7 +228,7 @@ sysPCReadN
   -> Int
   -> EmulatedSystem cpuType insnSet addrType wordType
   -> (ProgramCounter addrType, (Vector wordType, EmulatedSystem cpuType insnSet addrType wordType))
-sysPCReadN pc nwords sys = (pc + fromIntegral nwords, sysMReadN (unPC pc) nwords sys)
+sysPCReadN pc nwords sys = (pc + fromIntegral nwords, sysMReadN (thePC pc) nwords sys)
 
 -- | Read _n_ words from memory starting at address 'addr'. Returns a vector of words read and the updated system
 -- state.

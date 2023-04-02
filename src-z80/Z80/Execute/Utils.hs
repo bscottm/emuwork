@@ -25,48 +25,20 @@ make16bit bytes  = fromIntegral (bytes ! 1) `shiftL` 8 .|. fromIntegral (bytes !
 reg8set :: Z80reg8
         -> (Z80word, Z80system sysType)
         -> Z80system sysType
-reg8set dstReg (val, sys) =
-  case dstReg of
-    A               -> sys & procRegs . z80accum .~ val
-    B               -> sys & procRegs . z80breg .~ val
-    C               -> sys & procRegs . z80creg .~ val
-    D               -> sys & procRegs . z80dreg .~ val
-    E               -> sys & procRegs . z80ereg .~ val
-    H               -> sys & procRegs . z80hreg .~ val
-    L               -> sys & procRegs . z80lreg .~ val
-    HLindirect      -> sysMWrite (reg16get HL sys) val sys
-    IXindirect disp -> sysMWrite (reg16get IX sys + signExtend disp) val sys
-    IYindirect disp -> sysMWrite (reg16get IY sys + signExtend disp) val sys
-    IXh             -> sys & procRegs . z80ixh .~ val
-    IXl             -> sys & procRegs . z80ixl .~ val
-    IYh             -> sys & procRegs . z80iyh .~ val
-    IYl             -> sys & procRegs . z80iyl .~ val
-  where
-    procRegs = processor . cpu . regs
+reg8set HLindirect (val, sys)        = sysMWrite (reg16get HL sys) val sys
+reg8set (IXindirect disp) (val, sys) = sysMWrite (reg16get IX sys + signExtend disp) val sys
+reg8set (IYindirect disp) (val, sys) = sysMWrite (reg16get IY sys + signExtend disp) val sys
+reg8set dstReg (val, sys)            = sys & processor . cpu . regs . z80Reg8Lens dstReg .~ val
 
 -- | Get the value of a register, returning the byte and the updated Z80 system (which should not have changed, but makes the
 -- function's signature one that can be used with `state`.)
 reg8get :: Z80system sysType
         -> Z80reg8
         -> (Z80word, Z80system sysType)
-reg8get sys srcReg =
-  case srcReg of
-    A               -> (sys ^. procRegs . z80accum, sys)
-    B               -> (sys ^. procRegs . z80breg, sys)
-    C               -> (sys ^. procRegs . z80creg, sys)
-    D               -> (sys ^. procRegs . z80dreg, sys)
-    E               -> (sys ^. procRegs . z80ereg, sys)
-    H               -> (sys ^. procRegs . z80hreg, sys)
-    L               -> (sys ^. procRegs . z80lreg, sys)
-    HLindirect      -> sysMRead (reg16get HL sys) sys
-    IXindirect disp -> sysMRead (reg16get IX sys + signExtend disp) sys
-    IYindirect disp -> sysMRead (reg16get IY sys + signExtend disp) sys
-    IXh             -> (sys ^. procRegs . z80ixh, sys)
-    IXl             -> (sys ^. procRegs . z80ixl, sys)
-    IYh             -> (sys ^. procRegs . z80iyh, sys)
-    IYl             -> (sys ^. procRegs . z80iyl, sys)
-  where
-    procRegs = processor . cpu . regs
+reg8get sys HLindirect        = sysMRead (reg16get HL sys) sys
+reg8get sys (IXindirect disp) = sysMRead (reg16get IX sys + signExtend disp) sys
+reg8get sys (IYindirect disp) = sysMRead (reg16get IY sys + signExtend disp) sys
+reg8get sys srcReg            = (sys ^. processor . cpu . regs . z80Reg8Lens srcReg, sys)
 
 reg16get
   :: Z80reg16

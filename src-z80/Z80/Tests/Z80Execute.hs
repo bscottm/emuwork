@@ -63,8 +63,8 @@ z80ExecTests opts =
     , testCase "(BC), (DE), (imm) indirect    " (test_ldOtherIndirect opts)
     , testCase "I, R register specials        " (test_ldSpecials      opts)
     , testCase "Reg16 immediates              " (test_ldReg16Imm      opts)
-    , testCase "Reg16 indirect loads          " (test_ldReg16IndLoad  opts)
-    , testCase "Reg16 indirect stores         " (test_ldReg16IndStore opts)
+    , testCase "Reg16 indirect loads          " (test_ldReg16MemLoad  opts)
+    , testCase "Reg16 indirect stores         " (test_ldReg16MemStore opts)
     ],
     testGroup "INC/DEC"
     [ testCase "8-bit register increment      " test_incReg8

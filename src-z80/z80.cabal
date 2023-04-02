@@ -16,40 +16,71 @@ library
     base,
     IntervalMap,
     bytestring,
-    comonad,
     containers,
-    deepseq,
-    directory,
     emubase,
-    filepath,
     generics-sop,
     hashable,
     microlens-platform,
     transformers,
-    old-locale,
-    parsec,
-    primitive,
     psqueues,
-    random,
+    split,
     syb,
     text,
-    time,
     uniplate,
     unordered-containers,
-    vector
+    vector,
+
+    -- Things we need here to keep VSCode Haskell LSP happy...
+    HUnit >= 1.2,
+    QuickCheck >= 2,
+    test-framework >= 0.8,
+    test-framework-hunit >= 0.3,
+    test-framework-quickcheck2 >= 0.3,
+    random
 
   -- cpp-options: -DTEST_DEBUG
   ghc-options: -Wall -O2
 
+  -- Note: RIO recommendations.
   default-extensions:
     CPP,
-    GADTs,
-    MultiParamTypeClasses,
-    TypeSynonymInstances,
-    RankNTypes,
-    OverloadedStrings,
     BangPatterns,
-    TemplateHaskell
+    BinaryLiterals,
+    ConstraintKinds,
+    DataKinds,
+    DefaultSignatures,
+    DeriveDataTypeable,
+    DeriveFoldable,
+    DeriveFunctor,
+    DeriveGeneric,
+    DeriveTraversable,
+    DoAndIfThenElse,
+    EmptyDataDecls,
+    ExistentialQuantification,
+    FlexibleContexts,
+    FlexibleInstances,
+    FunctionalDependencies,
+    GADTs,
+    GeneralizedNewtypeDeriving,
+    InstanceSigs,
+    KindSignatures,
+    LambdaCase,
+    MultiParamTypeClasses,
+    MultiWayIf,
+    NamedFieldPuns,
+    OverloadedStrings,
+    PartialTypeSignatures,
+    PatternGuards,
+    PolyKinds,
+    RankNTypes,
+    RecordWildCards,
+    ScopedTypeVariables,
+    StandaloneDeriving,
+    TemplateHaskell,
+    TupleSections,
+    TypeFamilies,
+    TypeSynonymInstances,
+    ViewPatterns
 
   exposed-modules:
     Z80,
@@ -68,79 +99,20 @@ library
     Z80.Execute.IncDec,
     Z80.Execute.Utils
 
--- test-suite z80inst
---     default-language:   Haskell2010
---     type:               exitcode-stdio-1.0
---     main-is:            Z80/Tests/Z80InstTest.hs
---     -- cpp-options:        -DTEST_DEBUG
---     ghc-options:        -Wall
---     build-depends:
---       base,
---       random,
---       Cabal,
---       HUnit >= 1.2,
---       QuickCheck >= 2,
---       test-framework >= 0.8,
---       test-framework-hunit >= 0.3,
---       test-framework-quickcheck2 >= 0.3,
---       IntervalMap,
---       bytestring,
---       comonad,
---       containers,
---       deepseq,
---       directory,
---       filepath,
---       generics-sop,
---       hashable,
---       microlens-platform,
---       transformers,
---       old-locale,
---       parsec,
---       primitive,
---       psqueues,
---       syb,
---       text,
---       time,
---       uniplate,
---       unordered-containers,
---       vector
---     default-extensions:
---       CPP,
---       GADTs,
---       MultiParamTypeClasses,
---       TypeSynonymInstances,
---       RankNTypes,
---       OverloadedStrings,
---       BangPatterns,
---       TemplateHaskell
---     other-modules:
---       Machine,
---       Machine.Device,
---       Machine.DisassemblerTypes,
---       Machine.MemorySystem,
---       Machine.NullProcessor,
---       Machine.ProgramCounter,
---       Machine.System,
---       Machine.Utils,
---       Z80,
---       Z80.DisasmOutput,
---       Z80.Disassembler,
---       Z80.InsnDecode,
---       Z80.InstructionSet,
---       Z80.Processor,
---       Z80.System
+  -- Grrrrrr... VSCode hair again!
+  other-modules:
+      Z80.Tests.Execute.QuickInstances,
+      Z80.Tests.Execute.TestData,
+      Z80.Tests.Execute.Utils
 
-test-suite z80execute
+test-suite z80inst
     default-language:   Haskell2010
     type:               exitcode-stdio-1.0
-    main-is:            Z80/Tests/Z80Execute.hs
-    hs-source-dirs:     .
+    main-is:            Z80/Tests/Z80InstTest.hs
     -- cpp-options:        -DTEST_DEBUG
     ghc-options:        -Wall
     build-depends:
-      base <5,
-      random >= 1,
-      Cabal,
+      base,
       HUnit >= 1.2,
       QuickCheck >= 2,
       test-framework >= 0.8,
@@ -160,22 +132,152 @@ test-suite z80execute
       old-locale,
       primitive,
       psqueues,
+      random,
+      split,
       syb,
       text,
       time >= 1.8,
       unordered-containers,
       vector,
       emubase
-    default-extensions:
-      CPP,
-      GADTs,
-      MultiParamTypeClasses,
-      TypeSynonymInstances,
-      RankNTypes,
-      OverloadedStrings,
-      BangPatterns,
-      TemplateHaskell
-    other-modules:
+  -- Note: RIO recommendations.
+  default-extensions:
+    CPP,
+    BangPatterns,
+    BinaryLiterals,
+    ConstraintKinds,
+    DataKinds,
+    DefaultSignatures,
+    DeriveDataTypeable,
+    DeriveFoldable,
+    DeriveFunctor,
+    DeriveGeneric,
+    DeriveTraversable,
+    DoAndIfThenElse,
+    EmptyDataDecls,
+    ExistentialQuantification,
+    FlexibleContexts,
+    FlexibleInstances,
+    FunctionalDependencies,
+    GADTs,
+    GeneralizedNewtypeDeriving,
+    InstanceSigs,
+    KindSignatures,
+    LambdaCase,
+    MultiParamTypeClasses,
+    MultiWayIf,
+    NamedFieldPuns,
+    OverloadedStrings,
+    PartialTypeSignatures,
+    PatternGuards,
+    PolyKinds,
+    RankNTypes,
+    RecordWildCards,
+    ScopedTypeVariables,
+    StandaloneDeriving,
+    TemplateHaskell,
+    TupleSections,
+    TypeFamilies,
+    TypeSynonymInstances,
+    ViewPatterns
+
+  other-modules:
+      Z80,
+      Z80.DisasmOutput,
+      Z80.Disassembler,
+      Z80.InsnDecode,
+      Z80.InsnExecute,
+      Z80.InstructionSet,
+      Z80.Processor,
+      Z80.System,
+
+      Z80.Execute.ALUops,
+      Z80.Execute.IncDec,
+      Z80.Execute.LoadStore,
+      Z80.Execute.Utils,
+
+      Z80.Tests.Execute.QuickInstances,
+      Z80.Tests.Execute.TestData,
+      Z80.Tests.Execute.Utils
+
+test-suite z80execute
+    default-language:   Haskell2010
+    type:               exitcode-stdio-1.0
+    main-is:            Z80/Tests/Z80Execute.hs
+    hs-source-dirs:     .
+    -- cpp-options:        -DTEST_DEBUG
+    ghc-options:        -Wall
+    build-depends:
+      base,
+      -- Cabal,
+      HUnit >= 1.2,
+      QuickCheck >= 2,
+      test-framework >= 0.8,
+      test-framework-hunit >= 0.3,
+      test-framework-quickcheck2 >= 0.3,
+      IntervalMap,
+      bytestring,
+      comonad,
+      containers,
+      deepseq,
+      directory,
+      filepath,
+      hashable,
+      generics-sop,
+      microlens-platform,
+      transformers >= 0.5,
+      old-locale,
+      primitive,
+      psqueues,
+      random,
+      split,
+      syb,
+      text,
+      time >= 1.8,
+      unordered-containers,
+      vector,
+      emubase
+  -- Note: RIO recommendations.
+  default-extensions:
+    CPP,
+    BangPatterns,
+    BinaryLiterals,
+    ConstraintKinds,
+    DataKinds,
+    DefaultSignatures,
+    DeriveDataTypeable,
+    DeriveFoldable,
+    DeriveFunctor,
+    DeriveGeneric,
+    DeriveTraversable,
+    DoAndIfThenElse,
+    EmptyDataDecls,
+    ExistentialQuantification,
+    FlexibleContexts,
+    FlexibleInstances,
+    FunctionalDependencies,
+    GADTs,
+    GeneralizedNewtypeDeriving,
+    InstanceSigs,
+    KindSignatures,
+    LambdaCase,
+    MultiParamTypeClasses,
+    MultiWayIf,
+    NamedFieldPuns,
+    OverloadedStrings,
+    PartialTypeSignatures,
+    PatternGuards,
+    PolyKinds,
+    RankNTypes,
+    RecordWildCards,
+    ScopedTypeVariables,
+    StandaloneDeriving,
+    TemplateHaskell,
+    TupleSections,
+    TypeFamilies,
+    TypeSynonymInstances,
+    ViewPatterns
+  other-modules:
       Z80,
       Z80.DisasmOutput,
       Z80.Disassembler,

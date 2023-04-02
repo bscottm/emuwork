@@ -1,94 +1,120 @@
 module Z80.Execute.LoadStore
  ( insLoad
+ , insLoadReg8Reg8
+ , insLoadReg8Imm
+ , insLoadAMemXfer
+ , insLoadReg16Mem
+ , insLoadReg16Imm
  )
 where
 
-import qualified Control.Arrow as Arrow
 import           Control.Monad.Trans.State.Strict (execState)
-import Data.Bits ( Bits((.&.), xor, shiftR) )
-import           Data.Vector.Unboxed            ((!))
-import Lens.Micro.Platform ( (&), (.~), (^.), Lens )
 
-import Machine
-import Z80.Execute.Utils
-import Z80.InstructionSet
-import Z80.Processor
-import Z80.System
+import           Data.Bits                        (Bits (shiftR, xor, (.&.)))
+import           Data.Vector.Unboxed              ((!))
+
+import           Lens.Micro.Platform              (Lens, (&), (.~), (^.))
+
+import           Machine
+
+import           Z80.Execute.Utils
+import           Z80.InstructionSet
+import           Z80.Processor
+import           Z80.System
 
 -- ==~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~~
 -- LD instruction:
 -- ==~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~~
 
--- | Z80 load instruction, with all of its manifest operands
-insLoad :: OperLD
-        -> Z80system sysType
-        -> Z80system sysType
+insLoadReg8Reg8 :: Reg8Reg8
+                -> Z80system sysType
+                -> Z80system sysType
+insLoadReg8Reg8 (Reg8Reg8 dst src) sys                  = reg8set dst $ reg8get sys src
 
-insLoad (Reg8Reg8 dst src) sys                  = reg8set dst $ reg8get sys src
-insLoad (Reg8Imm dst imm) sys                   = reg8set dst (imm, sys)
-insLoad AccBCIndirect sys                       = reg8set A $ sysMRead (reg16get BC sys) sys
-insLoad AccDEIndirect sys                       = reg8set A $ sysMRead (reg16get DE sys) sys
-insLoad (AccImm16Indirect (AbsAddr addr)) sys   = reg8set A $ sysMRead addr sys
-insLoad (AccImm16Indirect (SymAddr _   )) _     = error "insLoad/AccImm16Indirect: SymAddr encountered."
-insLoad AccIReg sys                             = iRegRRegFlags $ reg8set A (z80registers sys ^. z80ipage, sys)
-insLoad AccRReg sys                             = iRegRRegFlags $ reg8set A (z80registers sys ^. z80rreg, sys)
-insLoad BCIndirectStore sys                     = sysMWrite (reg16get BC sys) (z80registers sys ^. z80accum) sys
-insLoad DEIndirectStore sys                     = sysMWrite (reg16get DE sys) (z80registers sys ^. z80accum) sys
-insLoad (Imm16IndirectStore (AbsAddr addr)) sys = sysMWrite addr (z80registers sys ^. z80accum) sys
-insLoad (Imm16IndirectStore (SymAddr _   )) _   = error "insLoad/Imm16IndirectStore: SymAddr encountered."
-insLoad IRegAcc sys                             = sys & processor . cpu . regs . z80ipage .~ z80registers sys ^. z80accum
-insLoad RRegAcc sys                             = sys & processor . cpu . regs . z80rreg .~ z80registers sys ^. z80accum
+insLoadReg8Imm :: Reg8Imm
+               -> Z80system sysType
+               -> Z80system sysType
+insLoadReg8Imm (Reg8Imm dst imm) sys                   = reg8set dst (imm, sys)
 
-insLoad (RPair16ImmLoad (RPair16 rp) (AbsAddr val))  sys = reg16set val rp sys
-insLoad (RPair16ImmLoad SP           (AbsAddr addr)) sys = sys & processor . cpu . regs . z80sp .~ addr
-insLoad (RPair16ImmLoad _            (SymAddr _  ))  _   = error "insLoad/RPair16ImmLoad: SymAddr encountered."
+insLoadAMemXfer :: AMemXfer
+                -> Z80system sysType
+                -> Z80system sysType
+insLoadAMemXfer FromBCindirect sys              = reg8set A $ sysMRead (reg16get BC sys) sys
+insLoadAMemXfer FromDEindirect sys              = reg8set A $ sysMRead (reg16get DE sys) sys
+insLoadAMemXfer ToBCindirect sys                = sysMWrite (reg16get BC sys) (z80registers sys ^. z80accum) sys
+insLoadAMemXfer ToDEindirect sys                = sysMWrite (reg16get DE sys) (z80registers sys ^. z80accum) sys
+insLoadAMemXfer (AccFromMem (AbsAddr addr)) sys = reg8set A $ sysMRead addr sys
+insLoadAMemXfer (AccFromMem (SymAddr _   )) _   = error "insLoad/AccImm16Indirect: SymAddr encountered."
+insLoadAMemXfer (AccToMem (AbsAddr addr)) sys   = sysMWrite addr (z80registers sys ^. z80accum) sys
+insLoadAMemXfer (AccToMem (SymAddr _   )) _     = error "insLoad/Imm16IndirectStore: SymAddr encountered."
 
-insLoad (RPIndirectStore (RPair16 BC) (AbsAddr addr)) sys = doIndirectStoreReg16 addr z80breg z80creg sys
-insLoad (RPIndirectStore (RPair16 DE) (AbsAddr addr)) sys = doIndirectStoreReg16 addr z80dreg z80ereg sys
-insLoad (RPIndirectStore (RPair16 HL) (AbsAddr addr)) sys = doIndirectStoreReg16 addr z80hreg z80lreg sys
-insLoad (RPIndirectStore (RPair16 IX) (AbsAddr addr)) sys = doIndirectStoreReg16 addr z80ixh  z80ixl  sys
-insLoad (RPIndirectStore (RPair16 IY) (AbsAddr addr)) sys = doIndirectStoreReg16 addr z80iyh  z80iyl  sys
-insLoad (RPIndirectStore SP           (AbsAddr addr)) sys = execState writeSeq sys'
+insLoadReg16Mem
+  :: Reg16Mem
+  -> Z80system sysType
+  -> Z80system sysType
+insLoadReg16Mem (FromReg16 (RPair16 BC) (AbsAddr addr)) sys = doStoreReg16 addr z80breg z80creg sys
+insLoadReg16Mem (FromReg16 (RPair16 DE) (AbsAddr addr)) sys = doStoreReg16 addr z80dreg z80ereg sys
+insLoadReg16Mem (FromReg16 (RPair16 HL) (AbsAddr addr)) sys = doStoreReg16 addr z80hreg z80lreg sys
+insLoadReg16Mem (FromReg16 (RPair16 IX) (AbsAddr addr)) sys = doStoreReg16 addr z80ixh  z80ixl  sys
+insLoadReg16Mem (FromReg16 (RPair16 IY) (AbsAddr addr)) sys = doStoreReg16 addr z80iyh  z80iyl  sys
+insLoadReg16Mem (FromReg16 SP           (AbsAddr addr)) sys = execState writeSeq sys
   where
     z80regs           = z80registers sys
-    (storeAddr, sys') = Arrow.first make16bit $ sysMReadN addr 2 sys
-    hi                = (fromIntegral (z80regs ^. z80sp) `shiftR` 8) .&. 0xff :: Z80word
-    lo                = (fromIntegral (z80regs ^. z80sp) .&. 0xff)            :: Z80word
-    writeSeq          = sequence [stateSysMWrite storeAddr lo, stateSysMWrite (storeAddr + 1) hi]
-insLoad (RPIndirectStore _            (SymAddr _   )) _   = error "insLoad/HLIndirectStore: SymAddr encountered"
+    hi                = fromIntegral ((z80regs ^. z80sp `shiftR` 8) .&. 0xff)
+    lo                = fromIntegral (z80regs ^. z80sp) .&. 0xff
+    writeSeq          = sequence [stateSysMWrite addr lo, stateSysMWrite (1+ addr) hi]
+insLoadReg16Mem (FromReg16 _            (SymAddr _   )) _   = error "insLoadReg16Mem: SymAddr encountered"
 
-insLoad (RPIndirectLoad  (RPair16 BC) (AbsAddr addr)) sys = doIndirectLoadReg16 addr z80breg z80creg sys
-insLoad (RPIndirectLoad  (RPair16 DE) (AbsAddr addr)) sys = doIndirectLoadReg16 addr z80dreg z80ereg sys
-insLoad (RPIndirectLoad  (RPair16 HL) (AbsAddr addr)) sys = doIndirectLoadReg16 addr z80hreg z80lreg sys
-insLoad (RPIndirectLoad  (RPair16 IX) (AbsAddr addr)) sys = doIndirectLoadReg16 addr z80ixh  z80ixl  sys
-insLoad (RPIndirectLoad  (RPair16 IY) (AbsAddr addr)) sys = doIndirectLoadReg16 addr z80iyh  z80iyl sys
-insLoad (RPIndirectLoad  SP           (AbsAddr addr)) sys = sys' & processor . cpu . regs .~ z80regs'
+insLoadReg16Mem (ToReg16  (RPair16 BC) (AbsAddr addr)) sys = doLoadReg16 addr z80breg z80creg sys
+insLoadReg16Mem (ToReg16  (RPair16 DE) (AbsAddr addr)) sys = doLoadReg16 addr z80dreg z80ereg sys
+insLoadReg16Mem (ToReg16  (RPair16 HL) (AbsAddr addr)) sys = doLoadReg16 addr z80hreg z80lreg sys
+insLoadReg16Mem (ToReg16  (RPair16 IX) (AbsAddr addr)) sys = doLoadReg16 addr z80ixh  z80ixl  sys
+insLoadReg16Mem (ToReg16  (RPair16 IY) (AbsAddr addr)) sys = doLoadReg16 addr z80iyh  z80iyl sys
+insLoadReg16Mem (ToReg16  SP           (AbsAddr addr)) sys = sys' & processor . cpu . regs .~ z80regs'
   where
     (val, sys')      = sysMReadN addr 2 sys
     z80regs'         = z80registers sys & z80sp .~ make16bit val
+insLoadReg16Mem (ToReg16  _            (SymAddr _   )) _   = error "insLoadReg16Mem: SymAddr encountered"
 
-insLoad (RPIndirectLoad  _            (SymAddr _   )) _   = error "insLoad/HLIndirectLoad: SymAddr encountered"
+insLoadReg16Imm
+  :: Reg16Imm
+  -> Z80system sysType
+  -> Z80system sysTypeinsLoadReg16Imm
+insLoadReg16Imm (Reg16Imm (RPair16 rp) (AbsAddr val))  sys = reg16set val rp sys
+insLoadReg16Imm (Reg16Imm SP           (AbsAddr addr)) sys = sys & processor . cpu . regs . z80sp .~ addr
+insLoadReg16Imm (Reg16Imm _            (SymAddr _  ))  _   = error "insLoad/RPair16ImmLoad: SymAddr encountered."
 
-doIndirectStoreReg16
+-- | Z80 load instruction, with all of its manifest operands
+insLoad :: AccumSpecials
+        -> Z80system sysType
+        -> Z80system sysType
+insLoad FromItoA sys                             = iRegRRegFlags $ reg8set A (z80registers sys ^. z80ipage, sys)
+insLoad FromRtoA sys                             = iRegRRegFlags $ reg8set A (z80registers sys ^. z80rreg, sys)
+insLoad FromAtoI sys                             = sys & processor . cpu . regs . z80ipage .~ z80registers sys ^. z80accum
+insLoad FromAtoR sys                             = sys & processor . cpu . regs . z80rreg .~ z80registers sys ^. z80accum
+
+
+doStoreReg16
   :: Z80addr
   -> Lens Z80registers Z80registers Z80word Z80word
   -> Lens Z80registers Z80registers Z80word Z80word
   -> Z80system sysType
   -> Z80system sysType
-doIndirectStoreReg16 addr higetter logetter sys =
-  execState (sequence writeSeq) sys'
+doStoreReg16 addr higetter logetter sys = execState (sequence writeSeq) sys
   where
     z80regs = z80registers sys
-    (storeAddr, sys')  = Arrow.first make16bit $ sysMReadN addr 2 sys
-    writeSeq = [stateSysMWrite storeAddr (z80regs ^. logetter), stateSysMWrite (storeAddr + 1) (z80regs ^. higetter)]
+    writeSeq =
+      [ stateSysMWrite addr      (z80regs ^. logetter)
+      , stateSysMWrite (1+ addr) (z80regs ^. higetter)
+      ]
 
-doIndirectLoadReg16
+doLoadReg16
   :: Z80addr
   -> Lens Z80registers Z80registers Z80word Z80word
   -> Lens Z80registers Z80registers Z80word Z80word
   -> Z80system sysType
   -> Z80system sysType
-doIndirectLoadReg16 addr hisetter losetter sys = sys' & processor . cpu . regs .~ z80regs'
+doLoadReg16 addr hisetter losetter sys = sys' & processor . cpu . regs .~ z80regs'
   where
     z80regs          = z80registers sys
     (val, sys')      = sysMReadN addr 2 sys

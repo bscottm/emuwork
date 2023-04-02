@@ -154,7 +154,7 @@ doDirective :: G.Directive
             -> (Seq.Seq Z80DisasmElt, Z80disassembly)
 
 doDirective (G.SymEquate label addr) dstate =
-  let addr' = unPC $ getGuidanceAddr dstate addr
+  let addr' = thePC $ getGuidanceAddr dstate addr
   in  (Seq.singleton $ mkEquate label addr', dstate & disasmSymbolTable %~ H.insert addr' label)
 
 doDirective (G.Comment comment) dstate =
@@ -240,7 +240,7 @@ jumpTable :: Z80disp
 jumpTable nBytes dstate = first Seq.fromList $ runState (sequence [state genAddr | _elt <- [0..(nBytes - 2) `div` 2]]) dstate
   where
     genAddr dstate'        = first (genPseudo dstate') $ disasmMReadN 2 dstate'
-    genPseudo dstate' addr = mkAddr (unPC (dstate' ^. disasmCurAddr)) ((AbsAddr . flipWords) addr) addr
+    genPseudo dstate' addr = mkAddr (thePC (dstate' ^. disasmCurAddr)) ((AbsAddr . flipWords) addr) addr
     flipWords addr         = shiftL (fromIntegral (addr DVU.! 1)) 8 .|. fromIntegral (addr DVU.! 0)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
@@ -248,7 +248,7 @@ jumpTable nBytes dstate = first Seq.fromList $ runState (sequence [state genAddr
 -- by a character; (HL) is compared to this following character and flags set.
 trs80RomPostProcessor :: DisElementPostProc Z80state Z80instruction Z80addr Z80word Z80PseudoOps
 trs80RomPostProcessor rst08@(DisasmInsn _ _ (RST 8) _) dstate =
-  let curPC = unPC (dstate ^. disasmCurAddr)
+  let curPC = thePC (dstate ^. disasmCurAddr)
       (byte, dstate') = disasmMRead dstate
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
       pseudo = if byte >= 0x20 && byte <= 0x7f then mkAscii else mkByteRange

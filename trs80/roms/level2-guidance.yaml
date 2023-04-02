@@ -213,7 +213,12 @@ section:
     - comment: POINT command jumps here.
     - disasm:
         addr: $
-        nbytes: 1
+        nbytes: 2
+    - comment: |
+        The "LD BC, NNNN" hack: 0x01 is "LD BC, NNNN", which loads BC with an
+        ignored value. The following 0x03 0x80 is LD A, 80h. It's a clever way
+        to flow through the SET and RESET command entry points, which set A,
+        without jumps.
     - bytes:
         addr: $
         end: 0x0135
