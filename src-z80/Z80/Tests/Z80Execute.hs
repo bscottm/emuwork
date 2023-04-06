@@ -32,9 +32,9 @@ main =
   do
     stdGen <- getStdGen
     let ((mem0x7200, mem0x6100, mem0x6300), stdGen') =
-          runState ((,,) <$> state (finiteRandList (0, 0xff) 1024 :: (StdGen -> ([Z80word], StdGen)))
-                         <*> state (finiteRandList (0, 0xff)  256 :: (StdGen -> ([Z80word], StdGen)))
-                         <*> state (finiteRandList (0, 0xff)  256 :: (StdGen -> ([Z80word], StdGen)))
+          runState ((,,) <$> state (finiteRandList (0, 0xff) 1024 :: (StdGen -> ([Z80byte], StdGen)))
+                         <*> state (finiteRandList (0, 0xff)  256 :: (StdGen -> ([Z80byte], StdGen)))
+                         <*> state (finiteRandList (0, 0xff)  256 :: (StdGen -> ([Z80byte], StdGen)))
                    )
                    stdGen
         sysSeq = sequence [ stateSysMWriteN 0x7200                (DVU.fromList mem0x7200)
@@ -70,7 +70,7 @@ z80ExecTests opts =
     [ testCase "8-bit register increment      " test_incReg8
     , testCase "8-bit register decrement      " test_decReg8
     , testCase "Indirect Reg8 inc/dec         " (test_incDecIndReg8   opts)
-    , testCase "Increment/Decrement Reg8 flags" (test_incDecReg8CC    opts)
+    , testCase "Increment/Decrement Reg8 flags" (test_incIncDecReg8CC    opts)
     , testCase "16-bit register increment     " test_incReg16
     , testCase "16-bit register decrement     " test_decReg16
     , testCase "8-bit register SUB            " test_subReg8
@@ -92,13 +92,30 @@ finiteRandList :: (Random a, Num a) => (a, a) -> Int -> StdGen -> ([a], StdGen)
 finiteRandList range lim = runState (replicateM lim (state (randomR range)))
 
 {-
--- | The ordinary 8-bit registers (does not include the indirect (HL), (IX|IY+d) memory references)
-ordinaryReg8 :: [(Z80reg8, ASetter Z80registers Z80registers Z80word Z80word, Z80word, Text)]
-ordinaryReg8 = [ (A, z80accum, 0x5a, "A")
-               , (B, z80breg,  0x3b, "B")
-               , (C, z80creg,  0x0c, "B")
-               , (D, z80dreg,  0x8d, "D")
-               , (E, z80ereg,  0x2e, "E")
-               , (H, z80hreg,  0x72, "H")
-               , (L, z80lreg,  0xc2, "L")
-               ] -}
+import Control.Monad.Trans.Writer
+import Test.HUnit
+
+-- A test function that runs some IO and logs messages via WriterT
+testFunction :: Int -> WriterT [String] IO Bool
+testFunction n = do
+  let result = n > 0
+  tell ["Testing with n = " ++ show n]
+  tell ["Result: " ++ show result]
+  return result
+
+-- A HUnit test case that runs the test function for multiple values of n
+testCase1 :: Test
+testCase1 = TestCase $ do
+  -- Run the test function for n = 0, 1, and 2
+  results <- mapM (runWriterT . testFunction) [0, 1, 2]
+  -- Unzip the results, getting a list of booleans and a list of log messages
+  let (boolResults, logMessages) = unzip results
+  -- Check that all the boolean results are true
+  assertBool "Test failed!" $ and boolResults
+  -- Print the log messages
+  mapM_ putStrLn $ concat logMessages
+
+-- Run the test case
+main :: IO Counts
+main = runTestTT testCase1
+-}

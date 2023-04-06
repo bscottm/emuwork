@@ -17,9 +17,6 @@ import           Z80.InstructionSet as Z80exports
 import           Z80.Processor      as Z80exports
 import           Z80.System         as Z80exports
 
--- import           Z80.InstructionSet (Z80instruction)
--- import           Z80.Processor      (Z80state, z80initialState)
--- import           Z80.System         (Z80memory)
 import           Z80.InstructionSet ()
 import           Z80.Processor      ()
 import           Z80.System         ()

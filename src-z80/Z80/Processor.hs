@@ -3,7 +3,7 @@
 -- | The Z80 processor emulation module.
 module Z80.Processor
   ( -- * Types
-    Z80word
+    Z80byte
   , Z80addr
   , Z80disp
   , Z80ioPort
@@ -51,13 +51,14 @@ module Z80.Processor
 import           Lens.Micro.Platform (makeLenses)
 import Data.Int  (Int16)
 import Data.Word (Word8, Word16)
-
 import Machine   (ProgramCounter)
 
 -- | Basic word type on a Z80: byte
-type Z80word          = Word8
+type Z80byte          = Word8
+
 -- | Memory addresses are 16-bit quantities
 type Z80addr          = Word16
+
 -- | Program counter displacements are 16 bits
 type Z80disp          = Int16
 -- | Z80 program counter
@@ -97,41 +98,42 @@ data Z80state =
 -- registers are not generally visible except through the EXX instruction that exchanges the two sides.
 data Z80registers = Z80registers {
   -- The individual registers. The register pairs are treated separately.
-    _z80accum :: {-# UNPACK #-} !Z80word         -- ^ Accumulator
-  , _z80breg  :: {-# UNPACK #-} !Z80word         -- ^ B register
-  , _z80creg  :: {-# UNPACK #-} !Z80word         -- ^ C register
-  , _z80dreg  :: {-# UNPACK #-} !Z80word         -- ^ D register
-  , _z80ereg  :: {-# UNPACK #-} !Z80word         -- ^ E register
-  , _z80hreg  :: {-# UNPACK #-} !Z80word         -- ^ "High" register
-  , _z80lreg  :: {-# UNPACK #-} !Z80word         -- ^ "Low" register
-  , _z80ixh   :: {-# UNPACK #-} !Z80word         -- ^ Upper 8 bits of IX
-  , _z80ixl   :: {-# UNPACK #-} !Z80word         -- ^ Lower 8 bits of IX
-  , _z80iyh   :: {-# UNPACK #-} !Z80word         -- ^ Upper 8 bits of IY
-  , _z80iyl   :: {-# UNPACK #-} !Z80word         -- ^ Lower 8 bits of IY
+    _z80accum :: {-# UNPACK #-} !Z80byte         -- ^ Accumulator
+  , _z80breg  :: {-# UNPACK #-} !Z80byte         -- ^ B register
+  , _z80creg  :: {-# UNPACK #-} !Z80byte         -- ^ C register
+  , _z80dreg  :: {-# UNPACK #-} !Z80byte         -- ^ D register
+  , _z80ereg  :: {-# UNPACK #-} !Z80byte         -- ^ E register
+  , _z80hreg  :: {-# UNPACK #-} !Z80byte         -- ^ "High" register
+  , _z80lreg  :: {-# UNPACK #-} !Z80byte         -- ^ "Low" register
+  , _z80ixh   :: {-# UNPACK #-} !Z80byte         -- ^ Upper 8 bits of IX
+  , _z80ixl   :: {-# UNPACK #-} !Z80byte         -- ^ Lower 8 bits of IX
+  , _z80iyh   :: {-# UNPACK #-} !Z80byte         -- ^ Upper 8 bits of IY
+  , _z80iyl   :: {-# UNPACK #-} !Z80byte         -- ^ Lower 8 bits of IY
   , _z80sp    :: {-# UNPACK #-} !Z80addr         -- ^ Stack pointer
-  , _z80ipage :: {-# UNPACK #-} !Z80word         -- ^ Interrupt page
-  , _z80rreg  :: {-# UNPACK #-} !Z80word         -- ^ (Dynamic memory) Refresh register
+  , _z80ipage :: {-# UNPACK #-} !Z80byte         -- ^ Interrupt page
+  , _z80rreg  :: {-# UNPACK #-} !Z80byte         -- ^ (Dynamic memory) Refresh register
   }
   deriving (Eq, Show)
 
 -- | Default/zeroed register set
 initialRegisters :: Z80registers
-initialRegisters = Z80registers {
-    _z80accum = 0xff
-  , _z80breg  = 0
-  , _z80creg  = 0
-  , _z80dreg  = 0
-  , _z80ereg  = 0
-  , _z80hreg  = 0
-  , _z80lreg  = 0
-  , _z80ixh   = 0
-  , _z80ixl   = 0
-  , _z80iyh   = 0
-  , _z80iyl   = 0
-  , _z80sp    = 0xffff
-  , _z80ipage = 0
-  , _z80rreg  = 0
-  }
+initialRegisters = 
+  Z80registers
+    { _z80accum = 0xff
+    , _z80breg  = 0
+    , _z80creg  = 0
+    , _z80dreg  = 0
+    , _z80ereg  = 0
+    , _z80hreg  = 0
+    , _z80lreg  = 0
+    , _z80ixh   = 0
+    , _z80ixl   = 0
+    , _z80iyh   = 0
+    , _z80iyl   = 0
+    , _z80sp    = 0xffff
+    , _z80ipage = 0
+    , _z80rreg  = 0
+    }
 
 -- Emit Template Haskell hair for lenses
 $(concat <$> mapM makeLenses [''Z80state, ''Z80registers])

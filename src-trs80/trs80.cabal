@@ -65,7 +65,6 @@ library
     ScopedTypeVariables,
     StandaloneDeriving,
     TupleSections,
-    TypeFamilies,
     TypeSynonymInstances,
     ViewPatterns
 
@@ -104,6 +103,5 @@ test-suite yamltest
     default-extensions: GADTs,
                         MultiParamTypeClasses,
                         OverloadedStrings,
-                        TemplateHaskell,
                         TypeSynonymInstances,
                         FlexibleInstances

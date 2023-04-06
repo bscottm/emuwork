@@ -17,8 +17,8 @@ import Z80.Tests.Execute.QuickInstances()
 test_subReg8 :: Assertion
 test_subReg8 = assertBoolMessages [ runTest reg8 elt1 elt2
                                   | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
-                                  , elt1 <- [0..0xff] :: [Z80word]
-                                  , elt2 <- [0..0xff] :: [Z80word]
+                                  , elt1 <- [0..0xff] :: [Z80byte]
+                                  , elt2 <- [0..0xff] :: [Z80byte]
                                   ]
   where
     runTest reg8 val1 val2
@@ -30,15 +30,15 @@ test_subReg8 = assertBoolMessages [ runTest reg8 elt1 elt2
       | otherwise
       = T.pack $ printf "%s: Expected 0x%04x, got 0x%04x" (z80ShortInsnFormat ins) (val1 - val2) gotVal
       where
-        ins = SUB8 . ALUAcc . ALUreg8 $ reg8
-        gotVal = accumResult reg8 val1 val2 (SUB8 . ALUAcc)
+        ins = SUB . ALUreg8 $ reg8
+        gotVal = accumResult reg8 val1 val2 SUB
 
 
 test_andReg8 :: Assertion
 test_andReg8 = assertBoolMessages [ runTest reg8 elt1 elt2
                                   | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
-                                  , elt1 <- [0..0xff] :: [Z80word]
-                                  , elt2 <- [0..0xff] :: [Z80word]
+                                  , elt1 <- [0..0xff] :: [Z80byte]
+                                  , elt2 <- [0..0xff] :: [Z80byte]
                                   ]
   where
     runTest reg8 val1 val2
@@ -57,8 +57,8 @@ test_andReg8 = assertBoolMessages [ runTest reg8 elt1 elt2
 test_xorReg8 :: Assertion
 test_xorReg8 = assertBoolMessages [ runTest reg8 elt1 elt2
                                   | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
-                                  , elt1 <- [0..0xff] :: [Z80word]
-                                  , elt2 <- [0..0xff] :: [Z80word]
+                                  , elt1 <- [0..0xff] :: [Z80byte]
+                                  , elt2 <- [0..0xff] :: [Z80byte]
                                   ]
   where
     runTest reg8 val1 val2
@@ -77,8 +77,8 @@ test_xorReg8 = assertBoolMessages [ runTest reg8 elt1 elt2
 test_orReg8 :: Assertion
 test_orReg8 = assertBoolMessages [ runTest reg8 elt1 elt2
                                   | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
-                                  , elt1 <- [0..0xff] :: [Z80word]
-                                  , elt2 <- [0..0xff] :: [Z80word]
+                                  , elt1 <- [0..0xff] :: [Z80byte]
+                                  , elt2 <- [0..0xff] :: [Z80byte]
                                   ]
   where
     runTest reg8 val1 val2
@@ -96,10 +96,10 @@ test_orReg8 = assertBoolMessages [ runTest reg8 elt1 elt2
 
 accumResult
   :: Z80reg8
-  -> Z80word
-  -> Z80word
-  -> (OperALU -> Z80instruction)
-  -> Z80word
+  -> Z80byte
+  -> Z80byte
+  -> (Z80operand Z80OpndALU -> Z80instruction)
+  -> Z80byte
 accumResult reg accum val ins = z80registers testSys ^. z80accum
   where
     initialSys

@@ -9,15 +9,15 @@ import Z80.InstructionSet
 
 -- | Shorthand for the Z80\'s 'EmulatedProcessor' type. This is defined here because 'Z80instruction' is required
 -- and would otherwise form a module import cycle.
-type Z80emulation      = EmulatedProcessor Z80state Z80instruction Z80addr Z80word
+type Z80emulation      = EmulatedProcessor Z80state Z80instruction Z80addr Z80byte
 
 -- | Shorthand for a Z80 emulated system, with a phantom type. The phantom type
 -- acts as a discriminant between different kinds of Z80 systems, e.g., the
 -- TRS-80 Model I.
-type Z80system sysType = EmulatedSystem Z80state Z80instruction Z80addr Z80word
+type Z80system sysType = EmulatedSystem Z80state Z80instruction Z80addr Z80byte
 
 -- | Z80 memory system type
-type Z80memory         = MemorySystem Z80addr Z80word
+type Z80memory         = MemorySystem Z80addr Z80byte
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~
 -- Common accessors...

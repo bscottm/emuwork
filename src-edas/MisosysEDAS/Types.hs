@@ -320,7 +320,7 @@ data AsmStmt where
                  , _asmOp      :: AsmOp
                  , _comment    :: Maybe Comment
                  , _stmtAddr   :: Word16            -- Statement address, i.e., current program counter
-                 , _bytes      :: Vector Z80word    -- The bytes corresponding to this statement
+                 , _bytes      :: Vector Z80byte    -- The bytes corresponding to this statement
                  } -> AsmStmt
   -- Conditional assembly depending on pass number (1 = symbol evaluation, 2 = listing, 3 = object code generation)
   CondPass    :: { _srcPos       :: SourcePos

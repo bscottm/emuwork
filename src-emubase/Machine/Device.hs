@@ -43,7 +43,6 @@ type DeviceWriter addrType wordType devTag = wordType -> addrType -> devTag -> (
 
 -- | The workhorse for reading a data sequence from a device, returning both the resulting list
 devReadSeq :: ( Integral addrType
-              , Integral wordType
               , DVU.Unbox wordType
 #if defined(TEST_DEBUG)
               , Show addrType
@@ -61,7 +60,6 @@ devReadSeq sOffs mLen (Device dev' reset reader writer) =
 
 -- | The workhorse for writing a data sequence from a device, returning updated memory region
 devWriteSeq :: ( Integral addrType
-               , Integral wordType
                , DVU.Unbox wordType
 #if defined(TEST_DEBUG)
                , PrintfArg addrType

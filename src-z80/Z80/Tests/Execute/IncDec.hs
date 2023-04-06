@@ -27,7 +27,7 @@ import Z80.Tests.Execute.Utils
 test_incReg8 :: Assertion
 test_incReg8 = assertBoolMessages [ runTest reg8 elt
                                   | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
-                                  , elt  <- [0..0xff] :: [Z80word]
+                                  , elt  <- [0..0xff] :: [Z80byte]
                                   ]
   where
     runTest reg8 val
@@ -36,14 +36,14 @@ test_incReg8 = assertBoolMessages [ runTest reg8 elt
       | otherwise
       = T.pack $ printf "%s: Expected 0x%04x, got 0x%04x" (z80ShortInsnFormat ins) val gotVal
       where
-        ins = INC reg8
+        ins = INC . IncDecReg8 $ reg8
         gotVal = incDec8TestSys ins (z80Reg8Lens reg8) val
 
 
 test_decReg8 :: Assertion
 test_decReg8 = assertBoolMessages [ runTest reg8 elt
                                   | reg8 <- [A, B, C, D, E, H, L, IXh, IXl, IYh, IYl]
-                                  , elt  <- [0..0xff] :: [Z80word]
+                                  , elt  <- [0..0xff] :: [Z80byte]
                                   ]
   where
     runTest reg8 val
@@ -52,24 +52,24 @@ test_decReg8 = assertBoolMessages [ runTest reg8 elt
       | otherwise
       = T.pack $ printf "%s: Expected 0x%04x, got 0x%04x" (z80ShortInsnFormat ins) val gotVal
       where
-        ins = DEC reg8
+        ins = DEC . IncDecReg8 $ reg8
         gotVal = incDec8TestSys ins (z80Reg8Lens reg8) val
 
 
 incDec8Test
-  :: (Z80word -> Z80word)
+  :: (Z80byte -> Z80byte)
   -> Z80instruction
-  -> Lens Z80registers Z80registers Z80word Z80word
-  -> Z80word
+  -> Lens Z80registers Z80registers Z80byte Z80byte
+  -> Z80byte
   -> Bool
 incDec8Test op ins regLens val = op val == incDec8TestSys ins regLens val
 
 
 incDec8TestSys
   :: Z80instruction
-  -> Lens Z80registers Z80registers Z80word Z80word
-  -> Z80word
-  -> Z80word
+  -> Lens Z80registers Z80registers Z80byte Z80byte
+  -> Z80byte
+  -> Z80byte
 incDec8TestSys ins regLens val = z80registers testSys ^. regLens
   where
     testSys     = z80instructionExecute (DecodedInsn 0x1000 ins) initialSys
@@ -88,12 +88,12 @@ test_incDecIndReg8 opts =
         indirectAddr         = 0x7200 + offset
     setStdGen stdGen'''
 
-    let incHLindirect = indirectTest "(HL)" HLindirect indirectAddr (+ 1) INC
-        decHLindirect = indirectTest "(HL)" HLindirect indirectAddr (subtract 1) DEC
-        incIXindirect = indirectTest "(IX+d)" (IXindirect ixOffset) (initialIXAddr + fromIntegral ixOffset) (+ 1) INC
-        decIXindirect = indirectTest "(IX+d)" (IXindirect ixOffset) (initialIXAddr + fromIntegral ixOffset) (subtract 1) DEC
-        incIYindirect = indirectTest "(IY+d)" (IYindirect iyOffset) (initialIYAddr + fromIntegral iyOffset) (+ 1) INC
-        decIYindirect = indirectTest "(IY+d)" (IYindirect iyOffset) (initialIYAddr + fromIntegral iyOffset) (subtract 1) DEC
+    let incHLindirect = indirectTest "(HL)" HLindirect indirectAddr (+ 1) (INC . IncDecReg8)
+        decHLindirect = indirectTest "(HL)" HLindirect indirectAddr (subtract 1) (DEC . IncDecReg8)
+        incIXindirect = indirectTest "(IX+d)" (IXindirect ixOffset) (initialIXAddr + fromIntegral ixOffset) (+ 1) (INC . IncDecReg8)
+        decIXindirect = indirectTest "(IX+d)" (IXindirect ixOffset) (initialIXAddr + fromIntegral ixOffset) (subtract 1) (DEC . IncDecReg8)
+        incIYindirect = indirectTest "(IY+d)" (IYindirect iyOffset) (initialIYAddr + fromIntegral iyOffset) (+ 1) (INC . IncDecReg8)
+        decIYindirect = indirectTest "(IY+d)" (IYindirect iyOffset) (initialIYAddr + fromIntegral iyOffset) (subtract 1) (DEC . IncDecReg8)
 
     assertBoolMessages [ incHLindirect, decHLindirect
                        , incIXindirect, decIXindirect
@@ -116,16 +116,16 @@ test_incDecIndReg8 opts =
         gotVal = fst $ sysMRead addr testSys
 
 
-test_incDecReg8CC
+test_incIncDecReg8CC
   :: TestParams
   -> Assertion
-test_incDecReg8CC _opts =
+test_incIncDecReg8CC _opts =
   do
     result <- sequence [test_flags testVal
-                       | testVal <- [ (INC, 0xff, False,  True, False,  True, False)
-                                    , (DEC, 0x00, True,  False, False,  True,  True)
-                                    , (INC, 0x01, False, False, False, False, False)
-                                    , (INC, 0x49, False, False, True,  False, False)
+                       | testVal <- [ (INC . IncDecReg8, 0xff, False,  True, False,  True, False)
+                                    , (DEC . IncDecReg8, 0x00, True,  False, False,  True,  True)
+                                    , (INC . IncDecReg8, 0x01, False, False, False, False, False)
+                                    , (INC . IncDecReg8, 0x49, False, False, True,  False, False)
                                     ]
                        ]
     assertBool "INC/DEC condition codes fail." (and result)
@@ -175,13 +175,13 @@ test_incReg16 = assertBoolMessages [ runTest reg16 elt
                                    ]
   where
     runTest reg16 val
-      | incDec16Test (+ 1) INC16 reg16 val
+      | incDec16Test (+ 1) (INC . IncDecReg16) reg16 val
       = T.empty
       | otherwise
       = T.pack $ printf "%s: Expected 0x%04x, got 0x%04x" (z80ShortInsnFormat ins) val gotVal
       where
-        ins = INC16 . RPair16 $ reg16
-        gotVal = incDec16TestSys INC16 reg16 val
+        ins = INC . IncDecReg16 . RPair16 $ reg16
+        gotVal = incDec16TestSys (INC . IncDecReg16) reg16 val
 
 
 test_decReg16 :: Assertion
@@ -191,13 +191,13 @@ test_decReg16 = assertBoolMessages [ runTest reg16 elt
                                     ]
   where
     runTest reg16 val
-      | incDec16Test (subtract 1) DEC16 reg16 val
+      | incDec16Test (subtract 1) (DEC . IncDecReg16) reg16 val
       = T.empty
       | otherwise
       = T.pack $ printf "%s: Expected 0x%04x, got 0x%04x" (z80ShortInsnFormat ins) val gotVal
       where
-        ins = DEC16 . RPair16 $ reg16
-        gotVal = incDec16TestSys INC16 reg16 val
+        ins = DEC . IncDecReg16 . RPair16 $ reg16
+        gotVal = incDec16TestSys (DEC . IncDecReg16) reg16 val
 
 
 incDec16Test

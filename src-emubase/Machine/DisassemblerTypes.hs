@@ -1,11 +1,10 @@
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE CPP #-}
 
 -- | Basic types for all machine disassemblers
 module Machine.DisassemblerTypes
   ( -- * Types
     DisasmState(..)
   , DisElement(..)
-  , DisEltAddress(..)
   , NullPseudoOp(..)
   , DisElementPostProc
 
@@ -24,10 +23,6 @@ module Machine.DisassemblerTypes
   , mkEquate
   , mkLineComment
   , mkExtPseudo
-  , disEltAddress
-  , disEltLabel
-  , mkPlainAddress
-  , mkLabeledAddress
   , disEltHasAddr
   , disEltGetAddr
   , disEltGetLength
@@ -46,12 +41,7 @@ module Machine.DisassemblerTypes
   ) where
 
 import           Control.Arrow          (second, (>>>))
-#if MIN_VERSION_microlens_platform(0,4,10)
 import           Lens.Micro.Platform    (Lens', (&), (.~), (^.), (+~))
-#else
-import           Lens.Micro.Platform    (Lens', (&), (.~), (^.), ASetter, over)
-#endif
-import           Data.Data
 import           Data.HashMap.Strict    (HashMap)
 import qualified Data.HashMap.Strict    as H
 import           Data.Sequence          (Seq, (><))
@@ -59,28 +49,18 @@ import qualified Data.Sequence          as Seq
 import qualified Data.Text              as T
 import           Data.Vector.Unboxed    (Unbox, Vector)
 import qualified Data.Vector.Unboxed    as DVU
-import           Text.Printf
+
+import           Data.Generics.Uniplate.Direct
 
 import           Machine.ProgramCounter
 import           Machine.System
-import           Machine.Utils
 
 -- import Debug.Trace
 
 -- | The core of the disassembly machine:
-disassembler :: (Ord addrType
-                , Integral addrType
+disassembler :: ( Integral addrType
                 , Integral wordType
                 , Unbox wordType
-                -- The things you need for debugging. :-)
-                , PrintfArg addrType
-                , PrintfArg wordType
-                , ShowHex addrType
-                , ShowHex wordType
-                , Show addrType
-                , Show wordType
-                , Show insnType
-                , Show extPseudoType
                 )
              => DisasmState cpuType insnType addrType wordType extPseudoType
              -- ^ Initial disassembly state
@@ -112,36 +92,63 @@ disassembler = disassembler' (Seq.empty ><)
 
 -- | 'DisElement' is a dissassembly element: a disassembled instruction (with corresponding address and instruction
 -- words) or pseudo operation.
-data DisElement insnType addrType wordType extPseudoType =
-  -- Disassembled instruction
-    DisasmInsn (DisEltAddress addrType)        -- Instruction address
-                (Vector wordType)              -- Vector of words corresponding to the instruction, e.g. opcodes
-                insnType                       -- The instruction
-                T.Text                         -- Optional comment
-  -- Disassembly origin
-  | DisOrigin   (DisEltAddress addrType)
-  -- Sequence of bytes
-  | ByteRange   (DisEltAddress addrType)         -- Start address
-                (Vector wordType)                -- Bytes
-  -- An (sybolic|absolute) address
-  | Addr        (DisEltAddress addrType)         -- Adress of where this address is stored
-                (SymAbsAddr addrType)            -- The address to be annotated
-                (Vector wordType)                -- The actual address bytes
+data DisElement insnType addrType wordType extPseudoType where
+  DisasmInsn :: AbstractAddr addrType        -- Instruction address 
+             -> Vector wordType          -- Vector of words corresponding to the instruction, e.g. opcodes
+             -> insnType                 -- The instruction
+             -> T.Text                   -- Optional comment
+             -> DisElement insnType addrType wordType extPseudoType
+  DisOrigin :: AbstractAddr addrType
+             -> DisElement insnType addrType wordType extPseudoType
+  ByteRange :: AbstractAddr addrType        -- Start address
+            -> (Vector wordType)          -- Bytes
+            -> DisElement insnType addrType wordType extPseudoType
+  Addr :: AbstractAddr addrType             -- Adress of where this address is stored
+        -> AbstractAddr addrType          -- The address to be annotated
+        -> Vector wordType              -- The actual address bytes
+        -> DisElement insnType addrType wordType extPseudoType
   -- 0-terminated string (yes, these were used back in the pre-C days...)
-  | AsciiZ      (DisEltAddress addrType)         -- Start of string
-                (Vector wordType)                -- The string, not including the zero terminator
+  AsciiZ :: AbstractAddr addrType           -- Start of string
+         -> Vector wordType             -- The string, not including the zero terminator
+         -> DisElement insnType addrType wordType extPseudoType
   -- Simple ASCII string
-  | Ascii       (DisEltAddress addrType)
-                (Vector wordType)
+  Ascii :: AbstractAddr addrType
+        -> Vector wordType
+        -> DisElement insnType addrType wordType extPseudoType
   -- Address equation: associates a symbol with an address of something, which is also added to the
   -- disassembler's symbol table
-  | Equate      T.Text
-                (DisEltAddress addrType)
+  Equate :: T.Text
+         -> AbstractAddr addrType
+         -> DisElement insnType addrType wordType extPseudoType
   -- Comment, printed as a line, as opposed to after an mnemonic and operands
-  | LineComment T.Text
+  LineComment :: T.Text
+                   -> DisElement insnType addrType wordType extPseudoType
   -- Extensions to the "standard" disassembler pseudo instructions
-  | ExtPseudo   extPseudoType
-  deriving (Data, Typeable, Show)
+  ExtPseudo :: extPseudoType
+            -> DisElement insnType addrType wordType extPseudoType
+  deriving (Show)
+
+instance Uniplate (DisElement insnType addrType wordType extPseudoType) where
+  uniplate = plate
+
+instance (Uniplate insnType) =>
+         Biplate (DisElement insnType addrType wordType extPseudoType) insnType where
+  biplate (DisasmInsn addr bytes insn cmnt) = plate DisasmInsn |- addr |- bytes |* insn |- cmnt
+  biplate disasm = plate disasm
+
+instance (Biplate insnType (AbstractAddr addrType)) =>
+         Biplate (DisElement insnType addrType wordType extPseudoType) (AbstractAddr addrType) where
+  biplate (DisasmInsn addr bytes insn cmnt) = plate DisasmInsn |* addr |- bytes |+ insn |- cmnt
+  biplate (DisOrigin addr) = plate DisOrigin |* addr
+  biplate (Addr addr absAddr bytes) = plate Addr |* addr |* absAddr |- bytes
+  biplate (ByteRange addr bytes) = plate ByteRange |* addr |- bytes
+  biplate (AsciiZ addr bytes) = plate AsciiZ |* addr |- bytes
+  biplate (Ascii addr bytes) = plate Ascii |* addr |- bytes
+  biplate diselt = plate diselt
+
+instance (Uniplate insnType, Uniplate addrType) =>
+         Biplate (DisElement insnType addrType wordType extPseudoType) (DisElement insnType addrType wordType extPseudoType) where
+  biplate = plateSelf
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -151,11 +158,11 @@ mkDisasmInsn  :: addrType                       -- ^ Instruction address
               -> insnType                       -- ^ The instruction
               -> T.Text                         -- ^ Optional comment
               -> DisElement insnType addrType wordType extPseudoType
-mkDisasmInsn addr = DisasmInsn (mkPlainAddress addr)
+mkDisasmInsn = DisasmInsn . mkAbstractAddr
 
 mkDisOrigin   :: addrType
               -> DisElement insnType addrType wordType extPseudoType
-mkDisOrigin   = DisOrigin . mkPlainAddress
+mkDisOrigin   = DisOrigin . mkAbstractAddr
 
 -- | Make a new 'ByteRange'. The optional address label is set to empty.
 mkByteRange   :: addrType
@@ -163,32 +170,32 @@ mkByteRange   :: addrType
               -> Vector wordType
               -- ^ Bytes
               -> DisElement insnType addrType wordType extPseudoType
-mkByteRange = ByteRange . mkPlainAddress
+mkByteRange = ByteRange . mkAbstractAddr
 
 -- | Make a new 'Addr'. The optional address label is set to empty.
 mkAddr        :: addrType                       -- Adress of where this address is stored
-              -> SymAbsAddr addrType            -- The address to be annotated
+              -> AbstractAddr addrType            -- The address to be annotated
               -> Vector wordType                -- The actual address bytes
               -> DisElement insnType addrType wordType extPseudoType
-mkAddr        = Addr . mkPlainAddress
+mkAddr        = Addr . mkAbstractAddr
 
 -- | Make a new 'AsciiZ'. The optional address label is set to empty.
 mkAsciiZ      :: addrType                       -- Start of string
               -> Vector wordType                -- The string, not including the zero terminator
               -> DisElement insnType addrType wordType extPseudoType
-mkAsciiZ      = AsciiZ . mkPlainAddress
+mkAsciiZ      = AsciiZ . mkAbstractAddr
 
 -- | Make a new 'Ascii'. The optional address label is set to empty.
 mkAscii       :: addrType
               -> Vector wordType
               -> DisElement insnType addrType wordType extPseudoType
-mkAscii       = Ascii . mkPlainAddress
+mkAscii       = Ascii . mkAbstractAddr
 
 -- | Make a new 'Equate' for the disassembler's symbl table.
 mkEquate      :: T.Text
               -> addrType
               -> DisElement insnType addrType wordType extPseudoType
-mkEquate sym addr = Equate sym (Plain addr)
+mkEquate sym addr = Equate sym (mkAbstractAddr addr)
 
 -- | Make a new 'LineComment'
 mkLineComment :: T.Text
@@ -199,42 +206,6 @@ mkLineComment = LineComment
 mkExtPseudo   :: extPseudoType
               -> DisElement insnType addrType wordType extPseudoType
 mkExtPseudo = ExtPseudo
-
--- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
--- | Disassembly element's address, with optional label
-data DisEltAddress addrType =
-    Plain addrType
-  | Labeled addrType T.Text
-  deriving (Eq, Show, Data, Typeable)
-
-instance (ShowHex addrType)
-         => ShowHex (DisEltAddress addrType) where
-  asHex (Plain addr)     = asHex addr
-  asHex (Labeled addr _) = asHex addr
-
--- | Extract the address from a disassembler element address type
-disEltAddress :: DisEltAddress addrType
-              -> addrType
-disEltAddress (Plain addr)          = addr
-disEltAddress (Labeled addr _label) = addr
-
--- | Extract the label from a disassembler element address. Returns empty if a 'Plain' element address
-disEltLabel :: DisEltAddress addrType
-            -> T.Text
-disEltLabel (Plain _addr)             = T.empty
-disEltLabel (Labeled _addr addrLabel) = addrLabel
-
--- | Make a 'Plain' disassembler element address
-mkPlainAddress :: addrType
-               -> DisEltAddress addrType
-mkPlainAddress = Plain
-
--- | Make a 'Labeled' disassembler element address
-mkLabeledAddress :: addrType
-                 -> T.Text
-                 -> DisEltAddress addrType
-mkLabeledAddress = Labeled
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- | Disassembler state needed to generically support instruction disassembly
@@ -311,8 +282,7 @@ disasmPostProc f ds = (\postProc -> ds { _disasmPostProc = postProc }) <$> f (_d
 
 -- | Create an initial disassembly state for a given emulated system. (Note: There is no good default for the emulated
 -- system, otherwise, this would be a good candidate for a 'Monoid' instance.)
-mkDisassemblyState :: Num addrType
-                   => EmulatedSystem cpuType insnType addrType wordType
+mkDisassemblyState :: EmulatedSystem cpuType insnType addrType wordType
                    -> addrType
                    -> addrType
                    -> DisasmState cpuType insnType addrType wordType extPseudoType
@@ -353,11 +323,11 @@ disEltHasAddr _               = False
 -- | Extract an address from an instruction or pseudo-operation.
 disEltGetAddr :: DisElement insnType addrType wordType extPseudoType
               -> addrType
-disEltGetAddr (DisasmInsn addr _ _ _) = disEltAddress addr
-disEltGetAddr (ByteRange addr _)      = disEltAddress addr
-disEltGetAddr (Addr addr _ _)         = disEltAddress addr
-disEltGetAddr (AsciiZ addr _)         = disEltAddress addr
-disEltGetAddr (Ascii addr _)          = disEltAddress addr
+disEltGetAddr (DisasmInsn addr _ _ _) = absAddr addr
+disEltGetAddr (ByteRange addr _)      = absAddr addr
+disEltGetAddr (Addr addr _ _)         = absAddr addr
+disEltGetAddr (AsciiZ addr _)         = absAddr addr
+disEltGetAddr (Ascii addr _)          = absAddr addr
 disEltGetAddr _                       = undefined
 
 -- | Extract length from an instruction or pseudo-operation.
@@ -388,10 +358,6 @@ disasmMRead dstate = (word, dstate & disasmSystem .~ sys' & disasmCurAddr +~ 1)
 disasmMReadN :: ( Integral addrType
                 , Integral wordType
                 , DVU.Unbox wordType
-                , PrintfArg addrType
-                , PrintfArg wordType
-                , Show addrType
-                , Show wordType
                 )
              => Int
              -> DisasmState cpuType insnType addrType wordType extPseudoType
@@ -399,9 +365,3 @@ disasmMReadN :: ( Integral addrType
 disasmMReadN nWords dstate = (wvec, dstate & disasmSystem .~ sys'& disasmCurAddr +~ fromIntegral nWords)
   where
     (wvec, sys') = sysMReadN (dstate ^. disasmCurAddr & thePC) nWords (dstate ^. disasmSystem)
-
-#if !MIN_VERSION_microlens_platform(0,4,10)
-(+~) :: Num a => ASetter s t a a -> a -> s -> t
-l +~ n = over l (+ n)
-{-# INLINE (+~) #-}
-#endif

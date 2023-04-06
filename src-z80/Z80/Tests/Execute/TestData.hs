@@ -50,9 +50,9 @@ initialIYAddr = 0x637b
 -- type system will disallow using the same function in two different ways. The fourth argument is the test value.
 reg8TestData
   :: [(Z80reg8
-      , ASetter Z80registers Z80registers Z80word Z80word
-      , Getting Z80word Z80registers Z80word
-      , Z80word
+      , ASetter Z80registers Z80registers Z80byte Z80byte
+      , Getting Z80byte Z80registers Z80byte
+      , Z80byte
       , Text
       )]
 reg8TestData =

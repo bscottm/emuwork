@@ -340,8 +340,6 @@ data YAMLGuidance where
     } -> YAMLGuidance
   deriving (Eq, Show)
 
--- $(deriveJSON guidanceFields ''YAMLGuidance)
-
 instance FromJSON YAMLGuidance where
   parseJSON = Y.withObject "YAMLGuidance" (\v ->
     YAMLGuidance

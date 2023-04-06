@@ -59,7 +59,6 @@ executable trs80
     ScopedTypeVariables,
     StandaloneDeriving,
     TupleSections,
-    TypeFamilies,
     TypeSynonymInstances,
     ViewPatterns
 
@@ -102,6 +101,5 @@ executable trs80-disasm
 --     GADTs,
 --     MultiParamTypeClasses,
 --     OverloadedStrings,
---     TemplateHaskell,
 --     TypeSynonymInstances,
 --     FlexibleInstances

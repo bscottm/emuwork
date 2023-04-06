@@ -169,7 +169,6 @@ instance ( Show addrType
   show (DevRegion _dev)             = "DevRegion()"
 
 instance ( Eq addrType
-         , Eq wordType
          , Integral wordType
          , DVU.Unbox wordType
          )
@@ -484,7 +483,6 @@ mReadN :: forall addrType wordType.
           ( Integral addrType
           , Integral wordType
           , DVU.Unbox wordType
-          , DVU.Unbox wordType
 #if defined(TEST_DEBUG)
           , PrintfArg addrType
           , PrintfArg wordType
@@ -570,7 +568,6 @@ updDevRegions updRegions {-origRegions-} = execState $ Fold.forM_ (IM.assocs upd
 -- then nothing happens.
 mWrite :: ( Integral addrType
           , Integral wordType
-          , Show wordType
           , DVU.Unbox wordType
 #if defined(TEST_DEBUG)
           , PrintfArg addrType
@@ -593,7 +590,6 @@ mWrite addr val = doWrite True addr (DVU.singleton val)
 -- | Write a block of memory, respecting the memory system's type
 mWriteN :: ( Integral addrType
            , Integral wordType
-           , Show wordType
            , DVU.Unbox wordType
 #if defined(TEST_DEBUG)
            , PrintfArg addrType
@@ -617,7 +613,6 @@ mWriteN = doWrite True
 -- if it extends beyond a region's upper bound.
 mPatch :: ( Integral addrType
           , Integral wordType
-          , Show wordType
           , DVU.Unbox wordType
 #if defined(TEST_DEBUG)
           , PrintfArg addrType
@@ -640,7 +635,6 @@ mPatch = doWrite False
 -- | Write to memory: 'mPatch' and 'mWriteN' share this code.
 doWrite :: ( Integral addrType
            , Integral wordType
-           , Show wordType
            , DVU.Unbox wordType
 #if defined(TEST_DEBUG)
            , PrintfArg addrType
@@ -689,7 +683,7 @@ doWrite readOnly startAddr patch msys = msys & regions  %~ updRegionState
         patchSlice  = {-tracePatchSlice-} DVU.slice sOffset nWrite patch
         leftSlice = if lOffset > 0 then {-traceLeftSlice-} DVU.slice 0 (fromIntegral lOffset) ctnt else DVU.empty
         rightSlice = if rightLen > 0 then {-traceRightSlice-} DVU.slice rightStart rightLen ctnt else DVU.empty
-        rightStart = fromIntegral lOffset + fromIntegral nWrite
+        rightStart = fromIntegral lOffset + nWrite
         rightLen   = fromIntegral (eRegion - sRegion + 1) - rightStart
 
     writeContents _ EmptyRegion = EmptyRegion
@@ -815,8 +809,7 @@ increaseTick tick psq maxSize
         Just (k, _, v, oldPsq') -> retick oldPsq' (OrdPSQ.insert k newTick v newPsq) (newTick + 1)
 
 -- | Queue a write to 'addr' in the pending write cache, flushing the cache if its size exceeds 'maxPending'.
-queueLRU :: ( Integral addrType
-            , DVU.Unbox wordType
+queueLRU :: ( DVU.Unbox wordType
             , Integral wordType
             )
          => Int
@@ -868,8 +861,7 @@ queueLRU addrOffs word mr@RAMRegion { _writesPending=LRUWriteCache nextTick psq 
 queueLRU _ _ _ = undefined
 
 -- | Flush some of the pending writes to a memory region's content vector
-flushPending :: ( Integral addrType
-                , DVU.Unbox wordType
+flushPending :: ( DVU.Unbox wordType
                 , Integral wordType
                 )
              => Int

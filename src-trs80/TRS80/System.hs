@@ -22,7 +22,7 @@ type TRS80ModelISystem = Z80system TRS80ModelITag
 -- | Create the system's RAM
 installMem :: TRS80ModelISystem
            -> Int
-           -> Vector Z80word
+           -> Vector Z80byte
            -> TRS80ModelISystem
 installMem sys memSize newROM = sys & memory %~ (mkROMRegion 0 newROM . mkRAMRegion ramStart (memSize * 1024))
 
@@ -56,7 +56,7 @@ ramStart    = 16 * 1024
 -- | TRS-80 Model I constructor: install a ROM image and configure the system's RAM.
 trs80System :: FilePath
             -- ^ File path to the ROM image
-            -> (FilePath -> IO (Vector Z80word))
+            -> (FilePath -> IO (Vector Z80byte))
             -- ^ ROM image reader (RAW vs. Intel Hex vs. Hex strings)
             -> Int
             -- ^ Memory size: 16K, 32K or 48K

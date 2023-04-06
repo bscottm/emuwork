@@ -28,7 +28,6 @@ executable edas
   default-extensions:   GADTs,
                         MultiParamTypeClasses,
                         OverloadedStrings,
-                        TemplateHaskell,
                         TypeSynonymInstances,
                         FlexibleInstances
   other-modules:
@@ -61,7 +60,6 @@ executable edas-tests
   default-extensions:   GADTs,
                         MultiParamTypeClasses,
                         OverloadedStrings,
-                        TemplateHaskell,
                         TypeSynonymInstances,
                         FlexibleInstances
 
@@ -84,6 +82,5 @@ executable edas-pptest
   default-extensions:   GADTs,
                         MultiParamTypeClasses,
                         OverloadedStrings,
-                        TemplateHaskell,
                         TypeSynonymInstances,
                         FlexibleInstances

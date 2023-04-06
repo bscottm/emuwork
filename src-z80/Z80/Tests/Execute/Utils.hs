@@ -43,7 +43,7 @@ compareRegs leftSys rightSys banner =
 -- | Compare a memory location with an expected byte value, print an error message if they don't match.
 compareMem
   :: Z80addr
-  -> Z80word
+  -> Z80byte
   -> Z80system sysType
   -> Text
   -> IO Bool

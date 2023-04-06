@@ -1,23 +1,20 @@
-{-# OPTIONS_HADDOCK ignore-exports #-}
-
-module Z80.InsnDecode
-  ( z80InsDecode
-  ) where
+module Main where
 
 import           Data.Bits           (Bits (..))
-import           Data.Int            (Int8)
+import           Data.Int
 import           Data.IntMap         (IntMap, (!))
 import qualified Data.IntMap         as IntMap
 import           Data.Maybe          (fromMaybe)
 import qualified Data.Vector.Unboxed as DVU
 
-import           Machine             (AbstractAddr, DecodedInsn (DecodedInsn), ProcessorDecoder, ProgramCounter (thePC),
-                                      ShowHex (as0xHexS), SignExtend (signExtend), mkAbstractAddr, sysIncPCAndRead, sysMRead,
-                                      sysMReadN)
+import           Lens.Micro.Platform ((&), (.~), (^.), _1, (%~))
 
-import           Z80.InstructionSet
-import           Z80.Processor       (Z80PC, Z80addr, Z80byte, Z80state)
-import           Z80.System          (Z80system)
+import           Machine
+
+import           System.IO
+
+import           Z80
+import           Z80.Tests.InstData
 
 -- import Debug.Trace
 
@@ -39,8 +36,8 @@ type IndexTransformerFunc opndType sysType =
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
-z80InsDecode :: ProcessorDecoder Z80state Z80instruction Z80addr Z80byte
-z80InsDecode pc z80sys =
+zz_z80InsDecode :: ProcessorDecoder Z80state Z80instruction Z80addr Z80byte
+zz_z80InsDecode pc z80sys =
   case sysMRead (thePC pc) z80sys of
         (0xdd, z80sys')  ->
           let (insn, endPC, endSys) = prefixed 0xdd ixSubstitutions z80sys'
@@ -75,7 +72,6 @@ z80InsDecode pc z80sys =
                , ", components "
                , show (opcodeComponents opc)
                ]
-
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
@@ -311,6 +307,16 @@ bumpPC (opnd, pc, sys) = (opnd, 1+ pc, sys)
 
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
+-- | Fetch an absolute (16-bit) little endian address
+z80getAddr :: Z80system sysType
+           -- ^ Memory from which address is fetched
+           -> Z80PC
+           -- ^ The program counter
+           -> (Z80addr, Z80system sysType)
+z80getAddr sys pc = sysMReadN (thePC pc) 2 sys & _1 %~ makeAddr
+  where
+    makeAddr awords = shiftL (fromIntegral (awords DVU.! 1)) 8 .|. fromIntegral (awords DVU.! 0)
+
 readIndexByte
   :: Z80PC
   -> Z80system sysType
@@ -323,10 +329,9 @@ read16BitValue
   :: (AbstractAddr Z80addr -> Z80operand opndType)
   -> OpLocation sysType
   -> (Z80operand opndType, Z80PC, Z80system sysType)
-read16BitValue opndCTor (pc, sys) = (opndCTor . mkAbstractAddr $ addr, pc + 3, sys)
+read16BitValue opndCTor (pc, sys) = (opndCTor . mkAbstractAddr $ addr, pc + 3, sys')
   where
-    addr = makeAddr . fst $ sysMReadN (thePC pc + 1) 2 sys
-    makeAddr awords = shiftL (fromIntegral (awords DVU.! 1)) 8 .|. fromIntegral (awords DVU.! 0)
+    (addr, sys') = z80getAddr sys (pc + 1)
 
 read8BitValue
   :: (Z80byte -> Z80operand opndType)
@@ -382,6 +387,139 @@ accumOps = IntMap.fromList
   , (7, CCF)
   ]
 
+completeInstruction
+  :: Z80instruction
+  -> OpLocation sysType
+  -> (Z80instruction, Z80PC, Z80system sysType)
+completeInstruction insn (pc, sys) = (insn, 1+ pc, sys)
+
+resultLoad
+  :: IndexRegSubs
+  -> Z80byte
+  -> OpcComponents
+  -> OpLocation sysType
+  -> (Z80instruction, Z80PC, Z80system sysType)
+
+resultLoad xform opcGroup opcParts (pc, sys) =
+  let (opnd, pc', _sys') = decodeOperands xform opcGroup opcParts (pc, sys)
+  in  (LD opnd, pc', sys)
+
+resultLoad16
+  :: IndexRegSubs
+  -> Z80byte
+  -> OpcComponents
+  -> OpLocation sysType
+  -> (Z80instruction, Z80PC, Z80system sysType)
+
+resultLoad16 xform opcGroup opcParts (pc, sys) =
+  let (opnd, pc', _sys') = decodeOperands xform opcGroup opcParts (pc, sys)
+  in  (LD16 opnd, pc', sys)
+
+resultALU16
+  :: (Z80operand Z80OpndALU16 -> Z80instruction)
+  -> IndexRegSubs
+  -> Z80byte
+  -> OpcComponents
+  -> OpLocation sysType
+  -> (Z80instruction, Z80PC, Z80system sysType)
+
+resultALU16 alu16CTor xform opcGroup opcParts (pc, sys) =
+  let (opnd, pc', _sys') = decodeOperands xform opcGroup opcParts (pc, sys)
+  in  (alu16CTor opnd, 1+ pc', sys)
+
+resultIncDec
+  :: (Z80operand Z80OpndInc -> Z80instruction)
+  -> IndexRegSubs
+  -> Z80byte
+  -> OpcComponents
+  -> OpLocation sysType
+  -> (Z80instruction, Z80PC, Z80system sysType)
+
+resultIncDec insnCTor xform opcGroup opcParts opLocn@(_pc, sys) =
+  let (opnd, pc', _sys') = decodeOperands xform opcGroup opcParts opLocn
+  in  (insnCTor opnd, pc', sys)
+
+-- | Compute signed, relative displacement address' absolute address
+displacementInstruction
+  :: (AbstractAddr Z80addr -> Z80instruction)
+  -> OpLocation sysType
+  -> (Z80instruction, Z80PC, Z80system sysType)
+
+displacementInstruction jumpIns (pc, sys) =
+  let (_, (disp, _sys'))  = sysIncPCAndRead pc sys
+      destAddr            = fromIntegral (pc + signExtend disp + 2)
+  in  (jumpIns . mkAbstractAddr $ destAddr, pc + 2, sys)
+
+-- | Fetch address, insert into an instruction
+mkAbsAddrInsn
+  :: (AbstractAddr Z80addr -> Z80instruction)
+  -> OpLocation sysType
+  -> (Z80instruction, Z80PC, Z80system sysType)
+mkAbsAddrInsn insnCTor (pc, sys) = (insnCTor . mkAbstractAddr $ addr, pc + 3, sys')
+  where
+    (addr, sys') = z80getAddr sys (pc + 1)
+
+-- | The SET, RESet, BIT instructions and rotation operations.
+bitopsDecode
+  :: Z80byte
+  -- ^ Opcode group
+  -> OpcComponents
+  -- ^ '(z, y, p, q) opcode components
+  -> IndexRegSubs
+  -- ^ Index register substitutions
+  -> OpLocation sysType
+  -- ^ Bit/rotate operation opcode components
+  -> (Z80instruction, Z80PC, Z80system sysType)
+  -- ^ The result
+bitopsDecode _opcGroup _opcParts xform (pc, sys) =
+  let (pc', (nextOpc, sys')) = sysIncPCAndRead pc sys
+      (z, y, _, _) = opcodeComponents nextOpc
+      dest = fromMaybe (error $ "reg8: Invalid register index: " ++ show z)
+                       (IntMap.lookup (fromIntegral z) reg8NumToReg)
+      insnCTor =
+        case opcodeGroup nextOpc of
+          0          -> rotOps ! fromIntegral y
+          1          -> BIT y
+          2          -> RES y
+          3          -> SET y
+          _otherwise -> undefined
+      (opnd, pc'', sys'') = indexSubstitute xform dest (pc', sys')
+  in  (insnCTor opnd, 1+ pc'', sys'')
+
+-- | Undocumented rotate/shift/bit operations using IX and IY
+undocBitOpsDecode
+  :: Z80byte
+  -- ^ Original prefix, 0xdd or 0xfd
+  -> OpLocation sysType
+  -- ^ Bit/rotate operation opcode components
+  -> (Z80instruction, Z80PC, Z80system sysType)
+  -- ^ The result
+undocBitOpsDecode prefixOpc (pc, sys) =
+  let (pcStep1, (disp, sys')) = sysIncPCAndRead pc sys
+      (pcStep2, (opc, sys'')) = sysIncPCAndRead pcStep1 sys'
+      idxReg8Ctor 0xdd = IXindirect . fromIntegral
+      idxReg8Ctor 0xfd = IYindirect . fromIntegral
+      idxReg8Ctor _    = undefined
+      x = opcodeGroup opc
+      (z, y, _p, _q) = opcodeComponents opc
+      theReg = reg8NumToReg ! fromIntegral z
+      instruction
+        | theReg == HLindirect
+        = case x of
+            0          -> (rotOps ! fromIntegral y) (idxReg8Ctor prefixOpc disp)
+            1          -> BIT y (idxReg8Ctor prefixOpc disp)
+            2          -> RES y (idxReg8Ctor prefixOpc disp)
+            3          -> SET y (idxReg8Ctor prefixOpc disp)
+            _otherwise -> undefined
+        | otherwise
+        = case x of
+            0          -> (undocRotOps ! fromIntegral y) (idxReg8Ctor prefixOpc disp) theReg
+            1          -> BIT y (idxReg8Ctor prefixOpc disp)
+            2          -> RESidx y (idxReg8Ctor prefixOpc disp) theReg
+            3          -> SETidx y (idxReg8Ctor prefixOpc disp) theReg
+            _otherwise -> undefined
+  in  (instruction, 1+ pcStep2, sys'')
+
 undocRotOps
   :: IntMap (Z80reg8 -> Z80reg8 -> Z80instruction)
 undocRotOps = IntMap.fromList
@@ -394,6 +532,80 @@ undocRotOps = IntMap.fromList
   , (6, SLLidx)
   , (7, SRLidx)
   ]
+
+portOpDecode
+  :: (Z80operand Z80OpndIO -> Z80instruction)
+  -> Z80byte
+  -> OpcComponents
+  -> IndexRegSubs
+  -> OpLocation sysType
+  -> (Z80instruction, Z80PC, Z80system sysType)
+portOpDecode insn opcGroup opcParts xform opLocn =
+  let (opnd, pc', sys') = decodeOperands xform opcGroup opcParts opLocn
+  in  (insn opnd, pc', sys')
+
+-- | Decode 'ED'-prefixed instructions
+edPrefixDecode
+  :: Z80byte
+  -- ^ Opcode group
+  -> OpcComponents
+  -- ^ '(z, y, p, q) opcode components
+  -> IndexRegSubs
+  -- ^ Index register substitutionsresultLoad
+  -> OpLocation sysType
+  -- ^ Bit/rotate operation opcode components
+  -> (Z80instruction, Z80PC, Z80system sysType)
+  -- ^ The result
+
+edPrefixDecode  _opcGroup _opcParts xform (pc, sys) =
+  let (pc', (nextOpc, sys')) = sysIncPCAndRead pc sys
+      invalidOpcodes = [0xed, nextOpc]
+      nextOpcGroup = opcodeGroup nextOpc
+      nextOpcParts = opcodeComponents nextOpc
+  in
+    case nextOpcGroup of
+      1 -> edGroup1Decode invalidOpcodes nextOpcGroup nextOpcParts xform (pc', sys')
+      2 -> edGroup2Decode invalidOpcodes nextOpcGroup nextOpcParts xform (pc', sys')
+      _ -> completeInstruction (Z80undef (UndefInsn invalidOpcodes)) (pc', sys')
+
+edGroup1Decode, edGroup2Decode, blockInstruction
+  :: [Z80byte]
+  -> Z80byte
+  -> OpcComponents
+  -> IndexRegSubs
+  -> OpLocation sysType
+  -> (Z80instruction, Z80PC, Z80system sysType)
+
+edGroup1Decode _ops  opcGroup  opcParts@(0, _, _, _)  xform opLocn = portOpDecode IN  opcGroup opcParts xform opLocn
+edGroup1Decode _ops  opcGroup  opcParts@(1, _, _, _)  xform opLocn = portOpDecode OUT opcGroup opcParts xform opLocn
+edGroup1Decode _ops  opcGroup  opcParts@(2, _, _, 0)  xform opLocn = resultALU16 SBC16 xform opcGroup opcParts opLocn
+edGroup1Decode _ops  opcGroup  opcParts@(2, _, _, 1)  xform opLocn = resultALU16 ADC16 xform opcGroup opcParts opLocn
+edGroup1Decode  ops _opcGroup           (2, _, _, _) _xform opLocn = completeInstruction (Z80undef (UndefInsn ops)) opLocn
+edGroup1Decode _ops  opcGroup  opcParts@(3, _, _, _)  xform opLocn = resultLoad16 xform opcGroup opcParts opLocn
+edGroup1Decode _ops _opcGroup           (4, _, _, _) _xform opLocn = completeInstruction NEG opLocn
+edGroup1Decode _ops _opcGroup           (5, _, _, 0) _xform opLocn = completeInstruction RETN opLocn
+edGroup1Decode _ops _opcGroup           (5, _, _, 1) _xform opLocn = completeInstruction RETI opLocn
+edGroup1Decode _ops _opcGroup           (6, y, _, _) _xform opLocn = completeInstruction (IM (interruptMode ! fromIntegral y)) opLocn
+edGroup1Decode _ops _opcGroup           (7, 0, _, _) _xform opLocn = completeInstruction (LD FromAtoI) opLocn
+edGroup1Decode _ops _opcGroup           (7, 1, _, _) _xform opLocn = completeInstruction (LD FromAtoR) opLocn
+edGroup1Decode _ops _opcGroup           (7, 2, _, _) _xform opLocn = completeInstruction (LD FromItoA) opLocn
+edGroup1Decode _ops _opcGroup           (7, 3, _, _) _xform opLocn = completeInstruction (LD FromRtoA) opLocn
+edGroup1Decode _ops _opcGroup           (7, 4, _, _) _xform opLocn = completeInstruction RRD opLocn
+edGroup1Decode _ops _opcGroup           (7, 5, _, _) _xform opLocn = completeInstruction RLD opLocn
+edGroup1Decode  ops _opcGroup _opcParts _xform opLocn = completeInstruction (Z80undef (UndefInsn ops)) opLocn
+
+edGroup2Decode  ops  opcGroup  opcParts@(_, 4, _, _)  xform opLocn = blockInstruction ops opcGroup opcParts xform opLocn
+edGroup2Decode  ops  opcGroup  opcParts@(_, 5, _, _)  xform opLocn = blockInstruction ops opcGroup opcParts xform opLocn
+edGroup2Decode  ops  opcGroup  opcParts@(_, 6, _, _)  xform opLocn = blockInstruction ops opcGroup opcParts xform opLocn
+edGroup2Decode  ops  opcGroup  opcParts@(_, 7, _, _)  xform opLocn = blockInstruction ops opcGroup opcParts xform opLocn
+edGroup2Decode  ops _opcGroup _opcParts _xform opLocn = completeInstruction (Z80undef (UndefInsn ops)) opLocn
+
+blockInstruction  ops _opcGroup        (z, y, _, _) _xform opLocn =
+  let insn =
+        if z <= 3 && y >=4
+        then (blockOps ! fromIntegral y) ! fromIntegral z
+        else Z80undef (UndefInsn ops)
+  in completeInstruction insn opLocn
 
 -- | Convert condition code
 condCode
@@ -472,82 +684,6 @@ blockOps = IntMap.fromList
                         , (3, OTDR)
                         ] )
   ]
-
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
-completeInstruction
-  :: Z80instruction
-  -> OpLocation sysType
-  -> (Z80instruction, Z80PC, Z80system sysType)
-completeInstruction insn (pc, sys) = (insn, 1+ pc, sys)
-
-resultLoad
-  :: IndexRegSubs
-  -> Z80byte
-  -> OpcComponents
-  -> OpLocation sysType
-  -> (Z80instruction, Z80PC, Z80system sysType)
-
-resultLoad xform opcGroup opcParts (pc, sys) =
-  let (opnd, pc', _sys') = decodeOperands xform opcGroup opcParts (pc, sys)
-  in  (LD opnd, pc', sys)
-
-resultLoad16
-  :: IndexRegSubs
-  -> Z80byte
-  -> OpcComponents
-  -> OpLocation sysType
-  -> (Z80instruction, Z80PC, Z80system sysType)
-
-resultLoad16 xform opcGroup opcParts (pc, sys) =
-  let (opnd, pc', _sys') = decodeOperands xform opcGroup opcParts (pc, sys)
-  in  (LD16 opnd, pc', sys)
-
-resultALU16
-  :: (Z80operand Z80OpndALU16 -> Z80instruction)
-  -> IndexRegSubs
-  -> Z80byte
-  -> OpcComponents
-  -> OpLocation sysType
-  -> (Z80instruction, Z80PC, Z80system sysType)
-
-resultALU16 alu16CTor xform opcGroup opcParts (pc, sys) =
-  let (opnd, pc', _sys') = decodeOperands xform opcGroup opcParts (pc, sys)
-  in  (alu16CTor opnd, 1+ pc', sys)
-
-resultIncDec
-  :: (Z80operand Z80OpndInc -> Z80instruction)
-  -> IndexRegSubs
-  -> Z80byte
-  -> OpcComponents
-  -> OpLocation sysType
-  -> (Z80instruction, Z80PC, Z80system sysType)
-
-resultIncDec insnCTor xform opcGroup opcParts opLocn@(_pc, sys) =
-  let (opnd, pc', _sys') = decodeOperands xform opcGroup opcParts opLocn
-  in  (insnCTor opnd, pc', sys)
-
--- | Compute signed, relative displacement address' absolute address
-displacementInstruction
-  :: (AbstractAddr Z80addr -> Z80instruction)
-  -> OpLocation sysType
-  -> (Z80instruction, Z80PC, Z80system sysType)
-
-displacementInstruction jumpIns (pc, sys) =
-  let (_, (disp, _sys'))  = sysIncPCAndRead pc sys
-      destAddr            = fromIntegral (pc + signExtend disp + 2)
-  in  (jumpIns . mkAbstractAddr $ destAddr, pc + 2, sys)
-
--- | Fetch address, insert into an instruction
-mkAbsAddrInsn
-  :: (AbstractAddr Z80addr -> Z80instruction)
-  -> OpLocation sysType
-  -> (Z80instruction, Z80PC, Z80system sysType)
-mkAbsAddrInsn insnCTor (pc, sys) = (insnCTor . mkAbstractAddr $ addr, pc + 3, sys)
-  where
-    addr = makeAddr . fst $ sysMReadN (thePC pc + 1) 2 sys
-    makeAddr awords = shiftL (fromIntegral (awords DVU.! 1)) 8 .|. fromIntegral (awords DVU.! 0)
-
 -- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
 group0decode, group1decode, group2decode, group3decode
@@ -578,20 +714,18 @@ group0decode _ops  opcGroup opcParts@(6, _, _, _)  xform  opLocn = resultLoad xf
 group0decode _ops _opcGroup (7, y, _, _)          _xform  opLocn = completeInstruction (accumOps ! fromIntegral y) opLocn
 group0decode  ops _opcGroup _opcParts             _xform  opLocn = completeInstruction (Z80undef (UndefInsn ops)) opLocn
 
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
 -- LD HL, HL -> HALT
 -- Everything else is a LD reg8, something
 group1decode _ops _opcGroup (6, 6, _, _) _xform opLocn = completeInstruction HALT opLocn
 group1decode  _ops opcGroup opcParts      xform opLocn = resultLoad xform opcGroup opcParts opLocn
 
 group2decode _ops opcGroup opcParts@(_, y, _, _) xform (pc, sys) =
-  let (opnd, pc', _sys') = decodeOperands xform opcGroup opcParts (pc, sys)
-  in  (aluOp y opnd, pc', sys)
-
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+  let insnCTor = aluOp y
+      (opnd, pc', _sys') = decodeOperands xform opcGroup opcParts (pc, sys)
+  in  (insnCTor opnd, pc', sys)
 
 group3decode _ops _opcGroup (0, y, _, _) _xform  opLocn = completeInstruction (RETCC $ condCode y) opLocn
+
 group3decode _ops _opcGroup (1, _, p, 0)  xform  opLocn =
   let (opnd, pc', sys') = indexSubstitute xform (mkRegPairAF p) opLocn
   in  (POP opnd, 1+ pc', sys')
@@ -599,7 +733,9 @@ group3decode _ops _opcGroup (1, _, 0, 1) _xform  opLocn = completeInstruction RE
 group3decode _ops _opcGroup (1, _, 1, 1) _xform  opLocn = completeInstruction (EXC Primes) opLocn
 group3decode _ops _opcGroup (1, _, 2, 1)  xform  opLocn = indexSubstitute xform  `applyTransformer` completeInstruction JPHL opLocn
 group3decode _ops _opcGroup (1, _, 3, 1)  xform  opLocn = indexSubstitute xform  `applyTransformer` completeInstruction LDSPHL opLocn
+
 group3decode _ops _opcGroup (2, y, _, _) _xform  opLocn = mkAbsAddrInsn (JPCC (condCode y)) opLocn
+
 group3decode _ops _opcGroup          (3, 0, _, _) _xform  opLocn = mkAbsAddrInsn JP opLocn
 group3decode _ops opcGroup  opcParts@(3, 1, _, _) xform  opLocn = bitopsDecode opcGroup opcParts xform opLocn
 group3decode _ops opcGroup  opcParts@(3, 2, _, _) xform  opLocn = portOpDecode OUT opcGroup opcParts xform opLocn
@@ -622,140 +758,43 @@ group3decode _ops opcGroup opcParts@(6, y, _, _)   xform (pc, sys) =
   in  (aluOp y opnd, pc', sys)
 group3decode _ops _opcGroup (7, y, _, _) _xform opLocn = completeInstruction (RST (y * 8)) opLocn
 group3decode ops _opcGroup _opcParts              _xform opLocn = completeInstruction (Z80undef (UndefInsn ops)) opLocn
-  
--- ~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 
--- | The SET, RESet, BIT instructions and rotation operations.
-bitopsDecode
-  :: Z80byte
-  -- ^ Opcode group
-  -> OpcComponents
-  -- ^ '(z, y, p, q) opcode components
-  -> IndexRegSubs
-  -- ^ Index register substitutions
-  -> OpLocation sysType
-  -- ^ Bit/rotate operation opcode components
-  -> (Z80instruction, Z80PC, Z80system sysType)
-  -- ^ The result
-bitopsDecode _opcGroup _opcParts xform (pc, sys) =
-  let (pc', (nextOpc, sys')) = sysIncPCAndRead pc sys
-      (z, y, _, _) = opcodeComponents nextOpc
-      dest = fromMaybe (error $ "reg8: Invalid register index: " ++ show z)
-                       (IntMap.lookup (fromIntegral z) reg8NumToReg)
-      insnCTor =
-        case opcodeGroup nextOpc of
-          0          -> rotOps ! fromIntegral y
-          1          -> BIT y
-          2          -> RES y
-          3          -> SET y
-          _otherwise -> undefined
-      (opnd, pc'', sys'') = indexSubstitute xform dest (pc', sys')
-  in  (insnCTor opnd, 1+ pc'', sys'')
+z80system :: Z80system Z80BaseSystem
+z80system =  z80generic & processor . processorOps . idecode .~ zz_z80InsDecode
 
--- | Undocumented rotate/shift/bit operations using IX and IY
-undocBitOpsDecode
-  :: Z80byte
-  -- ^ Original prefix, 0xdd or 0xfd
-  -> OpLocation sysType
-  -- ^ Bit/rotate operation opcode components
-  -> (Z80instruction, Z80PC, Z80system sysType)
-  -- ^ The result
-undocBitOpsDecode prefixOpc (pc, sys) =
-  let (pcStep1, (disp, sys')) = sysIncPCAndRead pc sys
-      (pcStep2, (opc, sys'')) = sysIncPCAndRead pcStep1 sys'
-      idxReg8Ctor 0xdd = IXindirect . fromIntegral
-      idxReg8Ctor 0xfd = IYindirect . fromIntegral
-      idxReg8Ctor _    = undefined
-      x = opcodeGroup opc
-      (z, y, _p, _q) = opcodeComponents opc
-      theReg = reg8NumToReg ! fromIntegral z
-      instruction
-        | theReg == HLindirect
-        = case x of
-            0          -> (rotOps ! fromIntegral y) (idxReg8Ctor prefixOpc disp)
-            1          -> BIT y (idxReg8Ctor prefixOpc disp)
-            2          -> RES y (idxReg8Ctor prefixOpc disp)
-            3          -> SET y (idxReg8Ctor prefixOpc disp)
-            _otherwise -> undefined
-        | otherwise
-        = case x of
-            0          -> (undocRotOps ! fromIntegral y) (idxReg8Ctor prefixOpc disp) theReg
-            1          -> BIT y (idxReg8Ctor prefixOpc disp)
-            2          -> RESidx y (idxReg8Ctor prefixOpc disp) theReg
-            3          -> SETidx y (idxReg8Ctor prefixOpc disp) theReg
-            _otherwise -> undefined
-  in  (instruction, 1+ pcStep2, sys'')
+main :: IO ()
+main = mapM_ doTestGroup z80InstData
+  where
+    doTestGroup tgrp = do
+      putStrLn (groupDescription tgrp)
+      mapM_ doInstTest (testCases tgrp)
 
-portOpDecode
-  :: (Z80operand Z80OpndIO -> Z80instruction)
-  -> Z80byte
-  -> OpcComponents
-  -> IndexRegSubs
-  -> OpLocation sysType
-  -> (Z80instruction, Z80PC, Z80system sysType)
-portOpDecode insn opcGroup opcParts xform opLocn =
-  let (opnd, pc', sys') = decodeOperands xform opcGroup opcParts opLocn
-  in  (insn opnd, pc', sys')
+    doInstTest :: InstTestCase -> IO ()
+    doInstTest tdata = do
+        if expectedInst == (inst' ^. decodedInsn)
+        then z80AnalyticDisassemblyOutput stdout dstate' output
+        else do
+            putStrLn "---- fixme:"
+            z80AnalyticDisassemblyOutput stdout dstate' output
+            z80AnalyticDisassemblyOutput stdout check_dstate' check_output
+            putStrLn "-----------"
+            error "Undecoded instruction."
+      where
+        insnBytes      = DVU.fromList $ instBytes tdata
+        testsys        = z80system
+                          & memory .~ mkROMRegion testOrigin insnBytes mempty
+        refsys         = z80generic
+                          & memory .~ mkROMRegion testOrigin insnBytes mempty
 
--- | Decode 'ED'-prefixed instructions
-edPrefixDecode
-  :: Z80byte
-  -- ^ Opcode group
-  -> OpcComponents
-  -- ^ '(z, y, p, q) opcode components
-  -> IndexRegSubs
-  -- ^ Index register substitutionsresultLoad
-  -> OpLocation sysType
-  -- ^ Bit/rotate operation opcode components
-  -> (Z80instruction, Z80PC, Z80system sysType)
-  -- ^ The result
+        sAddr = testOrigin
+        eAddr = testOrigin + fromIntegral (length $ instBytes tdata)
 
-edPrefixDecode  _opcGroup _opcParts xform (pc, sys) =
-  let (pc', (nextOpc, sys')) = sysIncPCAndRead pc sys
-      invalidOpcodes = [0xed, nextOpc]
-      nextOpcGroup = opcodeGroup nextOpc
-      nextOpcParts = opcodeComponents nextOpc
-  in
-    case nextOpcGroup of
-      1 -> edGroup1Decode invalidOpcodes nextOpcGroup nextOpcParts xform (pc', sys')
-      2 -> edGroup2Decode invalidOpcodes nextOpcGroup nextOpcParts xform (pc', sys')
-      _ -> completeInstruction (Z80undef (UndefInsn invalidOpcodes)) (pc', sys')
+        dstate = mkZ80DisassemblyState testsys sAddr eAddr
+        (output, dstate') = disassembler dstate
 
-edGroup1Decode, edGroup2Decode, blockInstruction
-  :: [Z80byte]
-  -> Z80byte
-  -> OpcComponents
-  -> IndexRegSubs
-  -> OpLocation sysType
-  -> (Z80instruction, Z80PC, Z80system sysType)
+        check_dstate = mkZ80DisassemblyState refsys sAddr eAddr
+        (check_output, check_dstate') = disassembler check_dstate
 
-edGroup1Decode _ops  opcGroup  opcParts@(0, _, _, _)  xform opLocn = portOpDecode IN  opcGroup opcParts xform opLocn
-edGroup1Decode _ops  opcGroup  opcParts@(1, _, _, _)  xform opLocn = portOpDecode OUT opcGroup opcParts xform opLocn
-edGroup1Decode _ops  opcGroup  opcParts@(2, _, _, 0)  xform opLocn = resultALU16 SBC16 xform opcGroup opcParts opLocn
-edGroup1Decode _ops  opcGroup  opcParts@(2, _, _, 1)  xform opLocn = resultALU16 ADC16 xform opcGroup opcParts opLocn
-edGroup1Decode  ops _opcGroup           (2, _, _, _) _xform opLocn = completeInstruction (Z80undef (UndefInsn ops)) opLocn
-edGroup1Decode _ops  opcGroup  opcParts@(3, _, _, _)  xform opLocn = resultLoad16 xform opcGroup opcParts opLocn
-edGroup1Decode _ops _opcGroup           (4, _, _, _) _xform opLocn = completeInstruction NEG opLocn
-edGroup1Decode _ops _opcGroup           (5, _, _, 0) _xform opLocn = completeInstruction RETN opLocn
-edGroup1Decode _ops _opcGroup           (5, _, _, 1) _xform opLocn = completeInstruction RETI opLocn
-edGroup1Decode _ops _opcGroup           (6, y, _, _) _xform opLocn = completeInstruction (IM (interruptMode ! fromIntegral y)) opLocn
-edGroup1Decode _ops _opcGroup           (7, 0, _, _) _xform opLocn = completeInstruction (LD FromAtoI) opLocn
-edGroup1Decode _ops _opcGroup           (7, 1, _, _) _xform opLocn = completeInstruction (LD FromAtoR) opLocn
-edGroup1Decode _ops _opcGroup           (7, 2, _, _) _xform opLocn = completeInstruction (LD FromItoA) opLocn
-edGroup1Decode _ops _opcGroup           (7, 3, _, _) _xform opLocn = completeInstruction (LD FromRtoA) opLocn
-edGroup1Decode _ops _opcGroup           (7, 4, _, _) _xform opLocn = completeInstruction RRD opLocn
-edGroup1Decode _ops _opcGroup           (7, 5, _, _) _xform opLocn = completeInstruction RLD opLocn
-edGroup1Decode  ops _opcGroup _opcParts _xform opLocn = completeInstruction (Z80undef (UndefInsn ops)) opLocn
+        expectedInst = instruction tdata
 
-edGroup2Decode  ops  opcGroup  opcParts@(_, 4, _, _)  xform opLocn = blockInstruction ops opcGroup opcParts xform opLocn
-edGroup2Decode  ops  opcGroup  opcParts@(_, 5, _, _)  xform opLocn = blockInstruction ops opcGroup opcParts xform opLocn
-edGroup2Decode  ops  opcGroup  opcParts@(_, 6, _, _)  xform opLocn = blockInstruction ops opcGroup opcParts xform opLocn
-edGroup2Decode  ops  opcGroup  opcParts@(_, 7, _, _)  xform opLocn = blockInstruction ops opcGroup opcParts xform opLocn
-edGroup2Decode  ops _opcGroup _opcParts _xform opLocn = completeInstruction (Z80undef (UndefInsn ops)) opLocn
-
-blockInstruction  ops _opcGroup        (z, y, _, _) _xform opLocn =
-  let insn =
-        if z <= 3 && y >=4
-        then (blockOps ! fromIntegral y) ! fromIntegral z
-        else Z80undef (UndefInsn ops)
-  in completeInstruction insn opLocn
+        (inst', _sys') = zz_z80InsDecode (PC testOrigin) testsys

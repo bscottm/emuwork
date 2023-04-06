@@ -1,5 +1,3 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE OverloadedStrings #-}
 {- |
 TRS-80 Model I disassembler.
 -}
@@ -20,7 +18,7 @@ import           Data.Digest.Pure.MD5
 import qualified Data.Foldable                    as Foldable
 import qualified Data.HashMap.Strict              as H
 import           Data.Maybe
-import           Data.Sequence                    ((><), (|>))
+import           Data.Sequence                    ((><), (|>), (<|))
 import qualified Data.Sequence                    as Seq
 import qualified Data.Text                        as T
 import qualified Data.Text.IO                     as TIO
@@ -240,19 +238,34 @@ jumpTable :: Z80disp
 jumpTable nBytes dstate = first Seq.fromList $ runState (sequence [state genAddr | _elt <- [0..(nBytes - 2) `div` 2]]) dstate
   where
     genAddr dstate'        = first (genPseudo dstate') $ disasmMReadN 2 dstate'
-    genPseudo dstate' addr = mkAddr (thePC (dstate' ^. disasmCurAddr)) ((AbsAddr . flipWords) addr) addr
+    genPseudo dstate' addr = mkAddr (thePC (dstate' ^. disasmCurAddr)) ((mkAbstractAddr . flipWords) addr) addr
     flipWords addr         = shiftL (fromIntegral (addr DVU.! 1)) 8 .|. fromIntegral (addr DVU.! 0)
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
--- | Post-processing for RST 8 "macros" in the TRS-80 ROM. RST 08 is always followed
--- by a character; (HL) is compared to this following character and flags set.
-trs80RomPostProcessor :: DisElementPostProc Z80state Z80instruction Z80addr Z80word Z80PseudoOps
+{- | Post-processing:
+
+- RST 8 "macros" in the TRS-80 ROM. RST 08 is always followed by a character; (HL) is
+  compared to this following character and flags set.
+- The infamous "LD BC, xx3EH" hack, which loads BC at the PC address, but there's a jump
+  target at PC+1 which is really a "LD A, xx". The real intent is to load A with a value
+  and avoid a following jump instruction. BC gets obliterated in the process.
+-}
+trs80RomPostProcessor :: DisElementPostProc Z80state Z80instruction Z80addr Z80byte Z80PseudoOps
 trs80RomPostProcessor rst08@(DisasmInsn _ _ (RST 8) _) dstate =
   let curPC = thePC (dstate ^. disasmCurAddr)
       (byte, dstate') = disasmMRead dstate
       -- Ensure that the next byte is printable ASCII, otherwise disassemble as a byte.
       pseudo = if byte >= 0x20 && byte <= 0x7f then mkAscii else mkByteRange
   in  (Seq.singleton rst08 |> pseudo curPC (DVU.singleton byte), dstate')
+-- The LD BC, 3Exx hack.
+trs80RomPostProcessor elt@(DisasmInsn pc bytes insn@(LD (Reg16Imm (RPair16 BC) val)) cmnt) dstate
+  | absAddr val .&. 0x00ff == 0x003e
+  = let curAddr = dstate ^. disasmCurAddr
+        (loadA, dstate') = disassembler (dstate & disasmCurAddr .~ curAddr - 2 & disasmFinishAddr .~ curAddr)
+        cmnt' = T.append cmnt " (poss. LD BC, xx3EH hack)"
+    in  (mkDisasmInsn (absAddr pc) bytes insn cmnt' <| loadA, dstate')
+  | otherwise
+  = z80DefaultPostProcessor elt dstate
 -- Otherwise, just append the instruction onto the disassembly sequence.
 trs80RomPostProcessor elt dstate = z80DefaultPostProcessor elt dstate
 

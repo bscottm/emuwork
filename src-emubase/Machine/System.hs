@@ -1,10 +1,5 @@
-{-# LANGUAGE DataKinds            #-}
-{-# LANGUAGE TypeFamilies         #-}
-{-# LANGUAGE TemplateHaskell      #-}
-{-# LANGUAGE DeriveDataTypeable    #-}
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE DataKinds #-}
 
 {- | Machine emulation data types.
 -}
@@ -14,16 +9,14 @@ module Machine.System where
 import           Control.Monad.Trans.State.Strict (StateT, state)
 import           Data.Functor.Identity (Identity)
 import           Lens.Micro.Platform
-import           Data.Data
 import qualified Data.Text                     as T
 import           Data.Vector.Unboxed            ( Vector )
 import qualified Data.Vector.Unboxed           as DVU
-import           Text.Printf
-import           Generics.SOP.TH                (deriveGeneric)
+import Data.Generics.Uniplate.Direct
 
 import           Machine.ProgramCounter
-import           Machine.Utils
 import qualified Machine.MemorySystem          as M
+import qualified Machine.Utils                 as MU (ShowHex, asHex, as0xHexS)
 
 -- | 'EmulatedSystem' encapsulates the various parts required to emulate a system (processor, memory, ...)
 data EmulatedSystem cpuType insnSet addrType wordType =
@@ -78,7 +71,7 @@ mkEmulatedSystem sysCpu name aliases =
 -- are in the `ProcessorOps` data type.
 data EmulatedProcessor cpuType insnSet addrType wordType where
   EmulatedProcessor ::
-    {_procPrettyName :: String
+    { _procPrettyName :: String
     , _cpu :: cpuType
     , _ops :: ProcessorOps cpuType insnSet addrType wordType
     } -> EmulatedProcessor cpuType insnSet addrType wordType
@@ -86,15 +79,15 @@ data EmulatedProcessor cpuType insnSet addrType wordType where
 
 -- | Lens for the processor's pretty name. This is a read-only lens.
 procPrettyName :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) String
-procPrettyName f proc = proc <$ f (_procPrettyName proc)
+procPrettyName f theProc = theProc <$ f (_procPrettyName theProc)
 
 -- | Lens for the processor's internals (the CPU). This is a read/write lens because the CPU is stateful and gets updated.
 cpu :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) cpuType
-cpu f proc = (\cpu' -> proc { _cpu = cpu' }) <$> f (_cpu proc)
+cpu f theProc = (\cpu' -> theProc { _cpu = cpu' }) <$> f (_cpu theProc)
 
--- | Lens for the processor operations (functions). This is a read-only lens.
+-- | Lens for the processor operations (functions).
 processorOps :: Lens' (EmulatedProcessor cpuType insnSet addrType wordType) (ProcessorOps cpuType insnSet addrType wordType)
-processorOps f ops = ops <$ f (_ops ops)
+processorOps f theProc = (\ops' -> theProc { _ops = ops' }) <$> f (_ops theProc)
 
 
 -- | Generic representation of instruction decoder outputs. Each decoded instruction's program counter refers to the address
@@ -117,19 +110,17 @@ decodedInsn f insn = (\insn' -> insn { _insn = insn' }) <$> f (_insn insn)
 
 
 -- | Processor operations function catalog.
-data ProcessorOps cpuType insnSet addrType wordType =
-  ProcessorOps
-  {
-    _idecode :: ProcessorDecoder cpuType insnSet addrType wordType
-  -- ^ Instruction decoder, for disassembly and execution
-  , _iexecute :: InstructionExecute cpuType insnSet addrType wordType
-  -- ^ Instruction execution function.
-  }
+data ProcessorOps cpuType insnSet addrType wordType where
+  ProcessorOps ::
+    { _idecode :: ProcessorDecoder cpuType insnSet addrType wordType
+    -- ^ Instruction decoder, for disassembly and execution
+    , _iexecute :: InstructionExecute cpuType insnSet addrType wordType
+    -- ^ Instruction execution function.
+    } -> ProcessorOps cpuType insnSet addrType wordType
 
--- | Lens for the instruction decoder function. Note that this is effectively "read-only" -- one cannot change the
--- instruction decoder function (and why would one do that?.)
+-- | Lens for the instruction decoder function. Exercise extreme caution when setting the instruction decoder!)
 idecode :: Lens' (ProcessorOps cpuType insnSet addrType wordType) (ProcessorDecoder cpuType insnSet addrType wordType)
-idecode f decoder = decoder <$ f (_idecode decoder)
+idecode f decoder = (\decoder' -> decoder { _idecode = decoder' }) <$> f (_idecode decoder)
 
 instance Show (ProcessorOps cpuType insnSet addrType wordType) where
   -- Nothing to show. Need the instance for the EmulatedSystem automagically derived Show instance.
@@ -160,19 +151,40 @@ type IOSystem portType wordType = M.MemorySystem portType wordType
 
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-
--- | Symbolic and absolute addresses, used both by disassemblers and instruction sets. For example, the Z80's instruction set uses
+-- | Symbolic address abstraction: an address and possibly a label. For example, the Z80's instruction set uses
 -- both symbolic and absolute addresses as jump and call targets.
-data SymAbsAddr addrType =
-    AbsAddr addrType
-  | SymAddr T.Text
-  deriving (Eq, Ord, Typeable, Data)
+data AbstractAddr addrType where
+  AbstractAddr ::
+    { absAddr :: addrType
+    , absLabel :: Maybe T.Text
+    } -> AbstractAddr addrType
+  deriving (Eq, Ord)
 
-instance (ShowHex addrType) => Show (SymAbsAddr addrType) where
-  show (AbsAddr addr ) = as0xHexS addr
-  show (SymAddr label) = show label
+instance (MU.ShowHex addrType) => Show (AbstractAddr addrType) where
+  show addr = typeLabel ++ showAddr ++ commaStr ++ showLabel ++ finalParen
+    where
+      typeLabel = "AbstractAddr (" :: String
+      commaStr = "," :: String
+      finalParen = ")" :: String
+      showAddr = MU.as0xHexS . absAddr $ addr
+      showLabel = show . absLabel $ addr
 
-$(deriveGeneric ''SymAbsAddr)
+instance (MU.ShowHex addrType) => MU.ShowHex (AbstractAddr addrType) where
+  asHex = MU.asHex . absAddr
+
+-- | Make a new 'AbstractAddr` from an address. The label is initialized to `Nothing`
+mkAbstractAddr :: addrType -> AbstractAddr addrType
+mkAbstractAddr addr = AbstractAddr { absAddr = addr, absLabel = Nothing }
+
+-- | Add a label to a 'AbstractAddr'.
+labelAbstractAddr :: AbstractAddr addrType -> T.Text -> AbstractAddr addrType
+labelAbstractAddr sym label = sym { absLabel = Just label }
+
+instance Uniplate (AbstractAddr addrType) where
+  uniplate (AbstractAddr addr label) = plate AbstractAddr |- addr |- label
+
+instance Biplate (AbstractAddr addrType) (AbstractAddr addrType) where
+  biplate = plateSelf
 
 -- =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
 -- System program counter and memory reading operations
@@ -219,10 +231,6 @@ sysPCReadN
   :: ( Integral addrType
      , Integral wordType
      , DVU.Unbox wordType
-     , Show addrType
-     , PrintfArg addrType
-     , PrintfArg wordType
-     , Show wordType
      )
   => ProgramCounter addrType
   -> Int
@@ -233,8 +241,9 @@ sysPCReadN pc nwords sys = (pc + fromIntegral nwords, sysMReadN (thePC pc) nword
 -- | Read _n_ words from memory starting at address 'addr'. Returns a vector of words read and the updated system
 -- state.
 sysMReadN
-  :: ( Integral addrType, Integral wordType, DVU.Unbox wordType, PrintfArg addrType, PrintfArg wordType
-     , Show addrType, Show wordType
+  :: ( Integral addrType
+     , Integral wordType
+     , DVU.Unbox wordType
      )
   => addrType
   -> Int
@@ -246,8 +255,10 @@ sysMReadN addr nwords sys = sys ^. memory & M.mReadN addr nwords & _2 %~ updateM
 
 -- | Write a 'word' value to memory at address 'addr'. Returns the updated system state.
 sysMWrite
-  :: (Integral addrType, Integral wordType, Show wordType, DVU.Unbox wordType, PrintfArg addrType
-     , Show addrType , PrintfArg wordType , Show wordType)
+  :: (Integral addrType
+     , Integral wordType
+     , DVU.Unbox wordType
+     )
   => addrType
   -> wordType
   -> EmulatedSystem cpuType insnSet addrType wordType
@@ -256,16 +267,20 @@ sysMWrite addr word sys = sys & memory %~ M.mWrite addr word
 
 -- | Adapt 'sysMWrite` to a 'Control.Monad.Trans.State' state transformer for 'execState' and friends.
 stateSysMWrite
-  :: (Integral addrType, Integral wordType, Show wordType, DVU.Unbox wordType, PrintfArg addrType
-     , Show addrType , PrintfArg wordType , Show wordType)
+  :: (Integral addrType
+     , Integral wordType
+     , DVU.Unbox wordType
+     )
   => addrType
   -> wordType
   -> StateT (EmulatedSystem cpuType1 insnSet1 addrType wordType) Identity ()
 stateSysMWrite addr word = state (\sys -> ((), sysMWrite addr word sys))
 
 sysMWriteN
-  :: (Integral addrType, Integral wordType, Show wordType, DVU.Unbox wordType, PrintfArg addrType
-     , Show addrType , PrintfArg wordType , Show wordType)
+  :: (Integral addrType
+     , Integral wordType
+     , DVU.Unbox wordType
+     )
   => addrType
   -> Vector wordType
   -> EmulatedSystem cpuType insnSet addrType wordType
@@ -274,8 +289,10 @@ sysMWriteN addr vec sys = sys & memory %~ M.mWriteN addr vec
 
 -- | Adapt 'sysMWriteN` to a 'Control.Monad.Trans.State' state transformer for 'execState' and friends.
 stateSysMWriteN
-  :: (Integral addrType, Integral wordType, Show wordType, DVU.Unbox wordType, PrintfArg addrType
-     , Show addrType , PrintfArg wordType , Show wordType)
+  :: (Integral addrType
+     , Integral wordType
+     , DVU.Unbox wordType
+     )
   => addrType
   -> Vector wordType
   -> StateT (EmulatedSystem cpuType1 insnSet1 addrType wordType) Identity ()

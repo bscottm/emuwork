@@ -153,7 +153,7 @@ defcTests = test [ "defc"              ~: (checkAssembly defcAsm False)         
                    , DVU.replicate 37 ((fromIntegral . C.ord) 'A')
                    , DVU.replicate 256 (((fromIntegral . C.ord) 'a') .|. 0x80)
                    , DVU.empty
-                   ] :: [(DVU.Vector Z80word)]
+                   ] :: [(DVU.Vector Z80byte)]
 
     -- Parse and assemble the source:
     defcAsm = edasAssemble $ edasParseSequence "defcSource" defcSource
@@ -176,7 +176,7 @@ defsTests = test [ "defs"              ~: (checkAssembly defsAsm False)         
                    , DVU.replicate 37 0
                    , DVU.replicate 256 0
                    , DVU.empty
-                   ] :: [(DVU.Vector Z80word)]
+                   ] :: [(DVU.Vector Z80byte)]
 
     -- Parse and assemble the source:
     defsAsm = edasAssemble $ edasParseSequence "defsSource" defsSource
@@ -202,7 +202,7 @@ defwTests = test [ "defw"              ~: (checkAssembly defwAsm False)         
                                   , low 1,     high 1
                                   ]
                    , DVU.empty
-                   ] :: [(DVU.Vector Z80word)]
+                   ] :: [(DVU.Vector Z80byte)]
 
     high, low :: Word16 -> Word8
     high x = fromIntegral (x `shiftR` 8)
@@ -248,7 +248,7 @@ dsymTests = test [ "dsym"              ~: (checkAssembly dsymAsm False)         
                    , DVU.fromList $ textToWord8 "LABEL"
                    , DVU.fromList [ 0x43, 0xe1 ]
                    , DVU.empty
-                   ] :: [(DVU.Vector Z80word)]
+                   ] :: [(DVU.Vector Z80byte)]
 
     -- Parse and assemble the source:
     dsymAsm = edasAssemble $ edasParseSequence "dsymSource" dsymSource
@@ -293,7 +293,7 @@ deflTests = test [ "defl"              ~: (checkAssembly deflAsm False)         
                     , DVU.empty
                     , DVU.empty
                     , DVU.empty
-                    ]:: [(DVU.Vector Z80word)]
+                    ]:: [(DVU.Vector Z80byte)]
 
     -- Parse and assemble the source:
     deflAsm = edasAssemble $ edasParseSequence "deflSource" deflSource

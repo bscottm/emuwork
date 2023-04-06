@@ -24,7 +24,6 @@ library
     transformers,
     psqueues,
     split,
-    syb,
     text,
     uniplate,
     unordered-containers,
@@ -76,9 +75,7 @@ library
     RecordWildCards,
     ScopedTypeVariables,
     StandaloneDeriving,
-    TemplateHaskell,
     TupleSections,
-    TypeFamilies,
     TypeSynonymInstances,
     ViewPatterns
 
@@ -88,6 +85,7 @@ library
     Z80.InstructionSet,
     Z80.InsnDecode,
     Z80.InsnExecute,
+    Z80.InsnText,
     Z80.Processor,
     Z80.Disassembler,
     Z80.DisasmOutput,
@@ -101,9 +99,10 @@ library
 
   -- Grrrrrr... VSCode hair again!
   other-modules:
-      Z80.Tests.Execute.QuickInstances,
-      Z80.Tests.Execute.TestData,
-      Z80.Tests.Execute.Utils
+    Z80.Tests.InstData,
+    Z80.Tests.Execute.QuickInstances,
+    Z80.Tests.Execute.TestData,
+    Z80.Tests.Execute.Utils
 
 test-suite z80inst
     default-language:   Haskell2010
@@ -134,9 +133,9 @@ test-suite z80inst
       psqueues,
       random,
       split,
-      syb,
       text,
       time >= 1.8,
+      uniplate,
       unordered-containers,
       vector,
       emubase
@@ -175,9 +174,7 @@ test-suite z80inst
     RecordWildCards,
     ScopedTypeVariables,
     StandaloneDeriving,
-    TemplateHaskell,
     TupleSections,
-    TypeFamilies,
     TypeSynonymInstances,
     ViewPatterns
 
@@ -188,6 +185,7 @@ test-suite z80inst
       Z80.InsnDecode,
       Z80.InsnExecute,
       Z80.InstructionSet,
+      Z80.InsnText,
       Z80.Processor,
       Z80.System,
 
@@ -196,6 +194,7 @@ test-suite z80inst
       Z80.Execute.LoadStore,
       Z80.Execute.Utils,
 
+      Z80.Tests.InstData,
       Z80.Tests.Execute.QuickInstances,
       Z80.Tests.Execute.TestData,
       Z80.Tests.Execute.Utils
@@ -231,9 +230,9 @@ test-suite z80execute
       psqueues,
       random,
       split,
-      syb,
       text,
       time >= 1.8,
+      uniplate,
       unordered-containers,
       vector,
       emubase
@@ -272,9 +271,7 @@ test-suite z80execute
     RecordWildCards,
     ScopedTypeVariables,
     StandaloneDeriving,
-    TemplateHaskell,
     TupleSections,
-    TypeFamilies,
     TypeSynonymInstances,
     ViewPatterns
   other-modules:
@@ -284,6 +281,7 @@ test-suite z80execute
       Z80.InsnDecode,
       Z80.InsnExecute,
       Z80.InstructionSet,
+      Z80.InsnText,
       Z80.Processor,
       Z80.System,
       Z80.Execute.ALUops,

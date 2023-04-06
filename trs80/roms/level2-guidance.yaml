@@ -219,19 +219,6 @@ section:
         ignored value. The following 0x03 0x80 is LD A, 80h. It's a clever way
         to flow through the SET and RESET command entry points, which set A,
         without jumps.
-    - bytes:
-        addr: $
-        end: 0x0135
-    - comment: SET command jumps here.
-    - disasm:
-        addr: $
-        end: 0x0137
-    - bytes:
-        addr: $
-        nbytes: 1
-    - disasm:
-        addr: $
-        end: 0x0150
     - disasm:
         addr: $
         end: 0x01c9
@@ -538,9 +525,39 @@ section:
     - disasm:
         addr: $
         end: 0x0708
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
-    - comment: End of the restart vector initialization table.
-    - comment: =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        End of the restart vector initialization table.
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - disasm:
+        addr: $
+        end: 0x07f8
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        Single precision constants:
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - comment: Single precision constant == 1.0
+    - bytes:
+        addr: $
+        nbytes: 4
+    - comment: |+
+        3 single precision constants stored here (this is the size of the
+        table):
+    - bytes:
+        addr: $
+        nbytes: 1
+    - comment: A single precision constant equal to .598978
+    - bytes:
+        addr: $
+        nbytes: 4
+    - comment: A single precision constant equal to .961471
+    - bytes:
+        addr: $
+        nbytes: 4
+    - comment: A single precision constant equal to 2.88539
+    - bytes:
+        addr: $
+        nbytes: 4
     - disasm:
         addr: $
         end: 0x0955
@@ -614,6 +631,17 @@ section:
         This routine calls 20H (RST 20H) and returns if NTF=3 (string) else
         if NTF is not 3 then it generates a TM ERROR. BC, DE, and HL are saved.
         =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - disasm:
+        addr: $
+        end: 0x0dd4
+    - comment: |+
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+        Double floating point constants
+        =~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=~=
+    - comment: Double precision floating point constant == 10.0
+    - bytes:
+        addr: $
+        nbytes: 8
     - disasm:
         addr: $
         end: 0x137c
@@ -853,11 +881,13 @@ section:
         RST00: 0x0000
         RST08: 0x0008
         WHERE: 0x000b
+        BOOT$: 0x000d
         RST10: 0x0010
-        WANTDCBGET: 0x0013
+        GET$: 0x0013
         RST18: 0x0018
-        WANTDCBPUT: 0x001b
+        PUT$: 0x001b
         RST20: 0x0020
+        $CTL: 0x0023
         RST28: 0x0028
         KBDSCN: 0x002b
         RST30: 0x0030
@@ -908,12 +938,17 @@ section:
         LPREADY: 0x05d1
         DOKBLINE: 0x05d9
         INITRSTVECS: 0x0674
+        DISKBOOT: 0x069f
         RSTVECTABLE: 0x06d2
         HADD_SPHALF: 0x0708
         SPADD_IND_HL: 0x070b
         SPSUB_IND_HL: 0x0710
         SPSUB_BCDE: 0x0713
         SPADD_BCDE: 0x0716
+        SPFP_ONE: 0x07f8
+        SPFP_VAL1: 0x07fd
+        SPFP_VAL2: 0x0801
+        SPFP_VAL3: 0x0805
         BASLOG: 0x0809
         SPMUL_BCDE: 0x0847
         SPDIV_BCDE: 0x08a2
@@ -935,6 +970,8 @@ section:
         INTADD: 0x0bd2
         INTSUB: 0x0bc7
         INTMPY: 0x0bf2
+        # Double precision constant
+        DPFP_TEN: 0x0dd4
         # Floating point constants
         SFPZERO: 0x137c
         SFPHALF: 0x1380
