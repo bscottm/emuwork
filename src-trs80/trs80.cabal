@@ -91,7 +91,6 @@ test-suite yamltest
         hashable,
         HUnit,
         pureMD5,
-        raw-strings-qq,
         scientific,
         text,
         unordered-containers,

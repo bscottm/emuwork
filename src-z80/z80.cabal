@@ -21,6 +21,7 @@ library
     generics-sop,
     hashable,
     microlens-platform,
+    mtl,
     transformers,
     psqueues,
     split,
