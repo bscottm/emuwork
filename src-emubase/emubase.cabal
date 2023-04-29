@@ -23,7 +23,6 @@ library
     generics-sop,
     hashable,
     microlens-platform,
-    mtl,
     transformers,
     old-locale,
     parsec,
