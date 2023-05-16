@@ -20,7 +20,7 @@ library
     deepseq,
     directory,
     filepath,
-    generics-sop,
+    fused-effects,
     hashable,
     microlens-platform,
     transformers,
@@ -77,20 +77,20 @@ library
     ViewPatterns
 
   exposed-modules:
-    Machine,
-    Reader,
+      Machine
+    , Reader
 
-    Machine.Device,
-    Machine.DisassemblerTypes,
-    Machine.MemorySystem,
-    Machine.ProgramCounter,
-    Machine.NullProcessor,
-    Machine.System,
-    Machine.Utils,
+    , Machine.Device
+    -- , Machine.DisassemblerTypes
+    , Machine.MemorySystem
+    -- , Machine.ProgramCounter
+    -- , Machine.NullProcessor
+    -- , Machine.System
+    , Machine.Utils
 
-    Reader.RawFormat,
-    Reader.IntelHex,
-    Reader.ErrorHandling
+    , Reader.RawFormat
+    , Reader.IntelHex
+    , Reader.ErrorHandling
 
 test-suite msystest
     default-language:   Haskell2010
