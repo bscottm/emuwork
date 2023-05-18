@@ -100,14 +100,13 @@ data DeviceRegion where
   EmptyRegion :: DeviceRegion
   DeviceRegion :: 
       forall addrType wordType devType.
-        ( D.DeviceIO devType addrType wordType
-        , Typeable devType
+        ( Typeable devType
         , Typeable addrType
         , Typeable wordType
         , Eq devType
         , Show devType
         )
-      => 
+      =>
       { deviceName :: Text
       , theDevice  :: D.Device devType addrType wordType
       } -> DeviceRegion
@@ -122,21 +121,6 @@ instance Show DeviceRegion where
   show (DeviceRegion name dev) = shows ("DevRegion(" :: String)
                                        (shows name (shows (", " :: String)
                                                    (shows dev ")")))
-
-instance ( Integral addrType
-         , Typeable addrType
-         , DVU.Unbox wordType
-         ) =>
-         D.DeviceIO DeviceRegion addrType wordType where
-  doDevRead _offset nRead EmptyRegion = pure (EmptyRegion, DVU.replicate nRead 0)
-  doDevRead offset nRead (DeviceRegion devName dev) = do
-    (dev', readData) <- D.doDevRead offset nRead dev
-    pure (DeviceRegion devName dev', readData)
-
-  doDevWrite _offset _devData EmptyRegion = pure EmptyRegion
-  doDevWrite offset   devData (DeviceRegion devName dev) = do
-    dev' <- D.doDevWrite offset devData dev
-    pure (DeviceRegion devName dev')
 
 -- | Admit MemorySystem to the Semigroup class (prerequisite for Monoid)
 instance ( Integral addrType
@@ -271,6 +255,7 @@ testFunc ::
     ( Monad m
     , Integral addrType
     , Ord addrType
+    , Integral wordType
     , DVU.Unbox wordType
     )
   => addrType
@@ -283,7 +268,7 @@ testFunc addr nRead msys = do
   let memRegions = IM.toAscList ((msys ^. regions) `IM.containing` addr)
   readRegions <- sequence
     [ D.runDeviceReadC $ D.deviceRead devOffset devRead dev
-      | (iv, dev) <- memRegions,
+      | (iv, DeviceRegion _devName dev) <- memRegions,
         let startAddr = I.lowerBound iv,
         let endAddr   = I.upperBound iv,
         let devOffset = max startAddr addr - startAddr,
@@ -300,10 +285,11 @@ testFunc addr nRead msys = do
   --     (dev', devData) <- D.runDeviceReadC $ D.deviceRead devOffset devRead dev
   --     pure (accum' devData, DeviceRegion devName dev')
 
+testFoo :: IO (DVU.Vector Word8, MemorySystem Word16 Word8)
 testFoo =  testFunc 15 5 testRAM
   where
-    ramDevice = MRAM.ByteRAM { byteRAMContent = DVU.empty } :: MRAM.MachineByteRAM Word16
-    testRAM = insertMemRegion (0 :: Word16) (0x00ff :: Word16) (DeviceRegion "PriRAM" ramDevice) initialMemorySystem
+    ramDevice = MRAM.mkAddr16ByteRAM 0 0xffff
+    testRAM = insertMemRegion (0 :: Word16) (0x00ff :: Word16) (DeviceRegion "PriRAM" ramDevice) (initialMemorySystem :: MemorySystem Word16 Word8)
 
 {- 
   foldMap getContent ((msys ^. regions) `IM.containing` addr)

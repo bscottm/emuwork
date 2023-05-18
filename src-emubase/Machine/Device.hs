@@ -10,11 +10,10 @@
 {-# LANGUAGE UndecidableInstances       #-}
 
 module Machine.Device 
-  ( Device
-  , DeviceIO(..)
+  ( DeviceIO(..)
   , DeviceReadC(..)
-  , DeviceWriteC(..)
   , deviceRead
+  , DeviceWriteC(..)
   , deviceWrite
   )
 where
@@ -23,6 +22,7 @@ import           Control.Algebra        (Algebra (..), Has, send, type (:+:) (..
 import           Control.Monad.IO.Class (MonadIO (..))
 
 import           Data.Kind              (Type)
+import           Data.Typeable          (Typeable, cast)
 import qualified Data.Vector.Unboxed    as DVU
 
 --------------------------------------------------------------------------------
@@ -31,8 +31,6 @@ import qualified Data.Vector.Unboxed    as DVU
 --------------------------------------------------------------------------------
 
 -- "Grand Piano..."
-
-data family Device devType addrType wordType :: Type
 
 -- | The DeviceIO type class: The minimal interface to support a device, which includes RAM and ROM.
 -- This introduces a functional dependency where the device type, 'devType', uniquely determines
@@ -47,28 +45,45 @@ data family Device devType addrType wordType :: Type
 -- Type class instances can make reading and writing a lot more efficient. For example, RAM and ROM
 -- devices can optimize reading and writing when the number of bytes to read equals 1 (direct indexing
 -- into a 'Vector' vice 'Vector' slicing.) 
-class ( Integral addrType
-      , Integral wordType
-      , DVU.Unbox wordType
-      ) =>
-      DeviceIO devType addrType wordType where
+class
+    ( Integral addrType
+    , Integral wordType
+    , DVU.Unbox wordType
+    )
+  => DeviceIO devType addrType wordType where
+
+  -- | The data family of devices
+  data family Device devType addrType wordType
 
   doDevRead ::
       ( MonadIO m
-      ) =>
-    addrType ->
-    Int ->
-    Device devType addrType wordType ->
-    m (Device devType addrType wordType, DVU.Vector wordType)
+      )
+    => addrType
+    -> Int
+    -> Device devType addrType wordType
+    -> m (Device devType addrType wordType, DVU.Vector wordType)
 
   doDevWrite ::
       ( MonadIO m
-      ) =>
-    addrType ->
-    DVU.Vector wordType ->
-    Device devType addrType wordType ->
-    m (Device devType addrType wordType)
+      )
+    => addrType
+    -> DVU.Vector wordType
+    -> Device devType addrType wordType
+    -> m (Device devType addrType wordType)
 
+instance {-# OVERLAPPABLE #-}
+  Show devType
+  => Show (Device devType addrType wordType) where
+    show dev = shows ("Device(generic: " :: String) (shows dev ")")
+
+instance {-# OVERLAPPABLE #-}
+    ( Eq devType
+    , Typeable devType
+    , Typeable addrType
+    , Typeable wordType
+    )
+  => Eq (Device devType addrType wordType) where
+    dev == dev' = cast dev == Just dev'
 
 -- "Reed and pipe organ"
 
@@ -76,17 +91,17 @@ class ( Integral addrType
 -- three arguments.
 data DeviceRead addrType wordType devType (m :: Type -> Type) (k :: Type) where
     DeviceRead ::
-        ( DeviceIO (Device devType addrType wordType) addrType wordType
+        ( DeviceIO devType addrType wordType
         ) =>
       addrType ->
       Int ->
       Device devType addrType wordType ->
-      DeviceRead addrType wordType (Device devType addrType wordType) m (Device devType addrType wordType, DVU.Vector wordType)
+      DeviceRead addrType wordType (Device devType addrType wordType)  m (Device devType addrType wordType, DVU.Vector wordType)
 
--- | The general device reader function that takes the 'DeviceRead' effect and invokes the action.
+-- | The general device reader function that packages the 'DeviceRead' effect and invokes the action.
 deviceRead ::
     ( Has (DeviceRead addrType wordType (Device devType addrType wordType)) sig m
-    , DeviceIO (Device devType addrType wordType) addrType wordType
+    , DeviceIO devType addrType wordType
     ) =>
   addrType ->
   Int ->
@@ -103,7 +118,7 @@ newtype DeviceReadC addrType wordType devType m a = DeviceReadC { runDeviceReadC
 
 -- "Bass Guitar"
 
-instance {-# OVERLAPPABLE #-}
+instance
     -- So long as the 'm' monad can interpret the 'sig' effects (and also
     -- perform IO), conforms to the DeviceIO type class' interface...
     ( Algebra sig m
@@ -115,19 +130,18 @@ instance {-# OVERLAPPABLE #-}
     )
     -- ... the 'DeviceRead addrType wordType devType m' monad can interpret
     -- 'DeviceReadC addrType wordType devType m :+: sig' effects
-  => Algebra (DeviceRead addrType wordType (Device devType addrType wordType) :+: sig) (DeviceReadC addrType wordType (Device devType addrType wordType) m) where
+  => Algebra (DeviceRead addrType wordType (Device devType addrType wordType) :+: sig) (DeviceReadC addrType wordType devType m) where
 
   alg hdl sig ctx = case sig of
-    (L (DeviceRead addr nRead dev)) -> (<$ ctx) <$> runDeviceReadC (doDevRead addr nRead dev)
+    (L (DeviceRead addr nRead dev)) -> (<$ ctx) <$> doDevRead addr nRead dev
     R other                         -> DeviceReadC (alg (runDeviceReadC . hdl) other ctx)
-
 
 -- "Double-speed guitar"
 
--- The device write effect:
+-- | The device write effect.
 data DeviceWrite addrType wordType (dev :: Type) (m ::  Type -> Type) (k :: Type) where
   DeviceWrite ::
-      ( DeviceIO (Device devType addrType wordType) addrType wordType
+      ( DeviceIO devType addrType wordType
       ) =>
     addrType ->
     DVU.Vector wordType ->
@@ -136,7 +150,7 @@ data DeviceWrite addrType wordType (dev :: Type) (m ::  Type -> Type) (k :: Type
 
 deviceWrite ::
   ( Has (DeviceWrite addrType wordType (Device devType addrType wordType)) sig m
-  , DeviceIO (Device devType addrType wordType) addrType wordType
+  , DeviceIO devType addrType wordType
   ) =>
   addrType ->
   DVU.Vector wordType ->
@@ -152,7 +166,7 @@ newtype DeviceWriteC addrType wordType devType m a = DeviceWriteC { runDeviceWri
 
 -- "Mandolin!"
 
-instance {-# OVERLAPPABLE #-}
+instance
     -- So long as the 'm' monad can interpret the 'sig' effects (and also
     -- perform IO), conforms to the DeviceIO type class' interface...
     ( Algebra sig m
@@ -160,10 +174,11 @@ instance {-# OVERLAPPABLE #-}
     , DeviceIO devType addrType wordType
     , DVU.Unbox wordType
     )
-    -- ... the 'DeviceRead addrType wordType devType m' monad can interpret
-    -- 'DeviceReadC addrType wordType devType m :+: sig' effects
-  => Algebra (DeviceWrite addrType wordType (Device devType addrType wordType) :+: sig) (DeviceWriteC addrType wordType (Device devType addrType wordType) m) where
+    -- ... the 'DeviceWrite addrType wordType devType m' monad can interpret
+    -- 'DeviceWriteC addrType wordType devType m :+: sig' effects
+  => Algebra (DeviceWrite  addrType wordType (Device devType addrType wordType) :+: sig)
+             (DeviceWriteC addrType wordType devType m) where
 
   alg hdl sig ctx = case sig of
-    (L (DeviceWrite addr devData dev)) -> (<$ ctx) <$> runDeviceWriteC (doDevWrite addr devData dev)
+    (L (DeviceWrite addr devData dev)) -> (<$ ctx) <$> doDevWrite addr devData dev
     R other                            -> DeviceWriteC (alg (runDeviceWriteC . hdl) other ctx)
